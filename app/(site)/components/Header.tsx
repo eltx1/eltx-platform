@@ -18,6 +18,8 @@ export default function Header(){
       <a href="#tokenomics">{t.tokenomics}</a>
       <a href="#roadmap">{t.roadmap_title}</a>
       <a href="#community">{t.community}</a>
+      <a href="/login">{t.login}</a>
+      <a href="/signup">{t.signup}</a>
       <button className="nav-toggle" onClick={()=>setLang(lang==='en'?'ar':'en')}>{lang==='en'?'العربية':'English'}</button>
     </nav>
   </div></header>);
