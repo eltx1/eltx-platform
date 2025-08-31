@@ -10,7 +10,7 @@ import BottomNav from './(site)/components/BottomNav';
 export default function Page(){
   return(<main>
     <Ticker/><Header/><Hero/><Features/><Tokenomics/><Roadmap/><Community/><BottomNav/>
-    <footer className="container py-4 text-white/70 text-sm border-t border-white/10 mt-4 flex items-center justify-between">
+    <footer className="container py-4 text-[var(--muted)] text-sm border-t border-[var(--line)] mt-4 flex items-center justify-between">
       <div>© {new Date().getFullYear()} ELTX</div>
       <div className="flex gap-2"><a href="#">Privacy</a><span>·</span><a href="#">Terms</a></div>
     </footer>

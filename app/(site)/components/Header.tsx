@@ -9,7 +9,7 @@ export default function Header(){
   const [open,setOpen]=useState(false);
   return(<header className="header"><div className="container flex items-center justify-between py-2">
     <a href="#" className="flex items-center gap-2 no-underline">
-      <span className="block w-11 h-11 rounded-xl overflow-hidden border border-white/15"><img src="/assets/img/logo.jpeg" alt="ELTX" /></span>
+      <span className="block w-11 h-11 rounded-xl overflow-hidden border border-[var(--line)]"><img src="/assets/img/logo.jpeg" alt="ELTX" /></span>
       <span className="font-black tracking-wide">{t.site_title}</span>
     </a>
     <button className="nav-toggle" onClick={()=>setOpen(v=>!v)}>☰</button>
