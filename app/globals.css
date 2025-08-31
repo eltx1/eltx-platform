@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  --bg:#090c17; --bg2:#090e22; --line:rgba(255,255,255,.12);
+  --text:#fff; --muted:#b8c4d7;
+  --brand1:#ff5a3c; --brand2:#ffc34d;
+}
+html,body{height:100%}
+body{color:var(--text);background:
+ radial-gradient(1200px 600px at 50% -200px,rgba(255,90,60,.18),transparent),
+ linear-gradient(180deg,var(--bg),var(--bg2));}
+.container{max-width:1040px;margin:0 auto;padding:0 14px}
+a{color:inherit}
+.ticker{position:sticky;top:0;z-index:50;background:#0a0f22cc;border-bottom:1px solid var(--line);backdrop-filter:blur(8px);overflow:hidden}
+.ticker .track{display:flex;gap:32px;white-space:nowrap;animation:marquee 26s linear infinite;padding:8px 14px;font-size:13px}
+@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.header{position:sticky;top:32px;z-index:40}
+.nav-toggle{border:1px solid var(--line);border-radius:10px;padding:7px 10px}
+.nav{display:none;position:fixed;left:10px;right:10px;top:90px;border:1px solid var(--line);background:rgba(12,16,36,.95);backdrop-filter:blur(8px);padding:10px;border-radius:14px}
+.nav.open{display:flex;flex-direction:column;gap:8px}
+.nav a{padding:10px;border-radius:10px}
+.nav a:hover{background:rgba(255,255,255,.06)}
+.hero .ring{width:190px;height:190px;border-radius:50%;background:linear-gradient(180deg,rgba(255,90,60,.28),rgba(255,195,77,.18));border:1px solid rgba(255,255,255,.18);display:grid;place-items:center;position:relative;box-shadow:0 30px 80px rgba(255,90,60,.25);animation:float 4s ease-in-out infinite, pulse 6s ease-in-out infinite}
+.hero .ring img{width:68%;height:68%;border-radius:50%;border:2px solid rgba(255,255,255,.6);background:#fff}
+@keyframes pulse {0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+@keyframes float {0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}
+}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;text-decoration:none;font-weight:900;transition:transform .15s ease, box-shadow .2s ease}
+.btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:linear-gradient(90deg,var(--brand1),var(--brand2));color:#2b1800;border:1px solid rgba(255,255,255,.15)}
+.btn-ghost{border:1px solid rgba(255,255,255,.25);color:var(--text);background:rgba(255,255,255,.02)}
+.panel{background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.45)}
+.donut{--size:230px; width:var(--size);height:var(--size);border-radius:50%;margin:0 auto;background:var(--donut);position:relative}
+.donut .hole{position:relative;width:calc(var(--size) - 44px);height:calc(var(--size) - 44px);margin:22px auto;border-radius:50%;background:rgba(0,0,0,.25);display:flex;align-items:center;justify-content:center;flex-direction:column}
+.bottom-nav{position:sticky;bottom:0;display:flex;justify-content:space-around;gap:6px;padding:10px;border-top:1px solid var(--line);background:#0a1024cc;backdrop-filter:blur(8px)}
