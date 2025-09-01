@@ -18,35 +18,22 @@ export default function Header() {
   }, [lang]);
 
   const t = dict[lang];
-  const [open, setOpen] = useState(false);
+  const [open,setOpen]=useState(false);
+  return(<header className="header"><div className="container flex items-center justify-between py-2">
+    <a href="#" className="flex items-center gap-2 no-underline">
+      <span className="block w-11 h-11 rounded-xl overflow-hidden border border-[var(--line)]"><img src="/assets/img/logo.jpeg" alt="ELTX" /></span>
+      <span className="font-black tracking-wide">{t.site_title}</span>
+    </a>
+    <button className="nav-toggle" onClick={()=>setOpen(v=>!v)}>☰</button>
+    <nav className={`nav ${open?'open':''}`}>
+      <a href="#features">{t.features}</a>
+      <a href="#tokenomics">{t.tokenomics}</a>
+      <a href="#roadmap">{t.roadmap_title}</a>
+      <a href="#community">{t.community}</a>
+      <a href="/login">{t.login}</a>
+      <a href="/signup">{t.signup}</a>
+      <button className="nav-toggle" onClick={()=>setLang(lang==='en'?'ar':'en')}>{lang==='en'?'العربية':'English'}</button>
+    </nav>
+  </div></header>);
 
-  return (
-    <header className="header">
-      <div className="container flex items-center justify-between py-2">
-        <a href="#" className="flex items-center gap-2 no-underline">
-          <span className="block w-11 h-11 rounded-xl overflow-hidden border border-[var(--line)]">
-            <img src="/assets/img/logo.jpeg" alt="ELTX" />
-          </span>
-          <span className="font-black tracking-wide">{t.site_title}</span>
-        </a>
-        <button className="nav-toggle" onClick={() => setOpen(v => !v)}>
-          ☰
-        </button>
-        <nav className={`nav ${open ? 'open' : ''}`}>
-          <a href="#features">{t.features}</a>
-          <a href="#tokenomics">{t.tokenomics}</a>
-          <a href="#roadmap">{t.roadmap_title}</a>
-          <a href="#community">{t.community}</a>
-          <a href="/login">{t.login}</a>
-          <a href="/signup">{t.signup}</a>
-          <button
-            className="nav-toggle"
-            onClick={() => setLang(lang === 'en' ? 'ar' : 'en')}
-          >
-            {lang === 'en' ? 'العربية' : 'English'}
-          </button>
-        </nav>
-      </div>
-    </header>
-  );
 }
