@@ -25,12 +25,17 @@ const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
 const sessionCookie = { httpOnly: true, sameSite: 'lax', secure: false, maxAge: 1000 * 60 * 60 };
 
 app.post('/auth/signup', async (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ message: 'Missing fields' });
+  const { email, password, username, language } = req.body;
+  if (!email || !password || !username) {
+    return res.status(400).json({ message: 'Missing fields' });
+  }
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
-    const [u] = await conn.query('INSERT INTO users (email) VALUES (?)', [email]);
+    const [u] = await conn.query(
+      'INSERT INTO users (email, username, language) VALUES (?, ?, ?)',
+      [email, username, language || 'en']
+    );
     const hash = await argon2.hash(password, { type: argon2.argon2id });
     await conn.query('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)', [u.insertId, hash]);
     await conn.commit();
