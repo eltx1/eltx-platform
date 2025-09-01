@@ -5,6 +5,7 @@ import Header from '../(site)/components/Header';
 export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
+
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
@@ -15,6 +16,7 @@ export default function SignupPage() {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ email, username, password })
+
     });
     const data = await res.json().catch(() => ({}));
     setMessage(data.message || (res.ok ? 'Account created' : 'Signup failed'));
@@ -54,6 +56,7 @@ export default function SignupPage() {
         </form>
       </div>
       {message && <p className="text-center mb-4">{message}</p>}
+
     </main>
   );
 }

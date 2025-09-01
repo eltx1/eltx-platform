@@ -66,6 +66,7 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
     }
     await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 0)', [userId, req.ip]);
     res.status(401).json({ message: 'Invalid credentials' });
+
   } catch (err) {
     res.status(500).json({ message: 'Error logging in' });
   }
@@ -96,4 +97,5 @@ const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`API running on port ${port}`);
 });
+
 

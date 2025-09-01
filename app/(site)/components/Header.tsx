@@ -1,10 +1,22 @@
 'use client';
+
 import { useEffect, useState } from 'react';
 import { dict, Lang } from '../i18n';
-export default function Header(){
+
+export default function Header() {
   const [lang, setLang] = useState<Lang>('en');
-  useEffect(()=>{ const s = localStorage.getItem('lang') as Lang|null; if(s) setLang(s); },[]);
-  useEffect(()=>{ document.documentElement.lang=lang; document.documentElement.dir=(lang==='ar')?'rtl':'ltr'; localStorage.setItem('lang',lang); },[lang]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('lang') as Lang | null;
+    if (stored) setLang(stored);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
+    localStorage.setItem('lang', lang);
+  }, [lang]);
+
   const t = dict[lang];
   const [open,setOpen]=useState(false);
   return(<header className="header"><div className="container flex items-center justify-between py-2">
@@ -23,4 +35,5 @@ export default function Header(){
       <button className="nav-toggle" onClick={()=>setLang(lang==='en'?'ar':'en')}>{lang==='en'?'العربية':'English'}</button>
     </nav>
   </div></header>);
+
 }
