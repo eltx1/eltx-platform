@@ -42,13 +42,11 @@ export default function LoginPage() {
             onChange={e => setPassword(e.target.value)}
           />
           <button className="btn btn-primary justify-center" type="submit">
-
             Login
           </button>
         </form>
       </div>
       {message && <p className="text-center mb-4">{message}</p>}
-
     </main>
   );
 }
