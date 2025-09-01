@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useState } from 'react';
-import { dict, Lang } from '../i18n';
+import { dict, useLang } from '../i18n';
 export default function Hero(){
-  const [lang,setLang]=useState<Lang>('en'); useEffect(()=>{const s=localStorage.getItem('lang') as Lang|null; if(s) setLang(s);},[]);
+  const { lang } = useLang();
   const t=dict[lang];
   const [price,setPrice]=useState('--'); const [time,setTime]=useState('');
   useEffect(()=>{ const load=async()=>{ try{ const r=await fetch('/api/price',{cache:'no-store'}); const j=await r.json(); setPrice(j?.price==null?'--':j.price+' USD'); setTime(j?.time||''); }catch(e){} }; load(); const id=setInterval(load,30000); return()=>clearInterval(id); },[]);

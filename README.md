@@ -3,10 +3,13 @@
 ## Run
 ```bash
 npm i
-echo "PRICE_URL=http://YOUR_PHP_SITE/api/price.php?provider=best" > .env.local
-npm run dev
+cp .env.example .env
+npm run api    # starts API on http://localhost:4000
+npm run dev    # starts Next.js on http://localhost:3000
+# run both together
+npm run dev:all
 ```
 
-If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`. (In this zip it’s already fixed.)
-# eltx-platform
-# eltx-platform
+The API uses a MySQL database. Create one (for example via cPanel’s **MySQL Database Wizard**), then run `api/schema.sql` against it. The `users` table now tracks `email`, `username` and preferred `language`.
+
+If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.

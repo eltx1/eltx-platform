@@ -1,15 +1,13 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { dict, Lang } from '../i18n';
+import { useState } from 'react';
+import { dict, useLang } from '../i18n';
 export default function Header(){
-  const [lang, setLang] = useState<Lang>('en');
-  useEffect(()=>{ const s = localStorage.getItem('lang') as Lang|null; if(s) setLang(s); },[]);
-  useEffect(()=>{ document.documentElement.lang=lang; document.documentElement.dir=(lang==='ar')?'rtl':'ltr'; localStorage.setItem('lang',lang); },[lang]);
+  const { lang, setLang } = useLang();
   const t = dict[lang];
   const [open,setOpen]=useState(false);
   return(<header className="header"><div className="container flex items-center justify-between py-2">
     <a href="#" className="flex items-center gap-2 no-underline">
-      <span className="block w-11 h-11 rounded-xl overflow-hidden border border-white/15"><img src="/assets/img/logo.jpeg" alt="ELTX" /></span>
+      <span className="block w-11 h-11 rounded-xl overflow-hidden border border-[var(--line)]"><img src="/assets/img/logo.jpeg" alt="ELTX" /></span>
       <span className="font-black tracking-wide">{t.site_title}</span>
     </a>
     <button className="nav-toggle" onClick={()=>setOpen(v=>!v)}>☰</button>
@@ -18,6 +16,8 @@ export default function Header(){
       <a href="#tokenomics">{t.tokenomics}</a>
       <a href="#roadmap">{t.roadmap_title}</a>
       <a href="#community">{t.community}</a>
+      <a href="/login">{t.login}</a>
+      <a href="/signup">{t.signup}</a>
       <button className="nav-toggle" onClick={()=>setLang(lang==='en'?'ar':'en')}>{lang==='en'?'العربية':'English'}</button>
     </nav>
   </div></header>);
