@@ -11,15 +11,18 @@ export default function SignupPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch('http://localhost:4000/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email, username, password })
-
-    });
-    const data = await res.json().catch(() => ({}));
-    setMessage(data.message || (res.ok ? 'Account created' : 'Signup failed'));
+    try {
+      const res = await fetch('http://localhost:4000/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, username, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.message || (res.ok ? 'Account created' : 'Signup failed'));
+    } catch {
+      setMessage('Signup failed');
+    }
   };
 
   return (
