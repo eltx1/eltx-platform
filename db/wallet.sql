@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS wallet_deposits (
   block_number BIGINT UNSIGNED NOT NULL,
   block_hash VARCHAR(80) NOT NULL,
   token_address VARCHAR(64) NULL,
-  amount_wei DECIMAL(78,0) NOT NULL,
+  amount_wei DECIMAL(65,0) NOT NULL,
   confirmations INT UNSIGNED NOT NULL DEFAULT 0,
   status ENUM('seen','confirmed','swept','orphaned') NOT NULL DEFAULT 'seen',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
