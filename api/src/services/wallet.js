@@ -41,4 +41,12 @@ async function provisionUserAddress(db, userId, chain = 'bsc-mainnet') {
   }
 }
 
-module.exports = { provisionUserAddress };
+async function getUserBalance(db, userId, asset = 'native') {
+  const [rows] = await db.query(
+    'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=?',
+    [userId, asset]
+  );
+  return rows.length ? rows[0].balance_wei : '0';
+}
+
+module.exports = { provisionUserAddress, getUserBalance };

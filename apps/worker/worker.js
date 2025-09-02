@@ -7,6 +7,7 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const RPC_HTTP = process.env.RPC_HTTP;
 const RPC_WS = process.env.RPC_WS;
+const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 15);
 
 async function initDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
@@ -48,8 +49,27 @@ async function handleBlock(pool, addrMap, block) {
     }
   }
 
-  await pool.query('UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain=? AND status IN (\'seen\',\'confirmed\')', [block.number, CHAIN]);
-  await pool.query('UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain=? AND status=\'seen\' AND confirmations>=?', [CHAIN, CONFIRMATIONS]);
+  await pool.query(
+    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain=? AND status IN (\'seen\',\'confirmed\')',
+    [block.number, CHAIN]
+  );
+  await pool.query(
+    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain=? AND status=\'seen\' AND confirmations>=?',
+    [CHAIN, CONFIRMATIONS]
+  );
+
+  const [confirmed] = await pool.query(
+    'SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain=? AND status=\'confirmed\' AND credited=0',
+    [CHAIN]
+  );
+  for (const dep of confirmed) {
+    await pool.query(
+      'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,\'native\',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)',
+      [dep.user_id, dep.amount_wei]
+    );
+    await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
+  }
+
   await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain=?', [block.number, block.hash, CHAIN]);
   console.log(`processed block ${block.number}`);
 }
@@ -59,7 +79,15 @@ async function main() {
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const wsProvider = RPC_WS ? new ethers.WebSocketProvider(RPC_WS, CHAIN_ID) : null;
   await ensureCursor(pool, provider);
-  const addrMap = await loadActiveAddresses(pool);
+  let addrMap = await loadActiveAddresses(pool);
+  setInterval(async () => {
+    try {
+      addrMap = await loadActiveAddresses(pool);
+      console.log('refreshed address list');
+    } catch (e) {
+      console.error('address refresh failed', e);
+    }
+  }, ADDR_REFRESH_MINUTES * 60 * 1000);
 
   const processBlockNumber = async (num) => {
     try {
