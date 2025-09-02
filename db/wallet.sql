@@ -51,8 +51,18 @@ CREATE TABLE IF NOT EXISTS wallet_deposits (
   amount_wei DECIMAL(65,0) NOT NULL,
   confirmations INT UNSIGNED NOT NULL DEFAULT 0,
   status ENUM('seen','confirmed','swept','orphaned') NOT NULL DEFAULT 'seen',
+  credited TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_tx (tx_hash),
   INDEX idx_user_chain_created (user_id, chain, created_at),
   INDEX idx_addr (address)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- user balances per asset
+CREATE TABLE IF NOT EXISTS user_balances (
+  user_id BIGINT UNSIGNED NOT NULL,
+  asset VARCHAR(32) NOT NULL DEFAULT 'native',
+  balance_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  PRIMARY KEY (user_id, asset),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
