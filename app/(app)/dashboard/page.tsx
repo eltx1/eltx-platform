@@ -1,11 +1,17 @@
 'use client';
 
 import Link from 'next/link';
+<<<<<<< HEAD
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { dict, useLang } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import { Wallet, ReceiptText, HelpCircle, Settings, Handshake } from 'lucide-react';
+=======
+import { apiFetch } from '../../lib/api';
+
+type WalletInfo = { chain_id: number; address: string };
+>>>>>>> origin/main
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -14,6 +20,7 @@ export default function DashboardPage() {
   const t = dict[lang];
 
   useEffect(() => {
+<<<<<<< HEAD
     if (user === null) router.replace('/login');
   }, [user, router]);
 
@@ -24,6 +31,10 @@ export default function DashboardPage() {
     { id: 'settings', title: t.dashboard.cards.settings.title, subtitle: t.dashboard.cards.settings.subtitle, icon: Settings, route: '/settings', status: 'active' },
     { id: 'partners', title: t.dashboard.cards.partners.title, subtitle: t.dashboard.cards.partners.subtitle, icon: Handshake, route: '/partners', status: 'soon' },
   ];
+=======
+    apiFetch('/wallet/me').then((d) => setWallet(d.wallet)).catch(() => {});
+  }, []);
+>>>>>>> origin/main
 
   return (
     <div className="p-4 space-y-4 overflow-x-hidden">
