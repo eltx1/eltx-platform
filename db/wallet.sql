@@ -22,25 +22,13 @@ CREATE TABLE IF NOT EXISTS chain_settings (
   min_confirmations INT UNSIGNED NOT NULL,
   PRIMARY KEY (chain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-ALTER TABLE chain_settings
-  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NULL,
-  ADD COLUMN IF NOT EXISTS min_confirmations INT UNSIGNED NOT NULL DEFAULT 12;
-SELECT COUNT(*) INTO @has_chain_settings_id
-FROM INFORMATION_SCHEMA.COLUMNS
-WHERE TABLE_SCHEMA = DATABASE()
-  AND TABLE_NAME = 'chain_settings'
-  AND COLUMN_NAME = 'id';
-SET @sql := IF(@has_chain_settings_id > 0,
-  'UPDATE chain_settings SET chain_id = id WHERE chain_id IS NULL',
-  'SELECT 1');
-PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
-ALTER TABLE chain_settings
-  MODIFY COLUMN chain_id INT UNSIGNED NOT NULL,
-  DROP COLUMN IF EXISTS id,
-  DROP PRIMARY KEY,
-  ADD PRIMARY KEY (chain_id);
-ALTER TABLE chain_settings
-  MODIFY COLUMN min_confirmations INT UNSIGNED NOT NULL DEFAULT 12;
+ALTER TABLE chain_settings ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NULL;
+ALTER TABLE chain_settings ADD COLUMN IF NOT EXISTS min_confirmations INT UNSIGNED NOT NULL DEFAULT 12;
+UPDATE chain_settings SET chain_id = id WHERE chain_id IS NULL;
+ALTER TABLE chain_settings DROP COLUMN IF EXISTS id;
+ALTER TABLE chain_settings MODIFY COLUMN chain_id INT UNSIGNED NOT NULL;
+ALTER TABLE chain_settings DROP PRIMARY KEY, ADD PRIMARY KEY (chain_id);
+ALTER TABLE chain_settings MODIFY COLUMN min_confirmations INT UNSIGNED NOT NULL DEFAULT 12;
 INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (56, 12);
 -- last processed block cursor
 CREATE TABLE IF NOT EXISTS chain_cursor (
