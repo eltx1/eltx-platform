@@ -107,4 +107,5 @@ CREATE TABLE IF NOT EXISTS user_balances (
   INDEX idx_user_balances_user (user_id),
   CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE user_balances DROP COLUMN IF EXISTS usd_balance;
 
