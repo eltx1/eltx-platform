@@ -100,13 +100,8 @@ app.post('/auth/signup', async (req, res, next) => {
     if (conn) await conn.rollback();
     if (err instanceof z.ZodError) {
       const missing = err.errors
-<<<<<<< HEAD
-        .filter(e => e.code === 'invalid_type' && e.received === 'undefined')
-        .map(e => e.path[0]);
-=======
         .filter((e) => e.code === 'invalid_type' && e.received === 'undefined')
         .map((e) => e.path[0]);
->>>>>>> codex-pr
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: { missing } });
     }
     if (err.code === 'ER_DUP_ENTRY') {
@@ -147,13 +142,8 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       const missing = err.errors
-<<<<<<< HEAD
-        .filter(e => e.code === 'invalid_type' && e.received === 'undefined')
-        .map(e => e.path[0]);
-=======
         .filter((e) => e.code === 'invalid_type' && e.received === 'undefined')
         .map((e) => e.path[0]);
->>>>>>> codex-pr
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: { missing } });
     }
     next(err);
