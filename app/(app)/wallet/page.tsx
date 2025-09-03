@@ -27,6 +27,7 @@ export default function WalletPage() {
   const toast = useToast();
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (user === null) router.replace('/login');
@@ -40,9 +41,11 @@ export default function WalletPage() {
       })
       .catch((err) => {
         if (err.status === 401) router.replace('/login');
+        else setError(t.common.genericError);
       });
-  }, [router]);
+  }, [router, t.common.genericError]);
 
+  if (error) return <div className="p-4">{error}</div>;
   if (!wallet) return <div className="p-4">Loading...</div>;
 
   const statusLabel = (s: string) => {

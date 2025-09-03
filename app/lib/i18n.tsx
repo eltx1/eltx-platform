@@ -7,6 +7,8 @@ export type Lang = 'en' | 'ar';
 export const dict = {
   en: {
     site_title: 'ELTX',
+    hero_title: 'Welcome to ELTX',
+    hero_sub: 'Fast and secure transactions.',
     auth: {
       signup: {
         title: 'Sign Up',
@@ -86,6 +88,8 @@ export const dict = {
   },
   ar: {
     site_title: 'ELTX',
+    hero_title: 'مرحبًا بك في ELTX',
+    hero_sub: 'معاملات سريعة وآمنة.',
     auth: {
       signup: {
         title: 'إنشاء حساب',

@@ -6,6 +6,8 @@ const cookieParser = require('cookie-parser');
 const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { z } = require('zod');
 const { provisionUserAddress } = require('./src/services/wallet');
 require('dotenv').config();
@@ -42,6 +44,28 @@ const pool = mysql.createPool(
     database: process.env.DB_NAME || 'eltx',
   }
 );
+
+// ensure wallet tables exist
+(async () => {
+  try {
+    const schema = fs.readFileSync(path.join(__dirname, '../db/wallet.sql'), 'utf8');
+    const statements = schema
+      .split(/;\s*\n/)
+      .map((s) => s.trim())
+      .filter((s) => s && !s.startsWith('--'));
+    const conn = await pool.getConnection();
+    try {
+      for (const sql of statements) {
+        await conn.query(sql);
+      }
+    } finally {
+      conn.release();
+    }
+    console.log('Wallet schema ready');
+  } catch (err) {
+    console.error('Wallet schema sync failed', err);
+  }
+})();
 
 const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
 const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
@@ -100,13 +124,8 @@ app.post('/auth/signup', async (req, res, next) => {
     if (conn) await conn.rollback();
     if (err instanceof z.ZodError) {
       const missing = err.errors
-<<<<<<< HEAD
-        .filter(e => e.code === 'invalid_type' && e.received === 'undefined')
-        .map(e => e.path[0]);
-=======
         .filter((e) => e.code === 'invalid_type' && e.received === 'undefined')
         .map((e) => e.path[0]);
->>>>>>> codex-pr
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: { missing } });
     }
     if (err.code === 'ER_DUP_ENTRY') {
@@ -147,13 +166,8 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError) {
       const missing = err.errors
-<<<<<<< HEAD
-        .filter(e => e.code === 'invalid_type' && e.received === 'undefined')
-        .map(e => e.path[0]);
-=======
         .filter((e) => e.code === 'invalid_type' && e.received === 'undefined')
         .map((e) => e.path[0]);
->>>>>>> codex-pr
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: { missing } });
     }
     next(err);
