@@ -1,24 +1,22 @@
 'use client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-
-const apiBase = process.env.NEXT_PUBLIC_API_URL;
-if (!apiBase) throw new Error('NEXT_PUBLIC_API_URL is not defined');
+import { apiFetch } from '../../../lib/api';
 
 type Deposit = { tx_hash: string; amount_wei: string; confirmations: number; status: string; created_at: string };
-type WalletInfo = { chain: string; address: string; derivation_index: number };
+type WalletInfo = { chain_id: number; address: string };
 
 export default function WalletPage() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/wallet/me`, { credentials: 'include' })
-      .then((r) => r.json())
+    apiFetch('/wallet/me')
       .then((d) => {
         setWallet(d.wallet);
         setDeposits(d.deposits || []);
-      });
+      })
+      .catch(() => {});
   }, []);
 
   if (!wallet) return <div className="p-4">Loading...</div>;
