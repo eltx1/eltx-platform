@@ -13,6 +13,12 @@ npm run worker # starts the blockchain worker
 npm run dev:all
 ```
 
+Set `NEXT_PUBLIC_API_URL` in `.env` to the base URL of the API, for example:
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:4000
+```
+
 The API uses a MySQL database. Create one and run `api/schema.sql` plus `db/wallet.sql` against it.
 
 ### ENV required (names only)

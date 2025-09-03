@@ -8,7 +8,7 @@ export default function DashboardPage() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE}/wallet/me`, { credentials: 'include' })
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/wallet/me`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => setWallet(d.wallet));
   }, []);
