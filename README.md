@@ -40,3 +40,10 @@ SESSION_COOKIE_NAME
 `CORS_ORIGIN` accepts a comma-separated list of allowed origins, e.g. `http://localhost:3000,https://eltx.online`.
 
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.
+
+### Auth responses
+`POST /auth/signup` and `POST /auth/login` both return the user's hot-wallet address:
+
+```json
+{ "ok": true, "wallet": { "address": "0x..." } }
+```
