@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS chain_settings (
   PRIMARY KEY (chain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (56, 12);
-
 -- last processed block cursor
 CREATE TABLE IF NOT EXISTS chain_cursor (
   chain_id INT UNSIGNED PRIMARY KEY,
@@ -53,6 +52,7 @@ CREATE TABLE IF NOT EXISTS wallet_addresses (
   UNIQUE KEY uniq_addr (address),
   INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 ALTER TABLE wallet_addresses
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
   ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
@@ -81,12 +81,14 @@ CREATE TABLE IF NOT EXISTS wallet_deposits (
   INDEX idx_user_chain (user_id, chain_id),
   INDEX idx_addr (address)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 ALTER TABLE wallet_deposits
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
   ADD COLUMN IF NOT EXISTS confirmations INT UNSIGNED NOT NULL DEFAULT 0 AFTER amount_wei,
   ADD INDEX IF NOT EXISTS idx_user_chain (user_id, chain_id),
   ADD INDEX IF NOT EXISTS idx_addr (address),
   DROP COLUMN IF EXISTS chain;
+
 
 -- user balances per asset
 CREATE TABLE IF NOT EXISTS user_balances (
@@ -99,3 +101,10 @@ CREATE TABLE IF NOT EXISTS user_balances (
   CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE user_balances DROP COLUMN IF EXISTS usd_balance;
+
+
+ALTER TABLE user_balances
+  DROP COLUMN IF EXISTS chain,
+  DROP COLUMN IF EXISTS status,
+  DROP COLUMN IF EXISTS usd_balance;
+
