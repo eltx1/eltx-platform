@@ -1,52 +1,56 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { dict, Lang } from '../i18n';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '../../lib/auth';
+import { dict, useLang } from '../../lib/i18n';
 
 export default function Header() {
-  const [lang, setLang] = useState<Lang>('en');
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    const stored = localStorage.getItem('lang') as Lang | null;
-    if (stored) setLang(stored);
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.lang = lang;
-    document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
-    localStorage.setItem('lang', lang);
-  }, [lang]);
-
+  const { user, logout } = useAuth();
+  const router = useRouter();
+  const { lang, setLang } = useLang();
   const t = dict[lang];
 
+  const guestLinks = [
+    { href: '/', label: t.nav.home },
+    { href: '/faq', label: t.nav.faq },
+    { href: '/login', label: t.nav.login },
+    { href: '/signup', label: t.nav.signup },
+  ];
+
+  const userLinks = [
+    { href: '/dashboard', label: t.nav.dashboard },
+    { href: '/wallet', label: t.nav.wallet },
+    { href: '/transactions', label: t.nav.transactions },
+    { href: '/settings', label: t.nav.settings },
+  ];
+
   return (
-    <header className="header">
-      <div className="container flex items-center justify-between py-2">
-        <a href="#" className="flex items-center gap-2 no-underline">
-          <span className="block w-11 h-11 rounded-xl overflow-hidden border border-[var(--line)]">
-            <img src="/assets/img/logo.jpeg" alt="ELTX" />
-          </span>
-          <span className="font-black tracking-wide">{t.site_title}</span>
-        </a>
-        <button className="nav-toggle" onClick={() => setOpen(v => !v)}>
-          ☰
-        </button>
-        <nav className={`nav ${open ? 'open' : ''}`}>
-          <a href="#features">{t.features}</a>
-          <a href="#tokenomics">{t.tokenomics}</a>
-          <a href="#roadmap">{t.roadmap_title}</a>
-          <a href="#community">{t.community}</a>
-          <a href="/login">{t.login}</a>
-          <a href="/signup">{t.signup}</a>
+    <header className="p-4 border-b border-white/10 flex items-center justify-between">
+      <Link href="/" className="font-bold tracking-wide">
+        {t.site_title}
+      </Link>
+      <nav className="flex items-center gap-4">
+        {(user ? userLinks : guestLinks).map((l) => (
+          <Link key={l.href} href={l.href} className="hover:opacity-80">
+            {l.label}
+          </Link>
+        ))}
+        {user && (
           <button
-            className="nav-toggle"
-            onClick={() => setLang(lang === 'en' ? 'ar' : 'en')}
+            onClick={async () => {
+              await logout();
+              router.push('/');
+            }}
+            className="hover:opacity-80"
           >
-            {lang === 'en' ? 'العربية' : 'English'}
+            {t.nav.logout}
           </button>
-        </nav>
-      </div>
+        )}
+        <button onClick={() => setLang(lang === 'en' ? 'ar' : 'en')} className="hover:opacity-80">
+          {lang === 'en' ? 'العربية' : 'English'}
+        </button>
+      </nav>
     </header>
   );
 }
