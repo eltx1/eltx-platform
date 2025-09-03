@@ -10,7 +10,7 @@ export default function WalletPage() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE}/wallet/me`, { credentials: 'include' })
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/wallet/me`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => {
         setWallet(d.wallet);
