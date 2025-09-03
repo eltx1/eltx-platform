@@ -2,7 +2,6 @@ const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 require('dotenv').config();
 
-const CHAIN = process.env.CHAIN || 'bsc-mainnet';
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const RPC_HTTP = process.env.RPC_HTTP;
@@ -15,7 +14,7 @@ async function initDb() {
 }
 
 async function loadActiveAddresses(pool) {
-  const [rows] = await pool.query('SELECT address, user_id FROM wallet_addresses WHERE status="active" AND chain=?', [CHAIN]);
+  const [rows] = await pool.query('SELECT address, user_id FROM wallet_addresses WHERE chain_id=?', [CHAIN_ID]);
   const map = new Map();
   for (const r of rows) map.set(r.address.toLowerCase(), r.user_id);
   return map;
@@ -23,19 +22,19 @@ async function loadActiveAddresses(pool) {
 
 async function ensureCursor(pool, provider) {
   const latest = await provider.getBlockNumber();
-  const [rows] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain=?', [CHAIN]);
+  const [rows] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain_id=?', [CHAIN_ID]);
   if (!rows.length) {
     const start = latest - 3;
-    await pool.query('INSERT INTO chain_cursor (chain,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN, start]);
+    await pool.query('INSERT INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, start]);
     return { last_block: start, last_hash: null };
   }
   return rows[0];
 }
 
 async function handleBlock(pool, addrMap, block) {
-  const [cursor] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain=?', [CHAIN]);
+  const [cursor] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain_id=?', [CHAIN_ID]);
   if (cursor.length && cursor[0].last_block === block.number && cursor[0].last_hash && cursor[0].last_hash !== block.hash) {
-    await pool.query('UPDATE wallet_deposits SET status="orphaned" WHERE chain=? AND block_number=?', [CHAIN, block.number]);
+    await pool.query('UPDATE wallet_deposits SET status="orphaned" WHERE chain_id=? AND block_number=?', [CHAIN_ID, block.number]);
   }
 
   for (const tx of block.transactions) {
@@ -43,24 +42,24 @@ async function handleBlock(pool, addrMap, block) {
     if (to && addrMap.has(to)) {
       const userId = addrMap.get(to);
       await pool.query(
-        'INSERT IGNORE INTO wallet_deposits (user_id, chain, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\')',
-        [userId, CHAIN, to, tx.hash, block.number, block.hash, tx.value.toString()]
+        'INSERT IGNORE INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\')',
+        [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, tx.value.toString()]
       );
     }
   }
 
   await pool.query(
-    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain=? AND status IN (\'seen\',\'confirmed\')',
-    [block.number, CHAIN]
+    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain_id=? AND status IN (\'seen\',\'confirmed\')',
+    [block.number, CHAIN_ID]
   );
   await pool.query(
-    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain=? AND status=\'seen\' AND confirmations>=?',
-    [CHAIN, CONFIRMATIONS]
+    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain_id=? AND status=\'seen\' AND confirmations>=?',
+    [CHAIN_ID, CONFIRMATIONS]
   );
 
   const [confirmed] = await pool.query(
-    'SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain=? AND status=\'confirmed\' AND credited=0',
-    [CHAIN]
+    'SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status=\'confirmed\' AND credited=0',
+    [CHAIN_ID]
   );
   for (const dep of confirmed) {
     await pool.query(
@@ -70,7 +69,7 @@ async function handleBlock(pool, addrMap, block) {
     await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
   }
 
-  await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain=?', [block.number, block.hash, CHAIN]);
+  await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain_id=?', [block.number, block.hash, CHAIN_ID]);
   console.log(`processed block ${block.number}`);
 }
 
