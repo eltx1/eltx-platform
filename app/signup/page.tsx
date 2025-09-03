@@ -2,6 +2,9 @@
 import { useState } from 'react';
 import Header from '../(site)/components/Header';
 
+const apiBase = process.env.NEXT_PUBLIC_API_URL;
+if (!apiBase) throw new Error('NEXT_PUBLIC_API_URL is not defined');
+
 export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
