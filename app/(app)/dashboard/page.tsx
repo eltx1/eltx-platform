@@ -2,13 +2,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
+const apiBase = process.env.NEXT_PUBLIC_API_URL;
+if (!apiBase) throw new Error('NEXT_PUBLIC_API_URL is not defined');
+
 type WalletInfo = { chain: string; address: string; derivation_index: number };
 
 export default function DashboardPage() {
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
 
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE}/wallet/me`, { credentials: 'include' })
+    fetch(`${apiBase}/wallet/me`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => setWallet(d.wallet));
   }, []);

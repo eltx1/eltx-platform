@@ -2,6 +2,9 @@
 import { useState } from 'react';
 import Header from '../(site)/components/Header';
 
+const apiBase = process.env.NEXT_PUBLIC_API_URL;
+if (!apiBase) throw new Error('NEXT_PUBLIC_API_URL is not defined');
+
 export default function SignupPage() {
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
@@ -12,7 +15,7 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE}/auth/signup`, {
+      const res = await fetch(`${apiBase}/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
