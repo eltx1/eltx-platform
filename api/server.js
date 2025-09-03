@@ -227,11 +227,6 @@ app.get('/wallet/me', walletLimiter, async (req, res, next) => {
   }
 });
 
-const port = process.env.PORT || 4000;
-app.listen(port, () => {
-  console.log(`API running on port ${port}`);
-});
-
 app.use((err, req, res, next) => {
   const id = req.requestId || crypto.randomUUID();
   const status = err.status || 500;
@@ -242,3 +237,9 @@ app.use((err, req, res, next) => {
   console.error(`[${id}]`, err);
   res.status(status).json(body);
 });
+
+const port = process.env.PORT || 4000;
+app.listen(port, () => {
+  console.log(`API running on port ${port}`);
+});
+
