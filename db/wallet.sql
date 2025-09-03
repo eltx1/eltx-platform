@@ -1,48 +1,64 @@
--- wallet module schema
+-- wallet module schema (idempotent)
 
 -- derivation index cursor per chain
 CREATE TABLE IF NOT EXISTS wallet_index (
-  chain VARCHAR(32) PRIMARY KEY,
-  last_index INT UNSIGNED NOT NULL DEFAULT 0,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  chain_id INT UNSIGNED PRIMARY KEY,
+  next_index INT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-INSERT IGNORE INTO wallet_index (chain, last_index) VALUES ('bsc-mainnet', 0);
+ALTER TABLE wallet_index
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL,
+  ADD COLUMN IF NOT EXISTS next_index INT UNSIGNED NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP;
+UPDATE wallet_index SET chain_id = 56 WHERE chain_id IS NULL;
+ALTER TABLE wallet_index
+  DROP COLUMN IF EXISTS id,
+  DROP PRIMARY KEY,
+  ADD PRIMARY KEY (chain_id);
+INSERT IGNORE INTO wallet_index (chain_id, next_index) VALUES (56, 0);
 
 -- chain settings
 CREATE TABLE IF NOT EXISTS chain_settings (
-  chain VARCHAR(32) PRIMARY KEY,
+  chain_id INT UNSIGNED PRIMARY KEY,
   min_confirmations INT UNSIGNED NOT NULL DEFAULT 12,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-INSERT IGNORE INTO chain_settings (chain, min_confirmations) VALUES ('bsc-mainnet', 12);
+INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (56, 12);
 
--- last processed block
+-- last processed block cursor
 CREATE TABLE IF NOT EXISTS chain_cursor (
-  chain VARCHAR(32) PRIMARY KEY,
+  chain_id INT UNSIGNED PRIMARY KEY,
   last_block BIGINT UNSIGNED NOT NULL DEFAULT 0,
   last_hash VARCHAR(80) NULL,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT IGNORE INTO chain_cursor (chain_id, last_block) VALUES (56, 0);
 
 -- derived address per user
 CREATE TABLE IF NOT EXISTS wallet_addresses (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT UNSIGNED NOT NULL,
-  chain VARCHAR(32) NOT NULL,
-  derivation_index INT UNSIGNED NOT NULL,
+  chain_id INT UNSIGNED NOT NULL,
   address VARCHAR(64) NOT NULL,
-  status ENUM('active','archived') NOT NULL DEFAULT 'active',
+  derivation_index INT UNSIGNED NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_user_chain (user_id, chain),
+  UNIQUE KEY uniq_user_chain (user_id, chain_id),
   UNIQUE KEY uniq_addr (address),
-  INDEX idx_chain_index (chain, derivation_index)
+  INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- deposits (BNB only)
+ALTER TABLE wallet_addresses
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
+  ADD UNIQUE KEY IF NOT EXISTS uniq_user_chain (user_id, chain_id),
+  ADD UNIQUE KEY IF NOT EXISTS uniq_addr (address),
+  ADD INDEX IF NOT EXISTS idx_user (user_id);
+
+-- deposits
 CREATE TABLE IF NOT EXISTS wallet_deposits (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id BIGINT UNSIGNED NOT NULL,
-  chain VARCHAR(32) NOT NULL,
+  chain_id INT UNSIGNED NOT NULL,
   address VARCHAR(64) NOT NULL,
   tx_hash VARCHAR(80) NOT NULL,
   block_number BIGINT UNSIGNED NOT NULL,
@@ -54,9 +70,15 @@ CREATE TABLE IF NOT EXISTS wallet_deposits (
   credited TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_tx (tx_hash),
-  INDEX idx_user_chain_created (user_id, chain, created_at),
+  INDEX idx_user_chain (user_id, chain_id),
   INDEX idx_addr (address)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE wallet_deposits
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS confirmations INT UNSIGNED NOT NULL DEFAULT 0 AFTER amount_wei,
+  ADD INDEX IF NOT EXISTS idx_user_chain (user_id, chain_id),
+  ADD INDEX IF NOT EXISTS idx_addr (address);
 
 -- user balances per asset
 CREATE TABLE IF NOT EXISTS user_balances (
@@ -68,3 +90,4 @@ CREATE TABLE IF NOT EXISTS user_balances (
   INDEX idx_user_balances_user (user_id),
   CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
