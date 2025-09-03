@@ -14,14 +14,15 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
   });
   if (!res.ok) {
     const text = await res.text();
-    const requestId = res.headers.get('x-request-id') || undefined;
-    console.error('API request failed', { url, status: res.status, body: text, requestId });
+    let data: any;
     try {
-      const data = JSON.parse(text);
-      throw new Error(data.error?.message || 'Request failed');
+      data = JSON.parse(text);
     } catch {
-      throw new Error('Request failed');
+      data = { error: { message: text } };
     }
+    const requestId = res.headers.get('x-request-id') || undefined;
+    console.error('API request failed', { url, status: res.status, body: data, requestId });
+    throw { status: res.status, ...data };
   }
   return res.json();
 }

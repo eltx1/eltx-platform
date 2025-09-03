@@ -27,12 +27,24 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
       `m/44'/60'/0'/0/${nextIndex}`
     );
     const address = wallet.address.toLowerCase();
-    await conn.query(
-      'INSERT INTO wallet_addresses (user_id, chain_id, derivation_index, address) VALUES (?,?,?,?)',
-      [userId, chainId, nextIndex, address]
-    );
-    if (!isConn) await conn.commit();
-    return { chain_id: chainId, address };
+    try {
+      await conn.query(
+        'INSERT INTO wallet_addresses (user_id, chain_id, derivation_index, address) VALUES (?,?,?,?)',
+        [userId, chainId, nextIndex, address]
+      );
+      if (!isConn) await conn.commit();
+      return { chain_id: chainId, address };
+    } catch (err) {
+      if (!isConn) await conn.rollback();
+      if (err.code === 'ER_DUP_ENTRY') {
+        const [existing2] = await conn.query(
+          'SELECT chain_id, address FROM wallet_addresses WHERE user_id=? AND chain_id=?',
+          [userId, chainId]
+        );
+        if (existing2.length) return { chain_id: existing2[0].chain_id, address: existing2[0].address };
+      }
+      throw err;
+    }
   } catch (err) {
     if (!isConn) await conn.rollback();
     throw err;
