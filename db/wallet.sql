@@ -71,6 +71,11 @@ ALTER TABLE wallet_addresses
   ADD UNIQUE KEY IF NOT EXISTS uniq_addr (address),
   ADD INDEX IF NOT EXISTS idx_user (user_id);
 
+ALTER TABLE wallet_addresses
+  DROP COLUMN IF EXISTS chain,
+  DROP COLUMN IF EXISTS status,
+  DROP COLUMN IF EXISTS usd_balance;
+
 -- deposits
 CREATE TABLE IF NOT EXISTS wallet_deposits (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -97,6 +102,11 @@ ALTER TABLE wallet_deposits
   ADD INDEX IF NOT EXISTS idx_user_chain (user_id, chain_id),
   ADD INDEX IF NOT EXISTS idx_addr (address);
 
+ALTER TABLE wallet_deposits
+  DROP COLUMN IF EXISTS chain,
+  DROP COLUMN IF EXISTS status,
+  DROP COLUMN IF EXISTS usd_balance;
+
 -- user balances per asset
 CREATE TABLE IF NOT EXISTS user_balances (
   user_id BIGINT UNSIGNED NOT NULL,
@@ -107,4 +117,9 @@ CREATE TABLE IF NOT EXISTS user_balances (
   INDEX idx_user_balances_user (user_id),
   CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE user_balances
+  DROP COLUMN IF EXISTS chain,
+  DROP COLUMN IF EXISTS status,
+  DROP COLUMN IF EXISTS usd_balance;
 
