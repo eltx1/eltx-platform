@@ -23,6 +23,15 @@ CREATE TABLE IF NOT EXISTS chain_settings (
   min_confirmations INT UNSIGNED NOT NULL DEFAULT 12,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE chain_settings
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL,
+  ADD COLUMN IF NOT EXISTS min_confirmations INT UNSIGNED NOT NULL DEFAULT 12,
+  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+UPDATE chain_settings SET chain_id = id WHERE chain_id IS NULL AND id IS NOT NULL;
+ALTER TABLE chain_settings
+  DROP COLUMN IF EXISTS id,
+  DROP PRIMARY KEY,
+  ADD PRIMARY KEY (chain_id);
 INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (56, 12);
 
 -- last processed block cursor
