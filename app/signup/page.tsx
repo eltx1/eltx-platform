@@ -1,5 +1,4 @@
 'use client';
-import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '../lib/api';
 import { dict, useLang } from '../lib/i18n';

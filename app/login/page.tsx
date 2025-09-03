@@ -55,14 +55,14 @@ export default function LoginPage() {
           className="p-2 rounded bg-black/20 border border-white/20"
           placeholder="Email or Username"
           value={identifier}
-          onChange={e => setIdentifier(e.target.value)}
+          onChange={(e) => setIdentifier(e.target.value)}
         />
         <input
           className="p-2 rounded bg-black/20 border border-white/20"
           type="password"
           placeholder="Password"
           value={password}
-          onChange={e => setPassword(e.target.value)}
+          onChange={(e) => setPassword(e.target.value)}
         />
         <button className="btn btn-primary justify-center" type="submit" disabled={loading}>
           {loading ? `${t.auth.login.title}...` : t.auth.login.title}
