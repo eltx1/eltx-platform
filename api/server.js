@@ -10,9 +10,16 @@ const { z } = require('zod');
 const { provisionUserAddress } = require('./src/services/wallet');
 require('dotenv').config();
 
+['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
+  if (!process.env[v]) throw new Error(`${v} is not set`);
+});
+
 const app = express();
 app.use(helmet());
-app.use(cors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000', credentials: true }));
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',')
+  : ['http://localhost:3000', 'https://eltx.online'];
+app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -37,13 +44,23 @@ const sessionCookie = {
   maxAge: 1000 * 60 * 60,
 };
 
+const SignupSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+  username: z.string().min(3),
+  language: z.string().optional(),
+});
+
+const LoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+
 app.post('/auth/signup', async (req, res) => {
-  const { email, password, username, language } = req.body;
-  if (!email || !password || !username) {
-    return res.status(400).json({ message: 'Missing fields' });
-  }
-  const conn = await pool.getConnection();
+  let conn;
   try {
+    const { email, password, username, language } = SignupSchema.parse(req.body);
+    conn = await pool.getConnection();
     await conn.beginTransaction();
     const [u] = await conn.query(
       'INSERT INTO users (email, username, language) VALUES (?, ?, ?)',
@@ -55,17 +72,24 @@ app.post('/auth/signup', async (req, res) => {
     await conn.commit();
     res.json({ ok: true, wallet });
   } catch (err) {
-    await conn.rollback();
+    if (conn) await conn.rollback();
+    console.error(err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid input' });
+    }
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Email or username already exists' });
+    }
     res.status(500).json({ message: 'Error creating user' });
   } finally {
-    conn.release();
+    if (conn) conn.release();
   }
 });
 
 app.post('/auth/login', loginLimiter, async (req, res) => {
-  const { email, password } = req.body;
   let userId = null;
   try {
+    const { email, password } = LoginSchema.parse(req.body);
     const [rows] = await pool.query(
       'SELECT users.id, uc.password_hash FROM users JOIN user_credentials uc ON users.id=uc.user_id WHERE users.email=?',
       [email]
@@ -75,7 +99,10 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
       const valid = await argon2.verify(rows[0].password_hash, password);
       if (valid) {
         const token = crypto.randomUUID();
-        await pool.query('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))', [token, userId]);
+        await pool.query('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))', [
+          token,
+          userId,
+        ]);
         await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 1)', [userId, req.ip]);
         const wallet = await provisionUserAddress(pool, userId);
         res.cookie(COOKIE_NAME, token, sessionCookie);
@@ -85,6 +112,10 @@ app.post('/auth/login', loginLimiter, async (req, res) => {
     await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 0)', [userId, req.ip]);
     res.status(401).json({ message: 'Invalid credentials' });
   } catch (err) {
+    console.error(err);
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ message: 'Invalid input' });
+    }
     res.status(500).json({ message: 'Error logging in' });
   }
 });

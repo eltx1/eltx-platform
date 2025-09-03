@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS user_balances (
   user_id BIGINT UNSIGNED NOT NULL,
   asset VARCHAR(32) NOT NULL DEFAULT 'native',
   balance_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, asset),
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  INDEX idx_user_balances_user (user_id),
+  CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

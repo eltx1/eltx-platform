@@ -13,6 +13,12 @@ npm run worker # starts the blockchain worker
 npm run dev:all
 ```
 
+Set `NEXT_PUBLIC_API_URL` in `.env` to the base URL of the API, for example:
+
+```
+NEXT_PUBLIC_API_URL=http://localhost:4000
+```
+
 The API uses a MySQL database. Create one and run `api/schema.sql` plus `db/wallet.sql` against it.
 
 ### ENV required (names only)
@@ -31,4 +37,13 @@ SESSION_COOKIE_DOMAIN
 SESSION_COOKIE_NAME
 ```
 
+`CORS_ORIGIN` accepts a comma-separated list of allowed origins, e.g. `http://localhost:3000,https://eltx.online`.
+
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.
+
+### Auth responses
+`POST /auth/signup` and `POST /auth/login` both return the user's hot-wallet address:
+
+```json
+{ "ok": true, "wallet": { "address": "0x..." } }
+```
