@@ -37,4 +37,6 @@ SESSION_COOKIE_DOMAIN
 SESSION_COOKIE_NAME
 ```
 
+`CORS_ORIGIN` accepts a comma-separated list of allowed origins, e.g. `http://localhost:3000,https://eltx.online`.
+
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.
