@@ -17,21 +17,30 @@ ALTER TABLE wallet_index
   ADD PRIMARY KEY (chain_id);
 INSERT IGNORE INTO wallet_index (chain_id, next_index) VALUES (56, 0);
 
--- chain settings
 CREATE TABLE IF NOT EXISTS chain_settings (
-  chain_id INT UNSIGNED PRIMARY KEY,
-  min_confirmations INT UNSIGNED NOT NULL DEFAULT 12,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  chain_id INT UNSIGNED NOT NULL,
+  min_confirmations INT UNSIGNED NOT NULL,
+  PRIMARY KEY (chain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE chain_settings
-  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL,
-  ADD COLUMN IF NOT EXISTS min_confirmations INT UNSIGNED NOT NULL DEFAULT 12,
-  ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
-UPDATE chain_settings SET chain_id = id WHERE chain_id IS NULL AND id IS NOT NULL;
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NULL,
+  ADD COLUMN IF NOT EXISTS min_confirmations INT UNSIGNED NOT NULL DEFAULT 12;
+SELECT COUNT(*) INTO @has_chain_settings_id
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'chain_settings'
+  AND COLUMN_NAME = 'id';
+SET @sql := IF(@has_chain_settings_id > 0,
+  'UPDATE chain_settings SET chain_id = id WHERE chain_id IS NULL',
+  'SELECT 1');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 ALTER TABLE chain_settings
+  MODIFY COLUMN chain_id INT UNSIGNED NOT NULL,
   DROP COLUMN IF EXISTS id,
   DROP PRIMARY KEY,
   ADD PRIMARY KEY (chain_id);
+ALTER TABLE chain_settings
+  MODIFY COLUMN min_confirmations INT UNSIGNED NOT NULL DEFAULT 12;
 INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (56, 12);
 
 -- last processed block cursor
