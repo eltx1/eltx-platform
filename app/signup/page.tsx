@@ -1,9 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Header from '../(site)/components/Header';
-
-const apiBase = process.env.NEXT_PUBLIC_API_URL;
-if (!apiBase) throw new Error('NEXT_PUBLIC_API_URL is not defined');
+import { apiFetch } from '../lib/api';
 
 export default function SignupPage() {
   const [email, setEmail] = useState('');
@@ -15,16 +13,13 @@ export default function SignupPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/signup`, {
+      await apiFetch('/auth/signup', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({ email, username, password }),
       });
-      const data = await res.json().catch(() => ({}));
-      setMessage(data.message || (res.ok ? 'Account created' : 'Signup failed'));
-    } catch {
-      setMessage('Signup failed');
+      setMessage('Account created');
+    } catch (err: any) {
+      setMessage(err.message || 'Signup failed');
     }
   };
 

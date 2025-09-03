@@ -1,25 +1,27 @@
 'use client';
 import { useState } from 'react';
 import Header from '../(site)/components/Header';
-
-const apiBase = process.env.NEXT_PUBLIC_API_URL;
-if (!apiBase) throw new Error('NEXT_PUBLIC_API_URL is not defined');
+import { apiFetch } from '../lib/api';
 
 export default function LoginPage() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ email, password })
-    });
-    const data = await res.json().catch(() => ({}));
-    setMessage(data.message || (res.ok ? 'Logged in' : 'Login failed'));
+    const body = identifier.includes('@')
+      ? { email: identifier, password }
+      : { username: identifier, password };
+    try {
+      await apiFetch('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      setMessage('Logged in');
+    } catch (err: any) {
+      setMessage(err.message || 'Login failed');
+    }
   };
 
   return (
@@ -33,9 +35,9 @@ export default function LoginPage() {
           <h1 className="text-2xl font-bold text-center mb-2">Login</h1>
           <input
             className="p-2 rounded bg-black/20 border border-white/20"
-            placeholder="Email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
+            placeholder="Email or Username"
+            value={identifier}
+            onChange={e => setIdentifier(e.target.value)}
           />
           <input
             className="p-2 rounded bg-black/20 border border-white/20"
