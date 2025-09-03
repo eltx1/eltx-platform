@@ -17,6 +17,8 @@ Set `NEXT_PUBLIC_API_BASE` in `.env` to the base URL of the API.
 
 The API uses a MySQL database. Create one and run `api/schema.sql` plus `db/wallet.sql` against it.
 
+Re-run `db/wallet.sql` after updates to remove any legacy columns.
+
 ### ENV required (names only)
 ```
 CHAIN
