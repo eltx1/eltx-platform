@@ -21,24 +21,20 @@ export default function SignupPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    try {
-      await apiFetch('/auth/signup', {
-        method: 'POST',
-        body: JSON.stringify({ email, username, password }),
-      });
+    const res = await apiFetch('/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, username, password }),
+    });
+    if (res.error) {
+      const err = res.error;
+      if (err.code === 'USER_EXISTS') setError(t.auth.signup.exists);
+      else if (err.details?.missing) setError(err.details.missing.join(', '));
+      else setError(t.auth.signup.genericError);
+    } else {
       toast(t.auth.signup.success);
       router.push('/login?registered=1');
-    } catch (err: any) {
-      if (err?.error?.code === 'USER_EXISTS') {
-        setError(t.auth.signup.exists);
-      } else if (err?.error?.details?.missing) {
-        setError(err.error.details.missing.join(', '));
-      } else {
-        setError(t.auth.signup.genericError);
-      }
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (
@@ -49,7 +45,7 @@ export default function SignupPage() {
       >
         <h1 className="text-2xl font-bold text-center mb-2">{t.auth.signup.title}</h1>
         {error && (
-          <div role="alert" className="text-red-500 text-sm text-center">
+          <div role="alert" aria-live="polite" className="text-red-500 text-sm text-center">
             {error}
           </div>
         )}

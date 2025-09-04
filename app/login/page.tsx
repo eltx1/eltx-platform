@@ -32,22 +32,22 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     const body = identifier.includes('@') ? { email: identifier, password } : { username: identifier, password };
-    try {
-      await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(body) });
-      await refresh();
-      toast(t.auth.login.success);
-      router.push('/dashboard');
-    } catch (err: any) {
-      if (err?.error?.code === 'INVALID_CREDENTIALS') {
+    const res = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(body) });
+    if (res.error) {
+      const err = res.error;
+      if (err.code === 'INVALID_CREDENTIALS') {
         setError(t.auth.login.invalid);
-      } else if (err?.error?.details?.missing) {
-        setError(err.error.details.missing.join(', '));
+      } else if (err.details?.missing) {
+        setError(err.details.missing.join(', '));
       } else {
         setError(t.auth.login.genericError);
       }
-    } finally {
-      setLoading(false);
+    } else {
+      await refresh();
+      toast(t.auth.login.success);
+      router.push('/dashboard');
     }
+    setLoading(false);
   };
 
   return (
@@ -58,7 +58,7 @@ export default function LoginPage() {
       >
         <h1 className="text-2xl font-bold text-center mb-2">{t.auth.login.title}</h1>
         {error && (
-          <div role="alert" className="text-red-500 text-sm text-center">
+          <div role="alert" aria-live="polite" className="text-red-500 text-sm text-center">
             {error}
           </div>
         )}

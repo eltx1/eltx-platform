@@ -13,14 +13,16 @@ export default function PositionsPage() {
   useEffect(() => {
     if (user === null) router.replace('/login');
     if (user) {
-      apiFetch('/staking/positions').then((d) => setPositions(d.positions));
+      apiFetch('/staking/positions').then((res) => {
+        if (res.data) setPositions(res.data.positions);
+      });
     }
   }, [user, router]);
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-6 max-w-4xl mx-auto">
       <h1 className="text-xl font-semibold">My Stakes</h1>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto rounded-2xl shadow">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-white/10">
             <tr>

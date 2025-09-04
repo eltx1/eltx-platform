@@ -14,21 +14,21 @@ export default function StakingPlansPage() {
   useEffect(() => {
     if (user === null) router.replace('/login');
     if (user) {
-      apiFetch('/staking/plans')
-        .then((d) => setPlans(d.plans))
-        .catch(console.error);
+      apiFetch('/staking/plans').then((res) => {
+        if (res.data) setPlans(res.data.plans);
+      });
     }
   }, [user, router]);
 
   return (
-    <div className="p-4 space-y-4">
-      <h1 className="text-xl font-semibold">Earn</h1>
+    <div className="p-4 space-y-6 max-w-3xl mx-auto">
+      <h1 className="text-xl font-semibold">Staking Plans</h1>
       <div className="grid gap-4 sm:grid-cols-3">
         {plans.map((p) => (
           <Link
             key={p.id}
             href={`/staking/new?plan=${p.id}`}
-            className="p-4 rounded-xl bg-white/5 hover:bg-white/10 transition flex flex-col"
+            className="p-4 rounded-2xl bg-white/5 hover:bg-white/10 transition flex flex-col shadow"
           >
             <div className="font-semibold mb-1">{p.name}</div>
             <div className="text-sm mb-1">{p.duration_days} days</div>

@@ -16,11 +16,13 @@ export default function NewStakePage() {
   useEffect(() => {
     if (user === null) router.replace('/login');
     if (user) {
-      apiFetch('/staking/plans').then((d) => {
-        setPlans(d.plans);
-        const qs = new URLSearchParams(window.location.search);
-        const p = qs.get('plan');
-        if (p) setPlanId(Number(p));
+      apiFetch('/staking/plans').then((res) => {
+        if (res.data) {
+          setPlans(res.data.plans);
+          const qs = new URLSearchParams(window.location.search);
+          const p = qs.get('plan');
+          if (p) setPlanId(Number(p));
+        }
       });
     }
   }, [user, router]);
@@ -37,25 +39,21 @@ export default function NewStakePage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      await apiFetch('/staking/positions', {
-        method: 'POST',
-        body: JSON.stringify({ planId, amount }),
-      });
-      router.push('/staking/positions');
-    } catch (err) {
-      console.error(err);
-    }
+    const res = await apiFetch('/staking/positions', {
+      method: 'POST',
+      body: JSON.stringify({ planId, amount }),
+    });
+    if (!res.error) router.push('/earn/staking/positions');
   };
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-6 max-w-md mx-auto">
       <h1 className="text-xl font-semibold">New Stake</h1>
-      <form onSubmit={submit} className="space-y-4 max-w-sm">
+      <form onSubmit={submit} className="space-y-4">
         <select
           value={planId ?? ''}
           onChange={(e) => setPlanId(Number(e.target.value))}
-          className="w-full p-2 rounded bg-white/5"
+          className="w-full p-2 rounded border border-white/10 bg-white/5"
         >
           <option value="" disabled>
             Select plan
@@ -70,12 +68,12 @@ export default function NewStakePage() {
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="Amount"
-          className="w-full p-2 rounded bg-white/5"
+          className="w-full p-2 rounded border border-white/10 bg-white/5"
         />
         {daily > 0 && (
           <div className="text-sm">Est. daily reward: {daily.toFixed(8)}</div>
         )}
-        <button type="submit" className="px-4 py-2 rounded bg-blue-600 text-white">
+        <button type="submit" className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 transition text-white">
           Stake
         </button>
       </form>

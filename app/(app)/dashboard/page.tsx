@@ -68,7 +68,7 @@ export default function DashboardPage() {
       title: 'Earn',
       subtitle: 'Stake ELTX to earn',
       icon: PiggyBank,
-      route: '/staking',
+      route: '/earn',
       status: 'active',
       color: 'from-pink-500 to-rose-500',
     },
@@ -84,7 +84,7 @@ export default function DashboardPage() {
             <Link
               key={c.id}
               href={c.route}
-              className={`p-4 rounded flex flex-col items-center text-center text-white bg-gradient-to-br ${c.color} shadow hover:shadow-lg transition`}
+              className={`p-4 rounded-2xl flex flex-col items-center text-center text-white bg-gradient-to-br ${c.color} shadow-md hover:shadow-lg transition`}
             >
               <Icon className="mb-2 h-6 w-6" />
               <div className="font-semibold">{c.title}</div>
@@ -93,7 +93,7 @@ export default function DashboardPage() {
           ) : (
             <div
               key={c.id}
-              className="p-4 rounded text-center opacity-50 cursor-not-allowed bg-white/5"
+              className="p-4 rounded-2xl text-center opacity-50 cursor-not-allowed bg-white/5"
               title={t.common.soon}
             >
               <Icon className="mx-auto mb-2 h-6 w-6" />
