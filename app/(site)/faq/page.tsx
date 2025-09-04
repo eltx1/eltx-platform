@@ -1,6 +1,6 @@
 'use client';
 
-import { dict, useLang } from '../lib/i18n';
+import { dict, useLang } from '../../lib/i18n';
 
 const faqs = [
   { q: 'What is ELTX?', a: 'Placeholder answer.' },

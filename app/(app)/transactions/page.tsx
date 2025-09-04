@@ -28,9 +28,13 @@ export default function TransactionsPage() {
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch('/wallet/me')
-      .then(d => setDeposits(d.deposits || []))
-      .catch(err => { if (err.status === 401) router.replace('/login'); });
+    apiFetch('/wallet/me').then(res => {
+      if (res.error) {
+        if (res.error.status === 401) router.replace('/login');
+      } else if (res.data) {
+        setDeposits(res.data.deposits || []);
+      }
+    });
   }, [router]);
 
   const statusLabel = (s: string) => {
