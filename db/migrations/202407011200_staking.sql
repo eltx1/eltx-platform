@@ -1,3 +1,7 @@
+DROP TABLE IF EXISTS staking_accruals;
+DROP TABLE IF EXISTS staking_positions;
+DROP TABLE IF EXISTS staking_plans;
+
 CREATE TABLE IF NOT EXISTS staking_plans (
   id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(20) NOT NULL,
@@ -21,8 +25,10 @@ CREATE TABLE IF NOT EXISTS staking_positions (
   status ENUM('active','matured','cancelled') NOT NULL DEFAULT 'active',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_positions_plan FOREIGN KEY (plan_id) REFERENCES staking_plans(id),
-  CONSTRAINT fk_positions_user FOREIGN KEY (user_id) REFERENCES users(id)
+  INDEX idx_positions_plan (plan_id),
+  INDEX idx_positions_user (user_id),
+  CONSTRAINT fk_positions_plan FOREIGN KEY (plan_id) REFERENCES staking_plans(id) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT fk_positions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS staking_accruals (
