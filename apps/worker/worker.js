@@ -161,6 +161,7 @@ async function main() {
       console.error('address refresh failed', e);
     }
   }, ADDR_REFRESH_MINUTES * 60 * 1000);
+  let backfillCursor = Math.max((cursor.last_block || 0) - BACKFILL_BLOCKS, 0);
 
   const processBlockNumber = async (num) => {
     try {
@@ -171,20 +172,33 @@ async function main() {
     }
   };
 
+  const scheduleBackfill = () => {
+    if (backfillCursor <= 0) return;
+    setTimeout(() => {
+      processBlockNumber(backfillCursor).catch((e) => console.error('block error', e));
+    }, 0);
+    backfillCursor--;
+  };
+
   const latest = await provider.getBlockNumber();
   const start = Math.max((cursor.last_block || 0) + 1 - BACKFILL_BLOCKS, 0);
   console.log(`starting block scan from ${start} to ${latest}`);
   for (let b = start; b <= latest; b++) {
     await processBlockNumber(b);
+    scheduleBackfill();
   }
   let last = latest;
   if (wsProvider) {
-    wsProvider.on('block', processBlockNumber);
+    wsProvider.on('block', async (b) => {
+      await processBlockNumber(b);
+      scheduleBackfill();
+    });
   } else {
     setInterval(async () => {
       const latest2 = await provider.getBlockNumber();
       for (let b = last + 1; b <= latest2; b++) {
         await processBlockNumber(b);
+        scheduleBackfill();
       }
       last = latest2;
     }, SCAN_INTERVAL_MS);
