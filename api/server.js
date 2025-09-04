@@ -57,18 +57,32 @@ const pool = mysql.createPool(
     const conn = await pool.getConnection();
     try {
       for (const sql of statements) {
-        if (/DROP COLUMN IF EXISTS/i.test(sql)) {
+        if (/DROP COLUMN IF EXISTS/i.test(sql) || /DROP INDEX IF EXISTS/i.test(sql)) {
           const table = sql.match(/ALTER TABLE\s+([`\w]+)/i)[1].replace(/`/g, '');
-          const dropCols = [...sql.matchAll(/DROP COLUMN IF EXISTS\s+([`\w]+)/gi)].map((m) => m[1].replace(/`/g, ''));
           try {
             const [tbl] = await conn.query('SHOW TABLES LIKE ?', [table]);
             if (!tbl.length) {
               console.warn(`table ${table} missing, skip drop`);
             } else {
-              for (const column of dropCols) {
-                const [cols] = await conn.query(`SHOW COLUMNS FROM ${table} LIKE ?`, [column]);
-                if (cols.length) await conn.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
-                else console.warn(`${table}.${column} missing, skip drop`);
+              if (/DROP COLUMN IF EXISTS/i.test(sql)) {
+                const dropCols = [...sql.matchAll(/DROP COLUMN IF EXISTS\s+([`\w]+)/gi)].map((m) =>
+                  m[1].replace(/`/g, '')
+                );
+                for (const column of dropCols) {
+                  const [cols] = await conn.query(`SHOW COLUMNS FROM ${table} LIKE ?`, [column]);
+                  if (cols.length) await conn.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+                  else console.warn(`${table}.${column} missing, skip drop`);
+                }
+              }
+              if (/DROP INDEX IF EXISTS/i.test(sql)) {
+                const dropIdx = [...sql.matchAll(/DROP INDEX IF EXISTS\s+([`\w]+)/gi)].map((m) =>
+                  m[1].replace(/`/g, '')
+                );
+                for (const index of dropIdx) {
+                  const [idxs] = await conn.query(`SHOW INDEX FROM ${table} WHERE Key_name = ?`, [index]);
+                  if (idxs.length) await conn.query(`ALTER TABLE ${table} DROP INDEX ${index}`);
+                  else console.warn(`${table}.${index} index missing, skip drop`);
+                }
               }
             }
           } catch (e) {
@@ -77,6 +91,7 @@ const pool = mysql.createPool(
 
           const cleaned = sql
             .replace(/DROP COLUMN IF EXISTS\s+[`\w]+(?:,)?/gi, '')
+            .replace(/DROP INDEX IF EXISTS\s+[`\w]+(?:,)?/gi, '')
             .replace(/,\s*;/g, ';')
             .trim();
           if (!/^ALTER TABLE\s+[`\w]+\s*;?$/i.test(cleaned)) {
