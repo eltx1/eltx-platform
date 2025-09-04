@@ -13,9 +13,10 @@ export default function PositionsPage() {
   useEffect(() => {
     if (user === null) router.replace('/login');
     if (user) {
-      apiFetch('/staking/positions').then((res) => {
+      (async () => {
+        const res = await apiFetch('/staking/positions');
         if (res.data) setPositions(res.data.positions);
-      });
+      })();
     }
   }, [user, router]);
 
