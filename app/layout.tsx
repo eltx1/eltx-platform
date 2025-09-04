@@ -1,5 +1,4 @@
 import './globals.css';
-import Header from './(site)/components/Header';
 import { LangProvider } from './lib/i18n';
 import { ToastProvider } from './lib/toast';
 import { AuthProvider } from './lib/auth';
@@ -16,7 +15,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <LangProvider>
           <AuthProvider>
             <ToastProvider>
-              <Header />
               {children}
             </ToastProvider>
           </AuthProvider>
