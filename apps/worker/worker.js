@@ -12,7 +12,17 @@ const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
 
 async function initDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
-  return mysql.createPool(process.env.DATABASE_URL);
+  const pool = mysql.createPool(process.env.DATABASE_URL);
+  try {
+    const conn = await pool.getConnection();
+    await conn.ping();
+    conn.release();
+    console.log('connected to database');
+  } catch (e) {
+    console.error('database connection failed', e);
+    throw e;
+  }
+  return pool;
 }
 
 async function loadActiveAddresses(pool) {
@@ -47,6 +57,7 @@ async function handleBlock(pool, addrMap, block) {
         'INSERT INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\') ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei)',
         [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, tx.value.toString()]
       );
+      console.log(`found deposit ${tx.hash} for ${to} amount ${tx.value.toString()}`);
     }
   }
 
@@ -125,13 +136,27 @@ async function main() {
   const pool = await initDb();
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const wsProvider = RPC_WS ? new ethers.WebSocketProvider(RPC_WS, CHAIN_ID) : null;
+
+  try {
+    const latest = await provider.getBlockNumber();
+    console.log(`connected to RPC ${RPC_HTTP} (chain ${CHAIN_ID}), latest block ${latest}`);
+    if (wsProvider) {
+      await wsProvider.getBlockNumber();
+      console.log(`connected to RPC WS ${RPC_WS}`);
+    }
+  } catch (e) {
+    console.error('RPC connection failed', e);
+    throw e;
+  }
+
   const cursor = await ensureCursor(pool, provider);
   scheduleStakingAccrual(pool);
   let addrMap = await loadActiveAddresses(pool);
+  console.log('monitoring addresses', Array.from(addrMap.keys()));
   setInterval(async () => {
     try {
       addrMap = await loadActiveAddresses(pool);
-      console.log('refreshed address list');
+      console.log('refreshed address list', Array.from(addrMap.keys()));
     } catch (e) {
       console.error('address refresh failed', e);
     }
@@ -147,7 +172,7 @@ async function main() {
   };
 
   const latest = await provider.getBlockNumber();
-  const start = Math.max((cursor.last_block || 0) - BACKFILL_BLOCKS, latest - BACKFILL_BLOCKS);
+  const start = Math.max((cursor.last_block || 0) + 1 - BACKFILL_BLOCKS, 0);
   for (let b = start; b <= latest; b++) {
     await processBlockNumber(b);
   }
