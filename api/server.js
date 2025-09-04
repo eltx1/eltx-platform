@@ -9,7 +9,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
-const { provisionUserAddress } = require('./src/services/wallet');
+const { ethers } = require('ethers');
+const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 require('dotenv').config();
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
@@ -19,7 +20,7 @@ require('dotenv').config();
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : [];
+const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://eltx.online'];
 const corsOptions = {
   origin: allowedOrigins,
   credentials: true,
@@ -56,6 +57,23 @@ const pool = mysql.createPool(
     const conn = await pool.getConnection();
     try {
       for (const sql of statements) {
+        if (/DROP COLUMN IF EXISTS/i.test(sql)) {
+          const table = sql.match(/ALTER TABLE\s+([`\w]+)/i)[1].replace(/`/g, '');
+          const column = sql.match(/DROP COLUMN IF EXISTS\s+([`\w]+)/i)[1].replace(/`/g, '');
+          try {
+            const [tbl] = await conn.query('SHOW TABLES LIKE ?', [table]);
+            if (!tbl.length) {
+              console.warn(`table ${table} missing, skip drop`);
+            } else {
+              const [cols] = await conn.query(`SHOW COLUMNS FROM ${table} LIKE ?`, [column]);
+              if (cols.length) await conn.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+              else console.warn(`${table}.${column} missing, skip drop`);
+            }
+          } catch (e) {
+            console.warn('schema adjust failed', e);
+          }
+          continue;
+        }
         await conn.query(sql);
       }
     } finally {
@@ -75,7 +93,7 @@ const sessionCookie = {
   httpOnly: true,
   sameSite: 'none',
   secure: true,
-  domain: process.env.SESSION_COOKIE_DOMAIN,
+  domain: process.env.SESSION_COOKIE_DOMAIN || '.eltx.online',
   path: '/',
   maxAge: 1000 * 60 * 60,
 };
@@ -233,6 +251,55 @@ app.get('/wallet/me', walletLimiter, async (req, res, next) => {
     });
     const deposits = z.array(depositSchema).parse(deps);
     res.json({ ok: true, wallet, deposits });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/wallet/address', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const wallet = await provisionUserAddress(pool, userId, CHAIN_ID);
+    res.json({ ok: true, wallet });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/wallet/balance', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const balance_wei = await getUserBalance(pool, userId);
+    res.json({ ok: true, balance_wei, balance: ethers.formatEther(balance_wei) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      'SELECT tx_hash, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
+      [userId, CHAIN_ID]
+    );
+    res.json({ ok: true, transactions: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/wallet/refresh', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const wallet = await provisionUserAddress(pool, userId, CHAIN_ID);
+    const provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL || process.env.RPC_HTTP, CHAIN_ID);
+    const bal = await provider.getBalance(wallet.address);
+    await pool.query(
+      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=VALUES(balance_wei)",
+      [userId, bal.toString()]
+    );
+    res.json({ ok: true, balance_wei: bal.toString(), balance: ethers.formatEther(bal) });
   } catch (err) {
     next(err);
   }
