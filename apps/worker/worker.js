@@ -17,7 +17,7 @@ async function initDb() {
     const conn = await pool.getConnection();
     await conn.ping();
     conn.release();
-    console.log('connected to database');
+    console.log('database connection established');
   } catch (e) {
     console.error('database connection failed', e);
     throw e;
@@ -57,7 +57,7 @@ async function handleBlock(pool, addrMap, block) {
         'INSERT INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\') ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei)',
         [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, tx.value.toString()]
       );
-      console.log(`found deposit ${tx.hash} for ${to} amount ${tx.value.toString()}`);
+      console.log(`stored deposit tx ${tx.hash} for user ${userId} address ${to} amount ${tx.value.toString()}`);
     }
   }
 
@@ -139,10 +139,10 @@ async function main() {
 
   try {
     const latest = await provider.getBlockNumber();
-    console.log(`connected to RPC ${RPC_HTTP} (chain ${CHAIN_ID}), latest block ${latest}`);
+    console.log(`RPC connection established to ${RPC_HTTP} (chain ${CHAIN_ID}), latest block ${latest}`);
     if (wsProvider) {
       await wsProvider.getBlockNumber();
-      console.log(`connected to RPC WS ${RPC_WS}`);
+      console.log(`RPC WS connection established to ${RPC_WS}`);
     }
   } catch (e) {
     console.error('RPC connection failed', e);
@@ -181,7 +181,9 @@ async function main() {
   };
 
   const latest = await provider.getBlockNumber();
-  for (let b = (cursor.last_block || 0) + 1; b <= latest; b++) {
+  const start = Math.max((cursor.last_block || 0) + 1 - BACKFILL_BLOCKS, 0);
+  console.log(`starting block scan from ${start} to ${latest}`);
+  for (let b = start; b <= latest; b++) {
     await processBlockNumber(b);
     scheduleBackfill();
   }
