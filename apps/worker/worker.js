@@ -71,7 +71,7 @@ async function handleBlock(pool, addrMap, block) {
       );
       await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
     } catch (e) {
-      console.error('credit failed', e);
+      console.error('credit failed', e.code, e.table, e);
     }
   }
 
