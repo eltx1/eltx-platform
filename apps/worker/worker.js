@@ -73,11 +73,54 @@ async function handleBlock(pool, addrMap, block) {
   console.log(`processed block ${block.number}`);
 }
 
+async function runStakingAccrual(pool) {
+  const today = new Date().toISOString().slice(0, 10);
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [positions] = await conn.query(
+      'SELECT id, daily_reward FROM staking_positions WHERE status="active" AND start_date <= ? AND end_date >= ?',
+      [today, today]
+    );
+    for (const p of positions) {
+      try {
+        await conn.query(
+          'INSERT INTO staking_accruals (position_id, accrual_date, amount) VALUES (?,?,?)',
+          [p.id, today, p.daily_reward]
+        );
+        await conn.query('UPDATE staking_positions SET accrued_total=accrued_total+? WHERE id=?', [p.daily_reward, p.id]);
+      } catch (err) {
+        if (err.code !== 'ER_DUP_ENTRY') throw err;
+      }
+    }
+    await conn.query('UPDATE staking_positions SET status="matured" WHERE status="active" AND end_date < ?', [today]);
+    await conn.commit();
+    console.log('staking accrual done for', today, positions.length, 'positions');
+  } catch (e) {
+    if (conn) await conn.rollback();
+    console.error('staking accrual failed', e);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+function scheduleStakingAccrual(pool) {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 5, 0));
+  const ms = next.getTime() - now.getTime();
+  setTimeout(() => {
+    runStakingAccrual(pool);
+    setInterval(() => runStakingAccrual(pool), 24 * 60 * 60 * 1000);
+  }, ms);
+}
+
 async function main() {
   const pool = await initDb();
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const wsProvider = RPC_WS ? new ethers.WebSocketProvider(RPC_WS, CHAIN_ID) : null;
   await ensureCursor(pool, provider);
+  scheduleStakingAccrual(pool);
   let addrMap = await loadActiveAddresses(pool);
   setInterval(async () => {
     try {

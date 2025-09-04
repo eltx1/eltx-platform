@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { dict, useLang } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
-import { Wallet, ReceiptText, HelpCircle, Settings, Handshake } from 'lucide-react';
+import { Wallet, ReceiptText, HelpCircle, Settings, Handshake, PiggyBank } from 'lucide-react';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -62,6 +62,15 @@ export default function DashboardPage() {
       route: '/partners',
       status: 'soon',
       color: 'from-gray-500 to-gray-600',
+    },
+    {
+      id: 'earn',
+      title: 'Earn',
+      subtitle: 'Stake ELTX to earn',
+      icon: PiggyBank,
+      route: '/staking',
+      status: 'active',
+      color: 'from-pink-500 to-rose-500',
     },
   ];
 

@@ -99,6 +99,17 @@ const LoginSchema = z
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 
+async function requireUser(req) {
+  const token = req.cookies[COOKIE_NAME];
+  if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
+  const [rows] = await pool.query(
+    'SELECT users.id FROM sessions JOIN users ON sessions.user_id = users.id WHERE sessions.id = ? AND sessions.expires_at > NOW()',
+    [token]
+  );
+  if (!rows.length) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
+  return rows[0].id;
+}
+
 app.post('/auth/signup', async (req, res, next) => {
   let conn;
   try {
@@ -222,6 +233,75 @@ app.get('/wallet/me', walletLimiter, async (req, res, next) => {
     });
     const deposits = z.array(depositSchema).parse(deps);
     res.json({ ok: true, wallet, deposits });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/staking/plans', async (req, res, next) => {
+  try {
+    const [rows] = await pool.query('SELECT id,name,duration_days,apr_bps FROM staking_plans WHERE is_active=1');
+    res.json({ ok: true, plans: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const CreatePosSchema = z.object({ planId: z.coerce.number().int(), amount: z.string() });
+
+app.post('/staking/positions', async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const { planId, amount } = CreatePosSchema.parse(req.body);
+    const amt = parseFloat(amount);
+    if (amt <= 0) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    conn = await pool.getConnection();
+    const [[plan]] = await conn.query('SELECT id,duration_days,apr_bps FROM staking_plans WHERE id=? AND is_active=1', [planId]);
+    if (!plan) return next({ status: 400, code: 'INVALID_PLAN', message: 'Plan not found' });
+    const daily = +(amt * (plan.apr_bps / 10000 / 365)).toFixed(8);
+    const [result] = await conn.query(
+      'INSERT INTO staking_positions (user_id,plan_id,amount,apr_bps_snapshot,start_date,end_date,daily_reward) VALUES (?, ?, ?, ?, CURDATE(), DATE_ADD(CURDATE(), INTERVAL ? DAY), ?)',
+      [userId, plan.id, amt, plan.apr_bps, plan.duration_days, daily]
+    );
+    res.json({ ok: true, id: result.insertId });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input' });
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/staking/positions', async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      'SELECT sp.id, sp.amount, sp.start_date, sp.end_date, sp.daily_reward, sp.accrued_total, sp.status, pl.name FROM staking_positions sp JOIN staking_plans pl ON sp.plan_id=pl.id WHERE sp.user_id=? ORDER BY sp.created_at DESC',
+      [userId]
+    );
+    res.json({ ok: true, positions: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/staking/positions/:id/close', async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const id = Number(req.params.id);
+    const [[pos]] = await pool.query(
+      'SELECT id, amount, accrued_total, end_date, status FROM staking_positions WHERE id=? AND user_id=?',
+      [id, userId]
+    );
+    if (!pos) return next({ status: 404, code: 'NOT_FOUND', message: 'Position not found' });
+    if (pos.status !== 'active') return next({ status: 400, code: 'INVALID_STATE', message: 'Already closed' });
+    const today = new Date().toISOString().slice(0, 10);
+    if (today < pos.end_date.toISOString().slice(0, 10))
+      return next({ status: 400, code: 'TOO_SOON', message: 'Cannot close before maturity' });
+    await pool.query('UPDATE staking_positions SET status="matured" WHERE id=?', [id]);
+    res.json({ ok: true, principal: pos.amount, reward: pos.accrued_total });
   } catch (err) {
     next(err);
   }
