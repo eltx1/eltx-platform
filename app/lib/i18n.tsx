@@ -74,6 +74,21 @@ export const dict = {
       logout: 'Logout',
       language: 'Language',
     },
+    audience: {
+      title: 'Who we serve',
+      governments: {
+        title: 'Governments',
+        desc: 'Secure infrastructure for public services.',
+      },
+      companies: {
+        title: 'Companies',
+        desc: 'Tools for enterprises and startups.',
+      },
+      individuals: {
+        title: 'Individuals',
+        desc: 'Simple payments for everyone.',
+      },
+    },
     common: {
       soon: 'Soon',
       genericError: 'Something went wrong. Please try again.',
@@ -154,6 +169,21 @@ export const dict = {
       settings: 'الإعدادات',
       logout: 'تسجيل الخروج',
       language: 'اللغة',
+    },
+    audience: {
+      title: 'الفئات المستهدفة',
+      governments: {
+        title: 'الحكومات',
+        desc: 'بنية آمنة للخدمات العامة.',
+      },
+      companies: {
+        title: 'الشركات',
+        desc: 'أدوات للمؤسسات والشركات الناشئة.',
+      },
+      individuals: {
+        title: 'الأفراد',
+        desc: 'مدفوعات سهلة للجميع.',
+      },
     },
     common: {
       soon: 'قريبًا',

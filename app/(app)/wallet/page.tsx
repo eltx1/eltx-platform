@@ -34,15 +34,15 @@ export default function WalletPage() {
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch('/wallet/me')
-      .then((d) => {
-        setWallet(d.wallet);
-        setDeposits(d.deposits || []);
-      })
-      .catch((err) => {
-        if (err.status === 401) router.replace('/login');
+    apiFetch('/wallet/me').then((res) => {
+      if (res.error) {
+        if (res.error.status === 401) router.replace('/login');
         else setError(t.common.genericError);
-      });
+      } else if (res.data) {
+        setWallet(res.data.wallet);
+        setDeposits(res.data.deposits || []);
+      }
+    });
   }, [router, t.common.genericError]);
 
   if (error) return <div className="p-4">{error}</div>;
