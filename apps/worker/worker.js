@@ -6,7 +6,7 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const RPC_HTTP = process.env.RPC_HTTP;
 const RPC_WS = process.env.RPC_WS;
-const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 15);
+const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
 
 async function initDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
@@ -58,15 +58,15 @@ async function handleBlock(pool, addrMap, block) {
   );
 
   const [confirmed] = await pool.query(
-    'SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status=\'confirmed\' AND credited=0',
+    "SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed'",
     [CHAIN_ID]
   );
   for (const dep of confirmed) {
     await pool.query(
-      'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,\'native\',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)',
+      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
       [dep.user_id, dep.amount_wei]
     );
-    await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
+    await pool.query("UPDATE wallet_deposits SET status='swept' WHERE id=?", [dep.id]);
   }
 
   await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain_id=?', [block.number, block.hash, CHAIN_ID]);

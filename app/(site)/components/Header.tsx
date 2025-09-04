@@ -45,15 +45,6 @@ export default function Header() {
     return () => window.removeEventListener('keydown', onKey);
   }, [open]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open]);
-
   const guestLinks = [
     { href: '/', label: t.nav.home },
     { href: '/faq', label: t.nav.faq },
