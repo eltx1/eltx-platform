@@ -36,3 +36,7 @@ a{color:inherit}
 .donut{--size:230px; width:var(--size);height:var(--size);border-radius:50%;margin:0 auto;background:var(--donut);position:relative}
 .donut .hole{position:relative;width:calc(var(--size) - 44px);height:calc(var(--size) - 44px);margin:22px auto;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;flex-direction:column}
 .bottom-nav{position:sticky;bottom:0;display:flex;justify-content:space-around;gap:6px;padding:10px;border-top:1px solid var(--line);background:#ffffffcc;backdrop-filter:blur(8px)}
+.animate-blob{animation:blob 20s infinite;}
+.animation-delay-2000{animation-delay:2s;}
+.animation-delay-4000{animation-delay:4s;}
+@keyframes blob{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(30px,-50px) scale(1.1)}66%{transform:translate(-20px,20px) scale(.9)}}

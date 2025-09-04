@@ -11,12 +11,12 @@ export default function WalletPage() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
 
   useEffect(() => {
-    apiFetch('/wallet/me')
-      .then((d) => {
-        setWallet(d.wallet);
-        setDeposits(d.deposits || []);
-      })
-      .catch(() => {});
+    apiFetch('/wallet/me').then((res) => {
+      if (res.data) {
+        setWallet(res.data.wallet);
+        setDeposits(res.data.deposits || []);
+      }
+    });
   }, []);
 
   if (!wallet) return <div className="p-4">Loading...</div>;

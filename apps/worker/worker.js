@@ -6,7 +6,7 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const RPC_HTTP = process.env.RPC_HTTP;
 const RPC_WS = process.env.RPC_WS;
-const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 15);
+const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
 
 async function initDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
@@ -58,19 +58,61 @@ async function handleBlock(pool, addrMap, block) {
   );
 
   const [confirmed] = await pool.query(
-    'SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status=\'confirmed\' AND credited=0',
+    "SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed'",
     [CHAIN_ID]
   );
   for (const dep of confirmed) {
     await pool.query(
-      'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,\'native\',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)',
+      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
       [dep.user_id, dep.amount_wei]
     );
-    await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
+    await pool.query("UPDATE wallet_deposits SET status='swept' WHERE id=?", [dep.id]);
   }
 
   await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain_id=?', [block.number, block.hash, CHAIN_ID]);
   console.log(`processed block ${block.number}`);
+}
+
+async function runStakingAccrual(pool) {
+  const today = new Date().toISOString().slice(0, 10);
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [positions] = await conn.query(
+      'SELECT id, daily_reward FROM staking_positions WHERE status="active" AND start_date <= ? AND end_date >= ?',
+      [today, today]
+    );
+    for (const p of positions) {
+      try {
+        await conn.query(
+          'INSERT INTO staking_accruals (position_id, accrual_date, amount) VALUES (?,?,?)',
+          [p.id, today, p.daily_reward]
+        );
+        await conn.query('UPDATE staking_positions SET accrued_total=accrued_total+? WHERE id=?', [p.daily_reward, p.id]);
+      } catch (err) {
+        if (err.code !== 'ER_DUP_ENTRY') throw err;
+      }
+    }
+    await conn.query('UPDATE staking_positions SET status="matured" WHERE status="active" AND end_date < ?', [today]);
+    await conn.commit();
+    console.log('staking accrual done for', today, positions.length, 'positions');
+  } catch (e) {
+    if (conn) await conn.rollback();
+    console.error('staking accrual failed', e);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+function scheduleStakingAccrual(pool) {
+  const now = new Date();
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 5, 0));
+  const ms = next.getTime() - now.getTime();
+  setTimeout(() => {
+    runStakingAccrual(pool);
+    setInterval(() => runStakingAccrual(pool), 24 * 60 * 60 * 1000);
+  }, ms);
 }
 
 async function main() {
@@ -78,6 +120,7 @@ async function main() {
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const wsProvider = RPC_WS ? new ethers.WebSocketProvider(RPC_WS, CHAIN_ID) : null;
   await ensureCursor(pool, provider);
+  scheduleStakingAccrual(pool);
   let addrMap = await loadActiveAddresses(pool);
   setInterval(async () => {
     try {

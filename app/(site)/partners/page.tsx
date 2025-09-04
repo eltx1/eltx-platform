@@ -1,6 +1,6 @@
 'use client';
 
-import { dict, useLang } from '../lib/i18n';
+import { dict, useLang } from '../../lib/i18n';
 
 export default function PartnersPage() {
   const { lang } = useLang();
