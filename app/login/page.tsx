@@ -11,6 +11,7 @@ export default function LoginPage() {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
@@ -28,6 +29,7 @@ export default function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     setLoading(true);
     const body = identifier.includes('@') ? { email: identifier, password } : { username: identifier, password };
     try {
@@ -37,11 +39,11 @@ export default function LoginPage() {
       router.push('/dashboard');
     } catch (err: any) {
       if (err?.error?.code === 'INVALID_CREDENTIALS') {
-        toast(t.auth.login.invalid);
+        setError(t.auth.login.invalid);
       } else if (err?.error?.details?.missing) {
-        toast(err.error.details.missing.join(', '));
+        setError(err.error.details.missing.join(', '));
       } else {
-        toast(t.auth.login.genericError);
+        setError(t.auth.login.genericError);
       }
     } finally {
       setLoading(false);
@@ -55,6 +57,11 @@ export default function LoginPage() {
         className="bg-white/5 border border-white/10 rounded-lg p-6 w-full max-w-sm flex flex-col gap-4"
       >
         <h1 className="text-2xl font-bold text-center mb-2">{t.auth.login.title}</h1>
+        {error && (
+          <div role="alert" className="text-red-500 text-sm text-center">
+            {error}
+          </div>
+        )}
         <input
           className="p-2 rounded bg-black/20 border border-white/20"
           placeholder="Email or Username"

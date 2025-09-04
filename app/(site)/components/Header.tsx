@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { dict, useLang } from '../../lib/i18n';
@@ -13,6 +13,15 @@ export default function Header() {
   const { lang, setLang } = useLang();
   const t = dict[lang];
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   const guestLinks = [
     { href: '/', label: t.nav.home },
@@ -75,9 +84,16 @@ export default function Header() {
         {open ? <X /> : <Menu />}
       </button>
       {open && (
-        <nav className="absolute top-full left-0 w-full bg-black p-4 flex flex-col gap-4 sm:hidden">
-          <NavLinks />
-        </nav>
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <nav className="absolute top-full left-0 w-full bg-black p-4 flex flex-col gap-4 sm:hidden z-50">
+            <NavLinks />
+          </nav>
+        </>
       )}
     </header>
   );
