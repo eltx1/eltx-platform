@@ -1,11 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
-import { useAuth } from '../../lib/auth';
 import { ethers } from 'ethers';
 import QRCode from 'qrcode.react';
 
@@ -20,31 +18,36 @@ type Deposit = {
 type WalletInfo = { chain_id: number; address: string };
 
 export default function WalletPage() {
-  const { user } = useAuth();
-  const router = useRouter();
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
+  const [balance, setBalance] = useState('0');
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [error, setError] = useState('');
+  const [unauth, setUnauth] = useState(false);
 
-  useEffect(() => {
-    if (user === null) router.replace('/login');
-  }, [user, router]);
+  const load = async () => {
+    const addrRes = await apiFetch< { wallet: WalletInfo } >('/wallet/address');
+    if (addrRes.error) {
+      if (addrRes.error.status === 401) { setUnauth(true); return; }
+      setError(t.common.genericError); return;
+    }
+    setWallet(addrRes.data!.wallet);
+    const balRes = await apiFetch<{ balance_wei: string }>('/wallet/balance');
+    if (balRes.data) setBalance(balRes.data.balance_wei);
+    const txRes = await apiFetch<{ transactions: Deposit[] }>('/wallet/transactions');
+    if (txRes.data) setDeposits(txRes.data.transactions);
+  };
 
-  useEffect(() => {
-    apiFetch('/wallet/me').then((res) => {
-      if (res.error) {
-        if (res.error.status === 401) router.replace('/login');
-        else setError(t.common.genericError);
-      } else if (res.data) {
-        setWallet(res.data.wallet);
-        setDeposits(res.data.deposits || []);
-      }
-    });
-  }, [router, t.common.genericError]);
+  useEffect(() => { load(); }, []);
 
+  const handleRefresh = async () => {
+    await apiFetch('/wallet/refresh', { method: 'POST' });
+    load();
+  };
+
+  if (unauth) return <div className="p-4">Please sign in</div>;
   if (error) return <div className="p-4">{error}</div>;
   if (!wallet) return <div className="p-4">Loading...</div>;
 
@@ -70,6 +73,13 @@ export default function WalletPage() {
         >
           {t.wallet.copy}
         </button>
+        <button
+          className="px-3 py-1 bg-gray-100 rounded text-black text-sm hover:bg-gray-200 ml-2"
+          onClick={handleRefresh}
+        >
+          Refresh
+        </button>
+        <div className="text-sm">{Number(ethers.formatEther(balance)).toFixed(4)} BNB</div>
         <div className="p-4 flex justify-center">
           <QRCode value={wallet.address} size={160} />
         </div>

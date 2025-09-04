@@ -4,8 +4,10 @@ require('dotenv').config();
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
-const RPC_HTTP = process.env.RPC_HTTP;
+const RPC_HTTP = process.env.BSC_RPC_URL || process.env.RPC_HTTP;
 const RPC_WS = process.env.RPC_WS;
+const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS || 15000);
+const BACKFILL_BLOCKS = Number(process.env.BACKFILL_BLOCKS || 5000);
 const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
 
 async function initDb() {
@@ -42,7 +44,7 @@ async function handleBlock(pool, addrMap, block) {
     if (to && addrMap.has(to)) {
       const userId = addrMap.get(to);
       await pool.query(
-        'INSERT IGNORE INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\')',
+        'INSERT INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\') ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei)',
         [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, tx.value.toString()]
       );
     }
@@ -58,15 +60,19 @@ async function handleBlock(pool, addrMap, block) {
   );
 
   const [confirmed] = await pool.query(
-    "SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed'",
+    "SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0",
     [CHAIN_ID]
   );
   for (const dep of confirmed) {
-    await pool.query(
-      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
-      [dep.user_id, dep.amount_wei]
-    );
-    await pool.query("UPDATE wallet_deposits SET status='swept' WHERE id=?", [dep.id]);
+    try {
+      await pool.query(
+        "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
+        [dep.user_id, dep.amount_wei]
+      );
+      await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
+    } catch (e) {
+      console.error('credit failed', e);
+    }
   }
 
   await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain_id=?', [block.number, block.hash, CHAIN_ID]);
@@ -119,7 +125,7 @@ async function main() {
   const pool = await initDb();
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const wsProvider = RPC_WS ? new ethers.WebSocketProvider(RPC_WS, CHAIN_ID) : null;
-  await ensureCursor(pool, provider);
+  const cursor = await ensureCursor(pool, provider);
   scheduleStakingAccrual(pool);
   let addrMap = await loadActiveAddresses(pool);
   setInterval(async () => {
@@ -140,17 +146,22 @@ async function main() {
     }
   };
 
+  const latest = await provider.getBlockNumber();
+  const start = Math.max((cursor.last_block || 0) - BACKFILL_BLOCKS, latest - BACKFILL_BLOCKS);
+  for (let b = start; b <= latest; b++) {
+    await processBlockNumber(b);
+  }
+  let last = latest;
   if (wsProvider) {
     wsProvider.on('block', processBlockNumber);
   } else {
-    let last = await provider.getBlockNumber();
     setInterval(async () => {
-      const latest = await provider.getBlockNumber();
-      for (let b = last + 1; b <= latest; b++) {
+      const latest2 = await provider.getBlockNumber();
+      for (let b = last + 1; b <= latest2; b++) {
         await processBlockNumber(b);
       }
-      last = latest;
-    }, 13000);
+      last = latest2;
+    }, SCAN_INTERVAL_MS);
   }
 }
 
