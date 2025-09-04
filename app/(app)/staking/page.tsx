@@ -12,12 +12,17 @@ export default function StakingPlansPage() {
   const [plans, setPlans] = useState<any[]>([]);
 
   useEffect(() => {
-    if (user === null) router.replace('/login');
-    if (user) {
-      apiFetch('/staking/plans').then((res) => {
-        if (res.data) setPlans(res.data.plans);
-      });
+    if (user === null) {
+      router.replace('/login');
+      return;
     }
+
+    const fetchPlans = async () => {
+      const res = await apiFetch('/staking/plans');
+      if (res.data) setPlans(res.data.plans);
+    };
+
+    if (user) fetchPlans();
   }, [user, router]);
 
   return (
