@@ -5,6 +5,8 @@ require('dotenv').config();
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const RPC_HTTP = process.env.BSC_RPC_URL || process.env.RPC_HTTP;
+if (!RPC_HTTP) throw new Error('BSC_RPC_URL or RPC_HTTP is required');
+// optional websocket RPC for faster block updates
 const RPC_WS = process.env.RPC_WS;
 const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS || 15000);
 const BACKFILL_BLOCKS = Number(process.env.BACKFILL_BLOCKS || 5000);
@@ -34,7 +36,13 @@ async function loadActiveAddresses(pool) {
 
 async function ensureCursor(pool, provider) {
   const latest = await provider.getBlockNumber();
+  // allow forcing a specific starting block via START_BLOCK env
+  const startEnv = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : null;
   const [rows] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain_id=?', [CHAIN_ID]);
+  if (startEnv !== null) {
+    await pool.query('REPLACE INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, startEnv]);
+    return { last_block: startEnv, last_hash: null };
+  }
   if (!rows.length) {
     const start = latest - 3;
     await pool.query('INSERT INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, start]);
@@ -152,10 +160,12 @@ async function main() {
   const cursor = await ensureCursor(pool, provider);
   scheduleStakingAccrual(pool);
   let addrMap = await loadActiveAddresses(pool);
+  if (addrMap.size === 0) console.warn('no active addresses loaded');
   console.log('monitoring addresses', Array.from(addrMap.keys()));
   setInterval(async () => {
     try {
       addrMap = await loadActiveAddresses(pool);
+      if (addrMap.size === 0) console.warn('no active addresses loaded');
       console.log('refreshed address list', Array.from(addrMap.keys()));
     } catch (e) {
       console.error('address refresh failed', e);
