@@ -56,9 +56,12 @@ CREATE TABLE IF NOT EXISTS wallet_addresses (
 ALTER TABLE wallet_addresses
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
   ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
-  ADD UNIQUE KEY IF NOT EXISTS uniq_user_chain (user_id, chain_id),
-  ADD UNIQUE KEY IF NOT EXISTS uniq_addr (address),
-  ADD INDEX IF NOT EXISTS idx_user (user_id),
+  DROP INDEX IF EXISTS uniq_user_chain,
+  DROP INDEX IF EXISTS uniq_addr,
+  DROP INDEX IF EXISTS idx_user,
+  ADD UNIQUE KEY uniq_user_chain (user_id, chain_id),
+  ADD UNIQUE KEY uniq_addr (address),
+  ADD INDEX idx_user (user_id),
   DROP COLUMN IF EXISTS chain,
   DROP COLUMN IF EXISTS status;
 
