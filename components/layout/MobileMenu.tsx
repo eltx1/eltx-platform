@@ -37,13 +37,13 @@ export default function MobileMenu({
     <>
       <div
         data-open={open}
-        className="fixed inset-0 bg-black/40 backdrop-blur-sm opacity-0 pointer-events-none data-[open=true]:opacity-100 data-[open=true]:pointer-events-auto transition-opacity duration-200 z-40"
+        className="fixed inset-0 bg-black/40 backdrop-blur-sm opacity-0 pointer-events-none data-[open=true]:opacity-100 data-[open=true]:pointer-events-auto transition-opacity duration-200 z-[60]"
         onClick={() => setOpen(false)}
       />
       <nav
         ref={panelRef}
         data-open={open}
-        className="fixed top-0 right-0 h-full w-80 max-w-[85%] bg-neutral-900 text-white translate-x-full data-[open=true]:translate-x-0 transition-transform duration-200 z-50 p-6 flex flex-col gap-4"
+        className="fixed top-0 right-0 h-full w-80 max-w-[85%] bg-neutral-900 text-white translate-x-full data-[open=true]:translate-x-0 transition-transform duration-200 z-[70] p-6 flex flex-col gap-4"
         role="dialog"
         aria-modal="true"
       >
