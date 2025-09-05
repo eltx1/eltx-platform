@@ -73,7 +73,17 @@ async function handleBlock(pool, provider, addrMap, block) {
   // token transfers (ERC20/BEP20) to monitored addresses
   const addrTopics = Array.from(addrMap.keys()).map((a) => ethers.zeroPadValue(a, 32));
   if (addrTopics.length) {
-    const logs = await provider.getLogs({ fromBlock: block.number, toBlock: block.number, topics: [TRANSFER_TOPIC, null, addrTopics] });
+    const logs = [];
+    const chunkSize = 50;
+    for (let i = 0; i < addrTopics.length; i += chunkSize) {
+      const chunk = addrTopics.slice(i, i + chunkSize);
+      const chunkLogs = await provider.getLogs({
+        fromBlock: block.number,
+        toBlock: block.number,
+        topics: [TRANSFER_TOPIC, null, chunk],
+      });
+      logs.push(...chunkLogs);
+    }
     for (const log of logs) {
       const to = '0x' + log.topics[2].slice(26);
       const lower = to.toLowerCase();
