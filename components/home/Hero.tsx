@@ -14,11 +14,12 @@ export default function Hero() {
 
   return (
     <section className="relative overflow-hidden text-white py-24 text-center">
-      <div className="absolute inset-0 bg-gradient-to-br from-purple-600 to-cyan-500" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.1),transparent)]" />
-      <div className="absolute -top-20 -left-20 w-72 h-72 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
-      <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-cyan-600/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
-      <div className="absolute top-1/2 -left-24 w-72 h-72 bg-indigo-500/20 rounded-full blur-3xl animate-blob animation-delay-4000" />
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-700 via-fuchsia-600 to-cyan-500 animate-gradient-slow" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.15),transparent)]" />
+      <div className="absolute -top-24 -left-24 w-80 h-80 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
+      <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-cyan-600/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
+      <div className="absolute top-1/2 -left-32 w-80 h-80 bg-fuchsia-500/20 rounded-full blur-3xl animate-blob animation-delay-4000" />
+
       <div className="relative z-10 max-w-2xl mx-auto px-4 space-y-6">
         {!logoError ? (
           <Image
@@ -56,13 +57,13 @@ export default function Hero() {
         >
           <Link
             href={primaryHref}
-            className="px-6 py-2 rounded-full bg-white text-black font-semibold hover:opacity-90"
+            className="px-6 py-2 rounded-full bg-gradient-to-r from-purple-600 to-cyan-500 text-black font-semibold hover:opacity-90"
           >
             {primaryLabel}
           </Link>
           <Link
             href="/earn"
-            className="px-6 py-2 rounded-full border border-white hover:bg-white/10"
+            className="px-6 py-2 rounded-full border border-white/60 hover:bg-white/10"
           >
             Explore Earn
           </Link>

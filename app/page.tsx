@@ -4,7 +4,7 @@ import Features from '../components/home/Features';
 
 export default function Page(){
   return(
-    <main>
+    <main className="space-y-24">
       <Hero />
       <Industries />
       <Features />
