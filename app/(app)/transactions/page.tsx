@@ -5,11 +5,12 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
-import { ethers } from 'ethers';
-
 type Deposit = {
   tx_hash: string;
   amount_wei: string;
+  symbol: string;
+  decimals: number;
+  amount_formatted: string;
   confirmations: number;
   status: string;
   created_at: string;
@@ -28,11 +29,11 @@ export default function TransactionsPage() {
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch('/wallet/me').then(res => {
+    apiFetch('/wallet/transactions').then(res => {
       if (res.error) {
         if (res.error.status === 401) router.replace('/login');
       } else if (res.data) {
-        setDeposits(res.data.deposits || []);
+        setDeposits(res.data.transactions || []);
       }
     });
   }, [router]);
@@ -77,7 +78,9 @@ export default function TransactionsPage() {
             >
               {d.tx_hash}
             </a>
-            <div>{Number(ethers.formatEther(d.amount_wei)).toFixed(4)} BNB</div>
+            <div>
+              {Number(d.amount_formatted).toFixed(6)} {d.symbol}
+            </div>
             <div className="text-xs">{statusLabel(d.status)}</div>
           </div>
         ))}
