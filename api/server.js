@@ -367,7 +367,7 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
     if (!addrRows.length) return res.json({ ok: true, assets: [] });
     const userAddress = addrRows[0].address;
     const [bnbRow] = await pool.query(
-      "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address IS NULL AND status='confirmed' AND credited=1",
+      "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address IS NULL AND status IN ('confirmed','swept') AND credited=1",
       [userId, CHAIN_ID]
     );
     const bnbWei = normalizeWeiDecimal(bnbRow[0].sum);
