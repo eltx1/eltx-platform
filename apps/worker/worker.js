@@ -13,6 +13,21 @@ const BACKFILL_BLOCKS = Number(process.env.BACKFILL_BLOCKS || 5000);
 const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
 const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
 
+async function withRetry(fn, attempts = 3, delayMs = 1000) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (i < attempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function initDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
   const pool = mysql.createPool(process.env.DATABASE_URL);
@@ -78,7 +93,9 @@ async function handleBlock(pool, provider, addrMap, block) {
   // token transfers (ERC20/BEP20) to monitored addresses
   const addrTopics = Array.from(addrMap.keys()).map((a) => ethers.zeroPadValue(a, 32));
   if (addrTopics.length) {
-    const logs = await provider.getLogs({ fromBlock: block.number, toBlock: block.number, topics: [TRANSFER_TOPIC, null, addrTopics] });
+    const logs = await withRetry(() =>
+      provider.getLogs({ fromBlock: block.number, toBlock: block.number, topics: [TRANSFER_TOPIC, null, addrTopics] })
+    );
     for (const log of logs) {
       const to = '0x' + log.topics[2].slice(26);
       const lower = to.toLowerCase();
@@ -227,7 +244,7 @@ async function main() {
 
   const processBlockNumber = async (num) => {
     try {
-      const block = await provider.getBlock(num, true);
+      const block = await withRetry(() => provider.getBlock(num, true));
       if (block) await handleBlock(pool, provider, addrMap, block);
     } catch (e) {
       console.error('block error', e);
