@@ -85,6 +85,18 @@ async function loadAddresses(pool, hasChain) {
   return map;
 }
 
+// ---- table helpers ----
+const tableCache = {};
+async function tableExists(pool, name) {
+  if (tableCache[name] !== undefined) return tableCache[name];
+  const [rows] = await pool.query('SHOW TABLES LIKE ?', [name]);
+  tableCache[name] = rows.length > 0;
+  if (name === 'user_balances' && !tableCache[name]) {
+    console.log('[SKIP] user_balances not found — deposits-only mode');
+  }
+  return tableCache[name];
+}
+
 // ---- cursor helpers ----
 async function getStartCursor(pool, provider) {
   const tip = await provider.getBlockNumber();
@@ -126,6 +138,9 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
     await pool.query('UPDATE wallet_deposits SET status="orphaned" WHERE chain_id=? AND block_number=?', [CHAIN_ID, block.number]);
   }
 
+  const confirmEdge = Math.max(block.number - CONFIRMATIONS, 0);
+
+
   const txs = await getTxs(provider, block);
   for (const tx of txs) {
     if (!tx || !tx.to || tx.value === 0n) continue;
@@ -147,24 +162,28 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
   }
 
   await pool.query(
-    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain_id=? AND status IN (\'pending\',\'confirmed\')',
-    [block.number, CHAIN_ID]
+    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain_id=? AND status IN (\'pending\',\'confirmed\') AND block_number<=?',
+    [block.number, CHAIN_ID, block.number]
   );
   await pool.query(
-    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain_id=? AND status=\'pending\' AND confirmations>=?',
-    [CHAIN_ID, CONFIRMATIONS]
+    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain_id=? AND status=\'pending\' AND block_number<=?',
+    [CHAIN_ID, confirmEdge]
   );
 
   const [rows] = await pool.query(
-    "SELECT id,tx_hash,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0",
-    [CHAIN_ID]
+    "SELECT id,tx_hash,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0 AND block_number<=?",
+    [CHAIN_ID, confirmEdge]
   );
+  const hasBalances = await tableExists(pool, 'user_balances');
+
   for (const dep of rows) {
     try {
-      await pool.query(
-        "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
-        [dep.user_id, dep.amount_wei]
-      );
+      if (hasBalances) {
+        await pool.query(
+          "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
+          [dep.user_id, dep.amount_wei]
+        );
+      }
       await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
       console.log(`[CREDIT] tx=${dep.tx_hash} set credited=1`);
     } catch (e) {
