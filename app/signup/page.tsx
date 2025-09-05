@@ -50,23 +50,26 @@ export default function SignupPage() {
           </div>
         )}
         <input
-          className="p-2 rounded bg-black/20 border border-white/20"
+          className={`p-2 rounded bg-black/20 border ${error ? 'border-red-500' : 'border-white/20'}`}
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          aria-invalid={!!error}
         />
         <input
-          className="p-2 rounded bg-black/20 border border-white/20"
+          className={`p-2 rounded bg-black/20 border ${error ? 'border-red-500' : 'border-white/20'}`}
           placeholder="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
+          aria-invalid={!!error}
         />
         <input
-          className="p-2 rounded bg-black/20 border border-white/20"
+          className={`p-2 rounded bg-black/20 border ${error ? 'border-red-500' : 'border-white/20'}`}
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          aria-invalid={!!error}
         />
         <button className="btn btn-primary justify-center" type="submit" disabled={loading}>
           {loading ? `${t.auth.signup.title}...` : t.auth.signup.title}

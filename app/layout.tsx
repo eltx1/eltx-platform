@@ -2,6 +2,7 @@ import './globals.css';
 import { LangProvider } from './lib/i18n';
 import { ToastProvider } from './lib/toast';
 import { AuthProvider } from './lib/auth';
+import NavBar from '../components/layout/NavBar';
 
 export const metadata = {
   title: 'ELTX — Next',
@@ -15,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <LangProvider>
           <AuthProvider>
             <ToastProvider>
+              <NavBar />
               {children}
             </ToastProvider>
           </AuthProvider>

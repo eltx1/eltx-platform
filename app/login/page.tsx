@@ -63,17 +63,19 @@ export default function LoginPage() {
           </div>
         )}
         <input
-          className="p-2 rounded bg-black/20 border border-white/20"
+          className={`p-2 rounded bg-black/20 border ${error ? 'border-red-500' : 'border-white/20'}`}
           placeholder="Email or Username"
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
+          aria-invalid={!!error}
         />
         <input
-          className="p-2 rounded bg-black/20 border border-white/20"
+          className={`p-2 rounded bg-black/20 border ${error ? 'border-red-500' : 'border-white/20'}`}
           type="password"
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          aria-invalid={!!error}
         />
         <button className="btn btn-primary justify-center" type="submit" disabled={loading}>
           {loading ? `${t.auth.login.title}...` : t.auth.login.title}
