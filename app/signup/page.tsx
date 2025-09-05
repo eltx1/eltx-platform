@@ -21,15 +21,15 @@ export default function SignupPage() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const res = await apiFetch('/auth/signup', {
+    const res = await apiFetch<any>('/auth/signup', {
       method: 'POST',
       body: JSON.stringify({ email, username, password }),
     });
-    if (res.error) {
-      const err = res.error;
-      if (err.code === 'USER_EXISTS') setError(t.auth.signup.exists);
-      else if (err.details?.missing) setError(err.details.missing.join(', '));
-      else setError(t.auth.signup.genericError);
+    if (!res.ok) {
+      const err = (res.data as any)?.error;
+      if (err?.code === 'USER_EXISTS') setError(t.auth.signup.exists);
+      else if (err?.details?.missing) setError(err.details.missing.join(', '));
+      else setError(res.error || t.auth.signup.genericError);
     } else {
       toast(t.auth.signup.success);
       router.push('/login?registered=1');

@@ -18,8 +18,8 @@ export default function StakingPlansPage() {
     }
 
     const fetchPlans = async () => {
-      const res = await apiFetch('/staking/plans');
-      if (res.data) setPlans(res.data.plans);
+      const res = await apiFetch<{ plans: any[] }>('/staking/plans');
+      if (res.ok) setPlans(res.data.plans);
     };
 
     if (user) fetchPlans();

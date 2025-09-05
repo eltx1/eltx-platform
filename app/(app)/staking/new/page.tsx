@@ -17,11 +17,11 @@ export default function NewStakePage() {
   useEffect(() => {
     if (user === null) router.replace('/login');
     if (user) {
-      apiFetch('/staking/plans').then((res) => {
-        if (res.error) {
-          if (res.error.status === 401) router.replace('/login');
-          else setError('Failed to load plans');
-        } else if (res.data) {
+      apiFetch<{ plans: any[] }>('/staking/plans').then((res) => {
+        if (!res.ok) {
+          if (res.status === 401) router.replace('/login');
+          else setError(res.error || 'Failed to load plans');
+        } else {
           setPlans(res.data.plans);
           const qs = new URLSearchParams(window.location.search);
           const p = qs.get('plan');
@@ -44,13 +44,13 @@ export default function NewStakePage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    const res = await apiFetch('/staking/positions', {
+    const res = await apiFetch<any>('/staking/positions', {
       method: 'POST',
       body: JSON.stringify({ planId, amount }),
     });
-    if (res.error) {
-      setError('Failed to stake');
-    } else if (res.data) {
+    if (!res.ok) {
+      setError(res.error || 'Failed to stake');
+    } else {
       router.push('/earn/staking/positions');
     }
   };

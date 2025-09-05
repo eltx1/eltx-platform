@@ -14,8 +14,8 @@ const AuthContext = createContext<AuthContextType>({ user: undefined, refresh: a
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any | null | undefined>(undefined);
   const refresh = async () => {
-    const { data } = await apiFetch('/auth/me');
-    setUser(data || null);
+    const res = await apiFetch<any>('/auth/me');
+    setUser(res.ok ? res.data : null);
   };
   useEffect(() => {
     refresh();

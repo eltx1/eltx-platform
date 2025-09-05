@@ -14,8 +14,8 @@ export default function PositionsPage() {
     if (user === null) router.replace('/login');
     if (user) {
       (async () => {
-        const res = await apiFetch('/staking/positions');
-        if (res.data) setPositions(res.data.positions);
+        const res = await apiFetch<{ positions: any[] }>('/staking/positions');
+        if (res.ok && res.data.positions) setPositions(res.data.positions);
       })();
     }
   }, [user, router]);

@@ -32,15 +32,15 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     const body = identifier.includes('@') ? { email: identifier, password } : { username: identifier, password };
-    const res = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify(body) });
-    if (res.error) {
-      const err = res.error;
-      if (err.code === 'INVALID_CREDENTIALS') {
+    const res = await apiFetch<any>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
+    if (!res.ok) {
+      const err = (res.data as any)?.error;
+      if (err?.code === 'INVALID_CREDENTIALS') {
         setError(t.auth.login.invalid);
-      } else if (err.details?.missing) {
+      } else if (err?.details?.missing) {
         setError(err.details.missing.join(', '));
       } else {
-        setError(t.auth.login.genericError);
+        setError(res.error || t.auth.login.genericError);
       }
     } else {
       await refresh();

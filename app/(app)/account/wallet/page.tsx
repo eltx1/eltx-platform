@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiFetch } from '../../../lib/api';
 import { ethers } from 'ethers';
@@ -13,20 +13,20 @@ export default function WalletPage() {
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [unauth, setUnauth] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const addrRes = await apiFetch<{ wallet: WalletInfo }>('/wallet/address');
-    if (addrRes.error) {
-      if (addrRes.error.status === 401) { setUnauth(true); return; }
+    if (!addrRes.ok) {
+      if (addrRes.status === 401) { setUnauth(true); return; }
       return;
     }
-    setWallet(addrRes.data!.wallet);
+    setWallet(addrRes.data.wallet);
     const balRes = await apiFetch<{ balance_wei: string }>('/wallet/balance');
-    if (balRes.data) setBalance(balRes.data.balance_wei);
+    if (balRes.ok) setBalance(balRes.data.balance_wei);
     const txRes = await apiFetch<{ transactions: Deposit[] }>('/wallet/transactions');
-    if (txRes.data) setDeposits(txRes.data.transactions);
-  };
+    if (txRes.ok) setDeposits(txRes.data.transactions);
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const handleRefresh = async () => {
     await apiFetch('/wallet/refresh', { method: 'POST' });

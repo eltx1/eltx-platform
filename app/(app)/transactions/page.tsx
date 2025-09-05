@@ -29,10 +29,10 @@ export default function TransactionsPage() {
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch('/wallet/transactions').then(res => {
-      if (res.error) {
-        if (res.error.status === 401) router.replace('/login');
-      } else if (res.data) {
+    apiFetch<{ transactions: Deposit[] }>('/wallet/transactions').then(res => {
+      if (!res.ok) {
+        if (res.status === 401) router.replace('/login');
+      } else {
         setDeposits(res.data.transactions || []);
       }
     });
