@@ -19,6 +19,7 @@ export default function Hero() {
       <div className="absolute -top-24 -left-24 w-80 h-80 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
       <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-cyan-600/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
       <div className="absolute top-1/2 -left-32 w-80 h-80 bg-fuchsia-500/20 rounded-full blur-3xl animate-blob animation-delay-4000" />
+
       <div className="relative z-10 max-w-2xl mx-auto px-4 space-y-6">
         {!logoError ? (
           <Image

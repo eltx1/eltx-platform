@@ -28,6 +28,7 @@ export default function Features() {
                 <h3 className="font-semibold mb-2">{d.title}</h3>
                 <p className="text-sm opacity-80">{d.desc}</p>
               </div>
+
             </div>
           );
         })}
