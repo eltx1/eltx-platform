@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Menu } from 'lucide-react';
@@ -13,6 +14,7 @@ export default function NavBar() {
   const { user, logout } = useAuth();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [logoError, setLogoError] = useState(false);
 
   useEffect(() => {
     if (open) document.body.style.overflow = 'hidden';
@@ -30,7 +32,13 @@ export default function NavBar() {
 
   return (
     <header className="p-4 border-b border-white/10 flex items-center justify-between bg-black/40 backdrop-blur-sm sticky top-0 z-50">
-      <Link href="/" className="font-bold">ELTX</Link>
+      <Link href="/" className="flex items-center font-bold" aria-label="ELTX Home">
+        {logoError ? (
+          <span>ELTX</span>
+        ) : (
+          <Image src="/assets/img/logo.jpeg" alt="ELTX Logo" width={32} height={32} onError={() => setLogoError(true)} />
+        )}
+      </Link>
       <nav className="hidden sm:flex items-center gap-4">
         {links.map((l) => (
           <Link key={l.href} href={l.href} className={`hover:opacity-80 ${isActive(l.href)}`}>

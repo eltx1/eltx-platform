@@ -11,6 +11,8 @@ html,body{height:100%}
 body{color:var(--text);background:
  radial-gradient(1200px 600px at 50% -200px,rgba(255,90,60,.05),transparent),
  linear-gradient(180deg,var(--bg),var(--bg2));}
+
+body{background:#0a0a0a;color:#fff;}
 .container{max-width:1040px;margin:0 auto;padding:0 14px}
 a{color:inherit}
 .ticker{position:sticky;top:0;z-index:50;background:#ffffffcc;border-bottom:1px solid var(--line);backdrop-filter:blur(8px);overflow:hidden}
