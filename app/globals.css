@@ -13,7 +13,6 @@ body{color:var(--text);background:
  linear-gradient(180deg,var(--bg),var(--bg2));}
 
 body{background:#0a0a0a;color:#fff;background-image:radial-gradient(#1a1a1a 1px,transparent 1px);background-size:40px 40px;}
-
 .container{max-width:1040px;margin:0 auto;padding:0 14px}
 a{color:inherit}
 .ticker{position:sticky;top:0;z-index:50;background:#ffffffcc;border-bottom:1px solid var(--line);backdrop-filter:blur(8px);overflow:hidden}
