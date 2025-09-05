@@ -32,6 +32,7 @@ addToken('USDC', 'TOKEN_USDC');
 if (process.env.TOKEN_ELTX) addToken('ELTX', 'TOKEN_ELTX');
 const tokenMap = new Map(tokenMeta.map((t) => [t.address, t]));
 
+
 // ---- utils ----
 function maskUrl(url) {
   try {
@@ -128,6 +129,7 @@ async function getStartCursor(pool, provider) {
     tailStart = Math.max(tip - BACKFILL_BLOCKS, 0);
     await pool.query('INSERT INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, tailStart - 1]);
   }
+
   const backfillFrom = Math.max(tailStart - BACKFILL_BLOCKS, 0);
   console.log(`[CURSOR] tail_start=${tailStart} backfill_from=${backfillFrom}`);
   return { tailStart, backfillFrom };
@@ -223,6 +225,7 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
       }
     }
     await sleep(50);
+
   }
 
   await pool.query(
@@ -239,12 +242,14 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
     [CHAIN_ID, confirmEdge]
   );
   const hasBalances = await tableExists(pool, 'user_balances');
+
   for (const dep of rows) {
     try {
       if (hasBalances) {
         await pool.query(
           "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
           [dep.user_id, dep.token_address ? dep.token_address : 'native', dep.amount_wei]
+
         );
       }
       await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
@@ -280,6 +285,7 @@ async function main() {
   }
 
   const { tailStart, backfillFrom } = await getStartCursor(pool, provider);
+
 
   // periodic address refresh
   setInterval(async () => {
