@@ -1,21 +1,59 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
+import { motion } from 'framer-motion';
+import { useState } from 'react';
 import { useAuth } from '../../app/lib/auth';
 
 export default function Hero() {
   const { user } = useAuth();
   const primaryHref = user ? '/dashboard' : '/signup';
   const primaryLabel = user ? 'Dashboard' : 'Get Started';
+  const [logoError, setLogoError] = useState(false);
 
   return (
     <section className="relative overflow-hidden text-white py-24 text-center">
-      <div className="absolute inset-0 bg-gradient-to-br from-sky-500 to-violet-600" />
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.2),transparent)]" />
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-600 to-cyan-500" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.1),transparent)]" />
+      <div className="absolute -top-20 -left-20 w-72 h-72 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
+      <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-cyan-600/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
+      <div className="absolute top-1/2 -left-24 w-72 h-72 bg-indigo-500/20 rounded-full blur-3xl animate-blob animation-delay-4000" />
       <div className="relative z-10 max-w-2xl mx-auto px-4 space-y-6">
-        <h1 className="text-4xl font-bold">ELTX Platform</h1>
-        <p className="opacity-90">Secure, fast and cross-chain ready digital asset platform.</p>
-        <div className="flex justify-center gap-4">
+        {!logoError ? (
+          <Image
+            src="/assets/img/logo.jpeg"
+            alt="ELTX Logo"
+            width={96}
+            height={96}
+            className="mx-auto"
+            onError={() => setLogoError(true)}
+          />
+        ) : (
+          <div className="text-6xl font-bold">ELTX</div>
+        )}
+        <motion.h1
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+          className="text-4xl font-bold"
+        >
+          ELTX Platform
+        </motion.h1>
+        <motion.p
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="opacity-90"
+        >
+          Secure, fast and cross-chain ready digital asset platform.
+        </motion.p>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="flex justify-center gap-4"
+        >
           <Link
             href={primaryHref}
             className="px-6 py-2 rounded-full bg-white text-black font-semibold hover:opacity-90"
@@ -28,7 +66,7 @@ export default function Hero() {
           >
             Explore Earn
           </Link>
-        </div>
+        </motion.div>
         <div className="flex justify-center gap-2 text-xs opacity-80">
           <span>Secure</span>
           <span>•</span>
