@@ -17,8 +17,9 @@ export default function EarnPage() {
 
   useEffect(() => {
     const load = async () => {
-      const res = await apiFetch('/staking/plans');
-      if (!res.error) setPlans(res);
+      const res = await apiFetch<any[]>('/staking/plans');
+      if (!res.error && res.data) setPlans(res.data);
+
     };
     load();
   }, []);
