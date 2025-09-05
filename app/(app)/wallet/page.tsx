@@ -4,15 +4,25 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
-import { ethers } from 'ethers';
 import QRCode from 'qrcode.react';
 
 type Deposit = {
   tx_hash: string;
   amount_wei: string;
+  symbol: string;
+  decimals: number;
+  amount_formatted: string;
   confirmations: number;
   status: string;
   created_at: string;
+};
+
+type Asset = {
+  symbol: string;
+  contract: string | null;
+  decimals: number;
+  balance_wei: string;
+  balance: string;
 };
 
 type WalletInfo = { chain_id: number; address: string };
@@ -22,20 +32,20 @@ export default function WalletPage() {
   const t = dict[lang];
   const toast = useToast();
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
-  const [balance, setBalance] = useState('0');
+  const [assets, setAssets] = useState<Asset[]>([]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
   const [error, setError] = useState('');
   const [unauth, setUnauth] = useState(false);
 
   const load = async () => {
-    const addrRes = await apiFetch< { wallet: WalletInfo } >('/wallet/address');
+    const addrRes = await apiFetch<{ wallet: WalletInfo }>('/wallet/address');
     if (addrRes.error) {
       if (addrRes.error.status === 401) { setUnauth(true); return; }
       setError(t.common.genericError); return;
     }
     setWallet(addrRes.data!.wallet);
-    const balRes = await apiFetch<{ balance_wei: string }>('/wallet/balance');
-    if (balRes.data) setBalance(balRes.data.balance_wei);
+    const assetsRes = await apiFetch<{ assets: Asset[] }>('/wallet/assets');
+    if (assetsRes.data) setAssets(assetsRes.data.assets);
     const txRes = await apiFetch<{ transactions: Deposit[] }>('/wallet/transactions');
     if (txRes.data) setDeposits(txRes.data.transactions);
   };
@@ -79,10 +89,42 @@ export default function WalletPage() {
         >
           Refresh
         </button>
-        <div className="text-sm">{Number(ethers.formatEther(balance)).toFixed(4)} BNB</div>
         <div className="p-4 flex justify-center">
           <QRCode value={wallet.address} size={160} />
         </div>
+      </div>
+      <div>
+        <h2 className="font-semibold mb-2">Assets</h2>
+        <table className="text-sm w-full">
+          <thead>
+            <tr className="text-left">
+              <th>Asset</th>
+              <th>Balance</th>
+              <th>Contract</th>
+            </tr>
+          </thead>
+          <tbody>
+            {assets.map((a) => (
+              <tr key={a.symbol} className="border-t border-white/10">
+                <td className="py-1">{a.symbol}</td>
+                <td className="py-1">{Number(a.balance).toFixed(6)}</td>
+                <td className="py-1">
+                  {a.contract && (
+                    <button
+                      className="underline"
+                      onClick={() => {
+                        navigator.clipboard.writeText(a.contract!);
+                        toast('Copied');
+                      }}
+                    >
+                      {a.contract.slice(0, 6)}…{a.contract.slice(-4)}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       <div>
         <h2 className="font-semibold mb-2">{t.wallet.transactions}</h2>
@@ -101,7 +143,9 @@ export default function WalletPage() {
               >
                 {d.tx_hash}
               </a>
-              <div>{Number(ethers.formatEther(d.amount_wei)).toFixed(4)} BNB</div>
+              <div>
+                {Number(d.amount_formatted).toFixed(6)} {d.symbol}
+              </div>
               <div className="text-xs">{statusLabel(d.status)}</div>
             </div>
           ))}

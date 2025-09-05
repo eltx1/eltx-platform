@@ -2,288 +2,332 @@ const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 require('dotenv').config();
 
+// ---- env vars ----
+const RUN_ID = Math.random().toString(36).slice(2, 10);
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
-const RPC_HTTP = process.env.BSC_RPC_URL || process.env.RPC_HTTP;
-if (!RPC_HTTP) throw new Error('BSC_RPC_URL or RPC_HTTP is required');
-// optional websocket RPC for faster block updates
-const RPC_WS = process.env.RPC_WS;
-const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS || 15000);
+const START_BLOCK = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : undefined;
 const BACKFILL_BLOCKS = Number(process.env.BACKFILL_BLOCKS || 5000);
-const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
+const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS || 15000);
+const RPC_HTTP = process.env.RPC_HTTP || process.env.BSC_RPC_URL;
+const RPC_WS = process.env.RPC_WS;
+if (!RPC_HTTP) throw new Error('RPC_HTTP is required');
+
+const CONCURRENCY = 5;
+
 const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
+const tokenMeta = [];
+function addToken(symbol, envKey) {
+  const addr = process.env[envKey];
+  if (addr) {
+    tokenMeta.push({
+      symbol,
+      address: addr.toLowerCase(),
+      decimals: Number(process.env[`${envKey}_DECIMALS`] || 18),
+    });
+  }
+}
+addToken('USDT', 'TOKEN_USDT');
+addToken('USDC', 'TOKEN_USDC');
+if (process.env.TOKEN_ELTX) addToken('ELTX', 'TOKEN_ELTX');
+const tokenMap = new Map(tokenMeta.map((t) => [t.address, t]));
+
+// ---- utils ----
+function maskUrl(url) {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.hostname}${u.port ? ':' + u.port : ''}`;
+  } catch {
+    return url;
+  }
+}
+
+function maskHost(host) {
+  return host.replace(/(.{3}).*/, '$1***');
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 async function withRetry(fn, attempts = 3, delayMs = 1000) {
-  let lastErr;
+  let err;
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
     } catch (e) {
-      lastErr = e;
-      if (i < attempts - 1) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-      }
+      err = e;
+      if (i < attempts - 1) await sleep(delayMs);
     }
   }
-  throw lastErr;
+  throw err;
 }
 
+// ---- database helpers ----
 async function initDb() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
   const pool = mysql.createPool(process.env.DATABASE_URL);
-  try {
-    const conn = await pool.getConnection();
-    await conn.ping();
-    conn.release();
-    console.log('database connection established');
-  } catch (e) {
-    console.error('database connection failed', e);
-    throw e;
-  }
+  const conn = await pool.getConnection();
+  await conn.ping();
+  const host = maskHost(conn.connection.config.host);
+  const dbName = conn.connection.config.database;
+  conn.release();
+  console.log(`[DB] connected host=${host} db=${dbName}`);
   return pool;
 }
 
-async function loadActiveAddresses(pool) {
-  const [rows] = await pool.query('SELECT address, user_id FROM wallet_addresses WHERE chain_id=?', [CHAIN_ID]);
+async function detectSchema(pool) {
+  const [addrCol] = await pool.query("SHOW COLUMNS FROM wallet_deposits LIKE 'to_address'");
+  const addressColumn = addrCol.length ? 'to_address' : 'address';
+  const [chainCol] = await pool.query("SHOW COLUMNS FROM wallet_addresses LIKE 'chain_id'");
+  const addrHasChain = chainCol.length > 0;
+  const [wa] = await pool.query("SHOW TABLES LIKE 'wallet_addresses'");
+  const [wd] = await pool.query("SHOW TABLES LIKE 'wallet_deposits'");
+  console.log(
+    `[TABLES] wallet_addresses=${wa.length > 0} wallet_deposits=${wd.length > 0} addressColumn=${addressColumn}`
+  );
+  return { addressColumn, addrHasChain };
+}
+
+async function loadAddresses(pool, hasChain) {
+  const sql = hasChain
+    ? 'SELECT address, user_id FROM wallet_addresses WHERE chain_id=?'
+    : 'SELECT address, user_id FROM wallet_addresses';
+  const params = hasChain ? [CHAIN_ID] : [];
+  const [rows] = await pool.query(sql, params);
   const map = new Map();
-  for (const r of rows) map.set(r.address.trim().toLowerCase(), r.user_id);
+  for (const r of rows) map.set(r.address.toLowerCase(), r.user_id);
+  const sample = Array.from(map.keys()).slice(0, 3);
+  console.log(`[WATCH] addresses count=${map.size} sample=${JSON.stringify(sample)}`);
   return map;
 }
 
-async function ensureCursor(pool, provider) {
-  const latest = await provider.getBlockNumber();
-  // allow forcing a specific starting block via START_BLOCK env
-  const startEnv = process.env.START_BLOCK ? Number(process.env.START_BLOCK) : null;
-  const [rows] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain_id=?', [CHAIN_ID]);
-  if (startEnv !== null) {
-    await pool.query('REPLACE INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, startEnv]);
-    return { last_block: startEnv, last_hash: null };
+// ---- table helpers ----
+const tableCache = {};
+async function tableExists(pool, name) {
+  if (tableCache[name] !== undefined) return tableCache[name];
+  const [rows] = await pool.query('SHOW TABLES LIKE ?', [name]);
+  tableCache[name] = rows.length > 0;
+  if (name === 'user_balances' && !tableCache[name]) {
+    console.log('[SKIP] user_balances not found — deposits-only mode');
   }
-  if (!rows.length) {
-    const start = latest - 3;
-    await pool.query('INSERT INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, start]);
-    return { last_block: start, last_hash: null };
-  }
-  return rows[0];
+  return tableCache[name];
 }
 
-async function handleBlock(pool, provider, addrMap, block) {
+// ---- cursor helpers ----
+async function getStartCursor(pool, provider) {
+  const tip = await provider.getBlockNumber();
+  const [rows] = await pool.query('SELECT last_block FROM chain_cursor WHERE chain_id=?', [CHAIN_ID]);
+  let tailStart;
+  if (START_BLOCK !== undefined) {
+    tailStart = START_BLOCK;
+    await pool.query('REPLACE INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, START_BLOCK]);
+  } else if (rows.length) {
+    tailStart = rows[0].last_block + 1;
+  } else {
+    tailStart = Math.max(tip - BACKFILL_BLOCKS, 0);
+    await pool.query('INSERT INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, tailStart - 1]);
+  }
+  const backfillFrom = Math.max(tailStart - BACKFILL_BLOCKS, 0);
+  console.log(`[CURSOR] tail_start=${tailStart} backfill_from=${backfillFrom}`);
+  return { tailStart, backfillFrom };
+}
+
+// ---- block/tx helpers ----
+async function getTxs(provider, block) {
+  if (!block || !block.transactions) return [];
+  if (block.transactions.length && typeof block.transactions[0] !== 'string') return block.transactions;
+  const txs = [];
+  for (let i = 0; i < block.transactions.length; i += CONCURRENCY) {
+    const chunk = block.transactions.slice(i, i + CONCURRENCY);
+    const fetched = await Promise.all(
+      chunk.map((h) => provider.getTransaction(h).catch(() => null))
+    );
+    txs.push(...fetched.filter(Boolean));
+    await sleep(50);
+  }
+  return txs;
+}
+
+async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
   const [cursor] = await pool.query('SELECT last_block,last_hash FROM chain_cursor WHERE chain_id=?', [CHAIN_ID]);
   if (cursor.length && cursor[0].last_block === block.number && cursor[0].last_hash && cursor[0].last_hash !== block.hash) {
     await pool.query('UPDATE wallet_deposits SET status="orphaned" WHERE chain_id=? AND block_number=?', [CHAIN_ID, block.number]);
   }
 
-  for (const txEntry of block.transactions) {
-    const tx =
-      typeof txEntry === 'string' ? await provider.getTransaction(txEntry) : txEntry;
-    if (!tx) continue;
-    const to = tx.to ? tx.to.toLowerCase() : null;
-    if (to && addrMap.has(to)) {
-      const userId = addrMap.get(to);
-      await pool.query(
-        'INSERT INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,0,\'seen\') ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei)',
-        [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, tx.value.toString()]
-      );
-      console.log(
-        `stored deposit tx ${tx.hash} for user ${userId} address ${to} amount ${tx.value.toString()}`
-      );
-    }
-  }
+  const confirmEdge = Math.max(tip - CONFIRMATIONS, 0);
 
-  // token transfers (ERC20/BEP20) to monitored addresses
-  const addrTopics = Array.from(addrMap.keys()).map((a) => ethers.zeroPadValue(a, 32));
-  if (addrTopics.length) {
-    const logs = await withRetry(() =>
-      provider.getLogs({ fromBlock: block.number, toBlock: block.number, topics: [TRANSFER_TOPIC, null, addrTopics] })
+  const txs = await getTxs(provider, block);
+  for (let i = 0; i < txs.length; i += CONCURRENCY) {
+    const chunk = txs.slice(i, i + CONCURRENCY);
+    const receipts = await Promise.all(
+      chunk.map((tx) => provider.getTransactionReceipt(tx.hash).catch(() => null))
     );
-    for (const log of logs) {
-      const to = '0x' + log.topics[2].slice(26);
-      const lower = to.toLowerCase();
-      const userId = addrMap.get(lower);
-      if (!userId) continue;
-      const amount = BigInt(log.data).toString();
-      await pool.query(
-        'INSERT INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,?, ?,0,\'seen\') ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei)',
-        [userId, CHAIN_ID, lower, log.transactionHash, log.blockNumber, log.blockHash, log.address.toLowerCase(), amount]
-      );
-      console.log(`stored token deposit tx ${log.transactionHash} for user ${userId} address ${lower} token ${log.address.toLowerCase()} amount ${amount}`);
-    }
-  }
+    for (let j = 0; j < chunk.length; j++) {
+      const tx = chunk[j];
+      const rec = receipts[j];
+      if (!rec || rec.status !== 1) continue;
 
-  // token transfers (ERC20/BEP20) to monitored addresses
-  const addrTopics = Array.from(addrMap.keys()).map((a) => ethers.zeroPadValue(a, 32));
-  if (addrTopics.length) {
-    const logs = [];
-    const chunkSize = 50;
-    for (let i = 0; i < addrTopics.length; i += chunkSize) {
-      const chunk = addrTopics.slice(i, i + chunkSize);
-      const chunkLogs = await provider.getLogs({
-        fromBlock: block.number,
-        toBlock: block.number,
-        topics: [TRANSFER_TOPIC, null, chunk],
-      });
-      logs.push(...chunkLogs);
+      if (tx.to && tx.value > 0n) {
+        const to = tx.to.toLowerCase();
+        if (addrMap.has(to)) {
+          const userId = addrMap.get(to);
+          const amount = tx.value.toString();
+          const confirmations = tip - block.number + 1;
+          const status = confirmations >= CONFIRMATIONS ? 'confirmed' : 'pending';
+          const [res] = await pool.query(
+            `INSERT INTO wallet_deposits (user_id, chain_id, ${addressColumn}, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,?,?) ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei), confirmations=VALUES(confirmations), status=VALUES(status)`,
+            [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, amount, confirmations, status]
+          );
+          const result = res.affectedRows === 1 ? 'inserted' : 'updated';
+          console.log(
+            `[DEPOSIT] detected tx=${tx.hash} addr=${to} wei=${amount} (~${ethers.formatEther(tx.value)}) block=${block.number}`
+          );
+          console.log(`[DB] upsert wallet_deposits tx=${tx.hash} result=${result}`);
+        }
+      }
+
+      for (const log of rec.logs) {
+        const token = tokenMap.get(log.address.toLowerCase());
+        if (!token || log.topics[0] !== TRANSFER_TOPIC) continue;
+        const to = '0x' + log.topics[2].slice(26).toLowerCase();
+        if (!addrMap.has(to)) continue;
+        const userId = addrMap.get(to);
+        const value = BigInt(log.data);
+        let amt = value;
+        const diff = 18 - token.decimals;
+        if (diff > 0) amt = value * 10n ** BigInt(diff);
+        else if (diff < 0) amt = value / 10n ** BigInt(-diff);
+        const confirmations = tip - block.number + 1;
+        const status = confirmations >= CONFIRMATIONS ? 'confirmed' : 'pending';
+        const [res] = await pool.query(
+          `INSERT INTO wallet_deposits (user_id, chain_id, ${addressColumn}, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei), confirmations=VALUES(confirmations), status=VALUES(status)`,
+          [
+            userId,
+            CHAIN_ID,
+            to,
+            tx.hash,
+            block.number,
+            block.hash,
+            log.address.toLowerCase(),
+            amt.toString(),
+            confirmations,
+            status,
+          ]
+        );
+        const result = res.affectedRows === 1 ? 'inserted' : 'updated';
+        console.log(
+          `[DEPOSIT][TOKEN] symbol=${token.symbol} tx=${tx.hash} addr=${to} value=${value} wei18=${amt}`
+        );
+        console.log(`[DB] upsert wallet_deposits tx=${tx.hash} result=${result}`);
+      }
     }
-    for (const log of logs) {
-      const to = '0x' + log.topics[2].slice(26);
-      const lower = to.toLowerCase();
-      const userId = addrMap.get(lower);
-      if (!userId) continue;
-      const amount = BigInt(log.data).toString();
-      await pool.query(
-        'INSERT INTO wallet_deposits (user_id, chain_id, address, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,?, ?,0,\'seen\') ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei)',
-        [userId, CHAIN_ID, lower, log.transactionHash, log.blockNumber, log.blockHash, log.address.toLowerCase(), amount]
-      );
-      console.log(`stored token deposit tx ${log.transactionHash} for user ${userId} address ${lower} token ${log.address.toLowerCase()} amount ${amount}`);
-    }
+    await sleep(50);
   }
 
   await pool.query(
-    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain_id=? AND status IN (\'seen\',\'confirmed\')',
-    [block.number, CHAIN_ID]
+    'UPDATE wallet_deposits SET confirmations=?-block_number WHERE chain_id=? AND status IN (\'pending\',\'confirmed\') AND block_number<=?',
+    [block.number, CHAIN_ID, block.number]
   );
   await pool.query(
-    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain_id=? AND status=\'seen\' AND confirmations>=?',
-    [CHAIN_ID, CONFIRMATIONS]
+    'UPDATE wallet_deposits SET status=\'confirmed\' WHERE chain_id=? AND status=\'pending\' AND block_number<=?',
+    [CHAIN_ID, confirmEdge]
   );
 
-  const [confirmed] = await pool.query(
-    "SELECT id,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0",
-    [CHAIN_ID]
+  const [rows] = await pool.query(
+    "SELECT id,tx_hash,user_id,amount_wei,token_address FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0 AND block_number<=?",
+    [CHAIN_ID, confirmEdge]
   );
-  for (const dep of confirmed) {
+  const hasBalances = await tableExists(pool, 'user_balances');
+  for (const dep of rows) {
     try {
-      await pool.query(
-        "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
-        [dep.user_id, dep.amount_wei]
-      );
+      if (hasBalances) {
+        await pool.query(
+          "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
+          [dep.user_id, dep.token_address ? dep.token_address : 'native', dep.amount_wei]
+        );
+      }
       await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
+      console.log(`[CREDIT] tx=${dep.tx_hash} set credited=1`);
     } catch (e) {
-      console.error('credit failed', e.code, e.table, e);
+      console.error('[ERR][SQL]', e.code || e.message);
     }
   }
 
   await pool.query('UPDATE chain_cursor SET last_block=?, last_hash=? WHERE chain_id=?', [block.number, block.hash, CHAIN_ID]);
-  console.log(`processed block ${block.number}`);
+  if (block.number % 100 === 0) console.log(`[SCAN] progressed last_block=${block.number}`);
 }
 
-async function runStakingAccrual(pool) {
-  const today = new Date().toISOString().slice(0, 10);
-  let conn;
-  try {
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
-    const [positions] = await conn.query(
-      'SELECT id, daily_reward FROM staking_positions WHERE status="active" AND start_date <= ? AND end_date >= ?',
-      [today, today]
-    );
-    for (const p of positions) {
-      try {
-        await conn.query(
-          'INSERT INTO staking_accruals (position_id, accrual_date, amount) VALUES (?,?,?)',
-          [p.id, today, p.daily_reward]
-        );
-        await conn.query('UPDATE staking_positions SET accrued_total=accrued_total+? WHERE id=?', [p.daily_reward, p.id]);
-      } catch (err) {
-        if (err.code !== 'ER_DUP_ENTRY') throw err;
-      }
-    }
-    await conn.query('UPDATE staking_positions SET status="matured" WHERE status="active" AND end_date < ?', [today]);
-    await conn.commit();
-    console.log('staking accrual done for', today, positions.length, 'positions');
-  } catch (e) {
-    if (conn) await conn.rollback();
-    console.error('staking accrual failed', e);
-  } finally {
-    if (conn) conn.release();
-  }
-}
-
-function scheduleStakingAccrual(pool) {
-  const now = new Date();
-  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 5, 0));
-  const ms = next.getTime() - now.getTime();
-  setTimeout(() => {
-    runStakingAccrual(pool);
-    setInterval(() => runStakingAccrual(pool), 24 * 60 * 60 * 1000);
-  }, ms);
-}
-
+// ---- main ----
 async function main() {
+  console.log(`[BOOT] run_id=${RUN_ID} ethers=${ethers.version}`);
+  console.log(
+    `[ENV] CHAIN_ID=${CHAIN_ID} CONFIRMATIONS=${CONFIRMATIONS} START_BLOCK=${START_BLOCK ?? 'unset'} BACKFILL_BLOCKS=${BACKFILL_BLOCKS} SCAN_INTERVAL_MS=${SCAN_INTERVAL_MS}`
+  );
+
   const pool = await initDb();
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const wsProvider = RPC_WS ? new ethers.WebSocketProvider(RPC_WS, CHAIN_ID) : null;
+  const tip = await provider.getBlockNumber();
+  console.log(`[RPC] ok chainId=${CHAIN_ID} tip=${tip} using=${maskUrl(RPC_HTTP)}`);
 
-  try {
-    const latest = await provider.getBlockNumber();
-    console.log(`RPC connection established to ${RPC_HTTP} (chain ${CHAIN_ID}), latest block ${latest}`);
-    if (wsProvider) {
-      await wsProvider.getBlockNumber();
-      console.log(`RPC WS connection established to ${RPC_WS}`);
-    }
-  } catch (e) {
-    console.error('RPC connection failed', e);
-    throw e;
+  const { addressColumn, addrHasChain } = await detectSchema(pool);
+  let addrMap = await loadAddresses(pool, addrHasChain);
+  if (tokenMeta.length) {
+    console.log(
+      `[TOKENS] contracts=${tokenMeta.map((t) => `${t.symbol}:${t.address}`).join(',')}`
+    );
   }
 
-  const cursor = await ensureCursor(pool, provider);
-  scheduleStakingAccrual(pool);
-  let addrMap = await loadActiveAddresses(pool);
-  if (addrMap.size === 0) console.warn('no active addresses loaded');
-  console.log('monitoring addresses', Array.from(addrMap.keys()));
+  const { tailStart, backfillFrom } = await getStartCursor(pool, provider);
+
+  // periodic address refresh
   setInterval(async () => {
     try {
-      addrMap = await loadActiveAddresses(pool);
-      if (addrMap.size === 0) console.warn('no active addresses loaded');
-      console.log('refreshed address list', Array.from(addrMap.keys()));
+      addrMap = await loadAddresses(pool, addrHasChain);
     } catch (e) {
-      console.error('address refresh failed', e);
+      console.error('[ERR][SQL]', e.code || e.message);
     }
-  }, ADDR_REFRESH_MINUTES * 60 * 1000);
-  let backfillCursor = Math.max((cursor.last_block || 0) - BACKFILL_BLOCKS, 0);
+  }, 10 * 60 * 1000);
 
-  const processBlockNumber = async (num) => {
-    try {
-      const block = await withRetry(() => provider.getBlock(num, true));
-      if (block) await handleBlock(pool, provider, addrMap, block);
-    } catch (e) {
-      console.error('block error', e);
-    }
-  };
+  let nextBlock = tailStart;
+  let backfillCursor = backfillFrom;
 
-  const scheduleBackfill = () => {
-    if (backfillCursor <= 0) return;
-    setTimeout(() => {
-      processBlockNumber(backfillCursor).catch((e) => console.error('block error', e));
-    }, 0);
-    backfillCursor--;
-  };
-
-  const latest = await provider.getBlockNumber();
-  const start = Math.max((cursor.last_block || 0) + 1 - BACKFILL_BLOCKS, 0);
-  console.log(`starting block scan from ${start} to ${latest}`);
-  for (let b = start; b <= latest; b++) {
-    await processBlockNumber(b);
-    scheduleBackfill();
-  }
-  let last = latest;
-  if (wsProvider) {
-    wsProvider.on('block', async (b) => {
-      await processBlockNumber(b);
-      scheduleBackfill();
-    });
-  } else {
-    setInterval(async () => {
-      const latest2 = await provider.getBlockNumber();
-      for (let b = last + 1; b <= latest2; b++) {
-        await processBlockNumber(b);
-        scheduleBackfill();
+  async function backfillLoop() {
+    while (backfillCursor < tailStart) {
+      try {
+        const block = await withRetry(() => provider.getBlock(backfillCursor, true));
+        const latest = await provider.getBlockNumber();
+        if (block) await handleBlock(pool, provider, addrMap, addressColumn, block, latest);
+      } catch (e) {
+        console.error('[ERR][RPC]', e.message);
       }
-      last = latest2;
-    }, SCAN_INTERVAL_MS);
+      backfillCursor++;
+      await sleep(200);
+    }
+  }
+
+  async function tailLoop() {
+    try {
+      const latest = await provider.getBlockNumber();
+      while (nextBlock <= latest) {
+        const block = await withRetry(() => provider.getBlock(nextBlock, true));
+        if (block) await handleBlock(pool, provider, addrMap, addressColumn, block, latest);
+        nextBlock++;
+      }
+    } catch (e) {
+      console.error('[ERR][RPC]', e.message);
+    }
+    setTimeout(tailLoop, SCAN_INTERVAL_MS);
+  }
+
+  backfillLoop();
+  tailLoop();
+
+  if (wsProvider) {
+    wsProvider.on('error', (e) => console.error('[ERR][RPC]', e.message));
   }
 }
 
-main().catch((e) => {
-  console.error('worker failed', e);
-});
+main().catch((e) => console.error('[ERR][BOOT]', e));
+
