@@ -3,6 +3,7 @@
 import { Shield, Zap, Network, Coins } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+
 const data = [
   { icon: Shield, title: 'Secure', desc: 'Audited smart contracts keep your assets safe.' },
   { icon: Zap, title: 'Fast', desc: 'Instant transactions with low fees.' },
