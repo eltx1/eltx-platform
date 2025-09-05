@@ -15,6 +15,24 @@ if (!RPC_HTTP) throw new Error('RPC_HTTP is required');
 
 const CONCURRENCY = 5;
 
+const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
+const tokenMeta = [];
+function addToken(symbol, envKey) {
+  const addr = process.env[envKey];
+  if (addr) {
+    tokenMeta.push({
+      symbol,
+      address: addr.toLowerCase(),
+      decimals: Number(process.env[`${envKey}_DECIMALS`] || 18),
+    });
+  }
+}
+addToken('USDT', 'TOKEN_USDT');
+addToken('USDC', 'TOKEN_USDC');
+if (process.env.TOKEN_ELTX) addToken('ELTX', 'TOKEN_ELTX');
+const tokenMap = new Map(tokenMeta.map((t) => [t.address, t]));
+
+
 // ---- utils ----
 function maskUrl(url) {
   try {
@@ -111,6 +129,7 @@ async function getStartCursor(pool, provider) {
     tailStart = Math.max(tip - BACKFILL_BLOCKS, 0);
     await pool.query('INSERT INTO chain_cursor (chain_id,last_block,last_hash) VALUES (?,?,NULL)', [CHAIN_ID, tailStart - 1]);
   }
+
   const backfillFrom = Math.max(tailStart - BACKFILL_BLOCKS, 0);
   console.log(`[CURSOR] tail_start=${tailStart} backfill_from=${backfillFrom}`);
   return { tailStart, backfillFrom };
@@ -138,27 +157,75 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
     await pool.query('UPDATE wallet_deposits SET status="orphaned" WHERE chain_id=? AND block_number=?', [CHAIN_ID, block.number]);
   }
 
-  const confirmEdge = Math.max(block.number - CONFIRMATIONS, 0);
-
+  const confirmEdge = Math.max(tip - CONFIRMATIONS, 0);
 
   const txs = await getTxs(provider, block);
-  for (const tx of txs) {
-    if (!tx || !tx.to || tx.value === 0n) continue;
-    const to = tx.to.toLowerCase();
-    if (!addrMap.has(to)) continue;
-    const userId = addrMap.get(to);
-    const amount = tx.value.toString();
-    const confirmations = tip - block.number + 1;
-    const status = confirmations >= CONFIRMATIONS ? 'confirmed' : 'pending';
-    const [res] = await pool.query(
-      `INSERT INTO wallet_deposits (user_id, chain_id, ${addressColumn}, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,?,?) ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei), confirmations=VALUES(confirmations), status=VALUES(status)`,
-      [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, amount, confirmations, status]
+  for (let i = 0; i < txs.length; i += CONCURRENCY) {
+    const chunk = txs.slice(i, i + CONCURRENCY);
+    const receipts = await Promise.all(
+      chunk.map((tx) => provider.getTransactionReceipt(tx.hash).catch(() => null))
     );
-    const result = res.affectedRows === 1 ? 'inserted' : 'updated';
-    console.log(
-      `[DEPOSIT] detected tx=${tx.hash} addr=${to} wei=${amount} (~${ethers.formatEther(tx.value)}) block=${block.number}`
-    );
-    console.log(`[DB] upsert wallet_deposits tx=${tx.hash} result=${result}`);
+    for (let j = 0; j < chunk.length; j++) {
+      const tx = chunk[j];
+      const rec = receipts[j];
+      if (!rec || rec.status !== 1) continue;
+
+      if (tx.to && tx.value > 0n) {
+        const to = tx.to.toLowerCase();
+        if (addrMap.has(to)) {
+          const userId = addrMap.get(to);
+          const amount = tx.value.toString();
+          const confirmations = tip - block.number + 1;
+          const status = confirmations >= CONFIRMATIONS ? 'confirmed' : 'pending';
+          const [res] = await pool.query(
+            `INSERT INTO wallet_deposits (user_id, chain_id, ${addressColumn}, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,NULL,?,?,?) ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei), confirmations=VALUES(confirmations), status=VALUES(status)`,
+            [userId, CHAIN_ID, to, tx.hash, block.number, block.hash, amount, confirmations, status]
+          );
+          const result = res.affectedRows === 1 ? 'inserted' : 'updated';
+          console.log(
+            `[DEPOSIT] detected tx=${tx.hash} addr=${to} wei=${amount} (~${ethers.formatEther(tx.value)}) block=${block.number}`
+          );
+          console.log(`[DB] upsert wallet_deposits tx=${tx.hash} result=${result}`);
+        }
+      }
+
+      for (const log of rec.logs) {
+        const token = tokenMap.get(log.address.toLowerCase());
+        if (!token || log.topics[0] !== TRANSFER_TOPIC) continue;
+        const to = '0x' + log.topics[2].slice(26).toLowerCase();
+        if (!addrMap.has(to)) continue;
+        const userId = addrMap.get(to);
+        const value = BigInt(log.data);
+        let amt = value;
+        const diff = 18 - token.decimals;
+        if (diff > 0) amt = value * 10n ** BigInt(diff);
+        else if (diff < 0) amt = value / 10n ** BigInt(-diff);
+        const confirmations = tip - block.number + 1;
+        const status = confirmations >= CONFIRMATIONS ? 'confirmed' : 'pending';
+        const [res] = await pool.query(
+          `INSERT INTO wallet_deposits (user_id, chain_id, ${addressColumn}, tx_hash, block_number, block_hash, token_address, amount_wei, confirmations, status) VALUES (?,?,?,?,?,?,?, ?,?,?) ON DUPLICATE KEY UPDATE block_number=VALUES(block_number), block_hash=VALUES(block_hash), amount_wei=VALUES(amount_wei), confirmations=VALUES(confirmations), status=VALUES(status)`,
+          [
+            userId,
+            CHAIN_ID,
+            to,
+            tx.hash,
+            block.number,
+            block.hash,
+            log.address.toLowerCase(),
+            amt.toString(),
+            confirmations,
+            status,
+          ]
+        );
+        const result = res.affectedRows === 1 ? 'inserted' : 'updated';
+        console.log(
+          `[DEPOSIT][TOKEN] symbol=${token.symbol} tx=${tx.hash} addr=${to} value=${value} wei18=${amt}`
+        );
+        console.log(`[DB] upsert wallet_deposits tx=${tx.hash} result=${result}`);
+      }
+    }
+    await sleep(50);
+
   }
 
   await pool.query(
@@ -171,7 +238,7 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
   );
 
   const [rows] = await pool.query(
-    "SELECT id,tx_hash,user_id,amount_wei FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0 AND block_number<=?",
+    "SELECT id,tx_hash,user_id,amount_wei,token_address FROM wallet_deposits WHERE chain_id=? AND status='confirmed' AND credited=0 AND block_number<=?",
     [CHAIN_ID, confirmEdge]
   );
   const hasBalances = await tableExists(pool, 'user_balances');
@@ -180,8 +247,9 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
     try {
       if (hasBalances) {
         await pool.query(
-          "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
-          [dep.user_id, dep.amount_wei]
+          "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei=balance_wei+VALUES(balance_wei)",
+          [dep.user_id, dep.token_address ? dep.token_address : 'native', dep.amount_wei]
+
         );
       }
       await pool.query('UPDATE wallet_deposits SET credited=1 WHERE id=?', [dep.id]);
@@ -210,8 +278,14 @@ async function main() {
 
   const { addressColumn, addrHasChain } = await detectSchema(pool);
   let addrMap = await loadAddresses(pool, addrHasChain);
+  if (tokenMeta.length) {
+    console.log(
+      `[TOKENS] contracts=${tokenMeta.map((t) => `${t.symbol}:${t.address}`).join(',')}`
+    );
+  }
 
   const { tailStart, backfillFrom } = await getStartCursor(pool, provider);
+
 
   // periodic address refresh
   setInterval(async () => {

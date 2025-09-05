@@ -142,6 +142,37 @@ const LoginSchema = z
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 
+// token metadata from env
+const tokenMeta = {};
+function addToken(symbol, envKey) {
+  const addr = process.env[envKey];
+  if (addr) {
+    tokenMeta[addr.toLowerCase()] = {
+      symbol,
+      contract: addr,
+      decimals: Number(process.env[`${envKey}_DECIMALS`] || 18),
+    };
+  }
+}
+addToken('USDT', 'TOKEN_USDT');
+addToken('USDC', 'TOKEN_USDC');
+if (process.env.TOKEN_ELTX) addToken('ELTX', 'TOKEN_ELTX');
+
+function normalizeWeiDecimal(x) {
+  if (x === null || x === undefined) return '0';
+  const str = x.toString();
+  const i = str.indexOf('.');
+  return i >= 0 ? str.slice(0, i) : str;
+}
+
+function formatUnitsStr(weiStr, decimals = 18) {
+  try {
+    return ethers.formatUnits(BigInt(weiStr), decimals);
+  } catch {
+    return '0';
+  }
+}
+
 async function requireUser(req) {
   const token = req.cookies[COOKIE_NAME];
   if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
@@ -305,10 +336,66 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
-      'SELECT tx_hash, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
+      'SELECT tx_hash, token_address, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
       [userId, CHAIN_ID]
     );
+    for (const row of rows) {
+      row.amount_wei = normalizeWeiDecimal(row.amount_wei);
+      if (!row.token_address) {
+        row.symbol = 'BNB';
+        row.decimals = 18;
+      } else {
+        const meta = tokenMeta[row.token_address.toLowerCase()];
+        row.symbol = meta ? meta.symbol : 'UNKNOWN';
+        row.decimals = meta ? meta.decimals : 18;
+      }
+      row.amount_formatted = formatUnitsStr(row.amount_wei, row.decimals);
+    }
     res.json({ ok: true, transactions: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [addrRows] = await pool.query(
+      'SELECT address FROM wallet_addresses WHERE user_id=? AND chain_id=? LIMIT 1',
+      [userId, CHAIN_ID]
+    );
+    if (!addrRows.length) return res.json({ ok: true, assets: [] });
+    const userAddress = addrRows[0].address;
+    const [bnbRow] = await pool.query(
+      "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address IS NULL AND status='confirmed' AND credited=1",
+      [userId, CHAIN_ID]
+    );
+    const bnbWei = normalizeWeiDecimal(bnbRow[0].sum);
+    const assets = [
+      { symbol: 'BNB', contract: null, decimals: 18, balance_wei: bnbWei, balance: formatUnitsStr(bnbWei, 18) },
+    ];
+    const provider = new ethers.JsonRpcProvider(process.env.RPC_HTTP, CHAIN_ID);
+    for (const addr in tokenMeta) {
+      const meta = tokenMeta[addr];
+      const erc = new ethers.Contract(meta.contract, ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
+      if (isNaN(meta.decimals)) {
+        try {
+          meta.decimals = await erc.decimals();
+        } catch {
+          meta.decimals = 18;
+        }
+      }
+      const bal = await erc.balanceOf(userAddress);
+      const wei = bal.toString();
+      assets.push({
+        symbol: meta.symbol,
+        contract: meta.contract,
+        decimals: meta.decimals,
+        balance_wei: wei,
+        balance: formatUnitsStr(wei, meta.decimals),
+      });
+    }
+    res.json({ ok: true, assets });
   } catch (err) {
     next(err);
   }
@@ -332,8 +419,15 @@ app.post('/wallet/refresh', walletLimiter, async (req, res, next) => {
 
 app.get('/staking/plans', async (req, res, next) => {
   try {
-    const [rows] = await pool.query('SELECT id,name,duration_days,apr_bps FROM staking_plans WHERE is_active=1');
-    res.json({ ok: true, plans: rows });
+    const [rows] = await pool.query('SELECT * FROM staking_plans WHERE is_active=1');
+    const plans = rows.map((r) => ({
+      id: r.id,
+      name: r.name || r.title,
+      duration_days: r.duration_days ?? r.duration_months ?? null,
+      apr_bps: r.apr_bps ?? r.daily_rate ?? null,
+      min_deposit_wei: r.min_deposit_wei ? normalizeWeiDecimal(r.min_deposit_wei) : undefined,
+    }));
+    res.json({ ok: true, plans });
   } catch (err) {
     next(err);
   }
