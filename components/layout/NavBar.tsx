@@ -1,0 +1,71 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { Menu } from 'lucide-react';
+import { useAuth } from '../../app/lib/auth';
+import MobileMenu from './MobileMenu';
+
+interface NavLink { href: string; label: string; }
+
+export default function NavBar() {
+  const { user, logout } = useAuth();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (open) document.body.style.overflow = 'hidden';
+    else document.body.style.overflow = '';
+  }, [open]);
+
+  const links: NavLink[] = [
+    { href: '/', label: 'Home' },
+    { href: '/wallet', label: 'Wallet' },
+    { href: '/earn', label: 'Earn' },
+    { href: '/faq', label: 'FAQ' },
+  ];
+
+  const isActive = (href: string) => (pathname === href ? 'text-yellow-400' : '');
+
+  return (
+    <header className="p-4 border-b border-white/10 flex items-center justify-between bg-black/40 backdrop-blur-sm sticky top-0 z-50">
+      <Link href="/" className="font-bold">ELTX</Link>
+      <nav className="hidden sm:flex items-center gap-4">
+        {links.map((l) => (
+          <Link key={l.href} href={l.href} className={`hover:opacity-80 ${isActive(l.href)}`}>
+            {l.label}
+          </Link>
+        ))}
+        {!user && (
+          <>
+            <Link href="/login" className="hover:opacity-80">Sign in</Link>
+            <Link href="/signup" className="hover:opacity-80">Sign up</Link>
+          </>
+        )}
+        {user && (
+          <>
+            <Link href="/dashboard" className="hover:opacity-80">Dashboard</Link>
+            <button
+              onClick={async () => {
+                await logout();
+              }}
+              className="hover:opacity-80"
+            >
+              Logout
+            </button>
+          </>
+        )}
+      </nav>
+      <button
+        className="sm:hidden hover:opacity-80"
+        onClick={() => setOpen(true)}
+        aria-label="Open Menu"
+      >
+        <Menu />
+      </button>
+      <MobileMenu open={open} setOpen={setOpen} links={links} user={user} logout={logout} />
+    </header>
+  );
+}
+
