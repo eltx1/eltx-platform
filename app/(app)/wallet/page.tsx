@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
@@ -37,20 +37,20 @@ export default function WalletPage() {
   const [error, setError] = useState('');
   const [unauth, setUnauth] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const addrRes = await apiFetch<{ wallet: WalletInfo }>('/wallet/address');
-    if (addrRes.error) {
-      if (addrRes.error.status === 401) { setUnauth(true); return; }
-      setError(t.common.genericError); return;
+    if (!addrRes.ok) {
+      if (addrRes.status === 401) { setUnauth(true); return; }
+      setError(addrRes.error || t.common.genericError); return;
     }
-    setWallet(addrRes.data!.wallet);
+    setWallet(addrRes.data.wallet);
     const assetsRes = await apiFetch<{ assets: Asset[] }>('/wallet/assets');
-    if (assetsRes.data) setAssets(assetsRes.data.assets);
+    if (assetsRes.ok) setAssets(assetsRes.data.assets);
     const txRes = await apiFetch<{ transactions: Deposit[] }>('/wallet/transactions');
-    if (txRes.data) setDeposits(txRes.data.transactions);
-  };
+    if (txRes.ok) setDeposits(txRes.data.transactions);
+  }, [t]);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const handleRefresh = async () => {
     await apiFetch('/wallet/refresh', { method: 'POST' });

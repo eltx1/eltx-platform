@@ -3,8 +3,8 @@
 import { formatUnits } from 'ethers';
 
 interface Plan {
-  id: number;
-  name: string;
+  id: number | string;
+  name?: string;
   duration_days?: number;
   duration_months?: number;
   apr?: string;
