@@ -28,14 +28,18 @@ export default function Industries() {
         {data.map((d) => {
           const Icon = d.icon;
           return (
-            <div key={d.title} className="p-6 rounded-2xl bg-white/5 text-center shadow">
-              <Icon className="mx-auto mb-4 h-8 w-8" />
-              <h3 className="font-semibold mb-2">{d.title}</h3>
-              <ul className="text-sm opacity-80 space-y-1">
-                {d.points.map((p) => (
-                  <li key={p}>{p}</li>
-                ))}
-              </ul>
+            <div key={d.title} className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-600 to-cyan-600">
+              <div className="h-full p-6 rounded-2xl bg-black/80 text-center backdrop-blur">
+                <div className="mx-auto mb-4 h-10 w-10 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <h3 className="font-semibold mb-2">{d.title}</h3>
+                <ul className="text-sm opacity-80 space-y-1">
+                  {d.points.map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
           );
         })}

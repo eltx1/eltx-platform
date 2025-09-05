@@ -11,6 +11,8 @@ html,body{height:100%}
 body{color:var(--text);background:
  radial-gradient(1200px 600px at 50% -200px,rgba(255,90,60,.05),transparent),
  linear-gradient(180deg,var(--bg),var(--bg2));}
+
+body{background:#0a0a0a;color:#fff;background-image:radial-gradient(#1a1a1a 1px,transparent 1px);background-size:40px 40px;}
 .container{max-width:1040px;margin:0 auto;padding:0 14px}
 a{color:inherit}
 .ticker{position:sticky;top:0;z-index:50;background:#ffffffcc;border-bottom:1px solid var(--line);backdrop-filter:blur(8px);overflow:hidden}
@@ -40,3 +42,5 @@ a{color:inherit}
 .animation-delay-2000{animation-delay:2s;}
 .animation-delay-4000{animation-delay:4s;}
 @keyframes blob{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(30px,-50px) scale(1.1)}66%{transform:translate(-20px,20px) scale(.9)}}
+.animate-gradient-slow{background-size:200% 200%;animation:gradient 15s ease infinite;}
+@keyframes gradient{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
