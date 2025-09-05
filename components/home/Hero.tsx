@@ -19,6 +19,7 @@ export default function Hero() {
       <div className="absolute -top-24 -left-24 w-80 h-80 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
       <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-cyan-600/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
       <div className="absolute top-1/2 -left-32 w-80 h-80 bg-fuchsia-500/20 rounded-full blur-3xl animate-blob animation-delay-4000" />
+
       <div className="relative z-10 max-w-2xl mx-auto px-4 space-y-6">
         {!logoError ? (
           <Image
@@ -52,13 +53,19 @@ export default function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="flex justify-center"
+          className="flex justify-center gap-4"
         >
           <Link
             href={primaryHref}
             className="px-6 py-2 rounded-full bg-gradient-to-r from-purple-600 to-cyan-500 text-black font-semibold hover:opacity-90"
           >
             {primaryLabel}
+          </Link>
+          <Link
+            href="/earn"
+            className="px-6 py-2 rounded-full border border-white/60 hover:bg-white/10"
+          >
+            Explore Earn
           </Link>
         </motion.div>
         <div className="flex justify-center gap-2 text-xs opacity-80">

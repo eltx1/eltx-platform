@@ -1,7 +1,6 @@
 'use client';
 
 import { Building2, Briefcase, User } from 'lucide-react';
-import { motion } from 'framer-motion';
 
 const data = [
   {
@@ -26,17 +25,10 @@ export default function Industries() {
     <section className="py-16 px-4">
       <h2 className="text-2xl font-bold text-center mb-8">We serve</h2>
       <div className="grid gap-6 sm:grid-cols-3 max-w-5xl mx-auto">
-        {data.map((d, i) => {
+        {data.map((d) => {
           const Icon = d.icon;
           return (
-            <motion.div
-              key={d.title}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.1 }}
-              className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-600 to-cyan-600"
-            >
+            <div key={d.title} className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-600 to-cyan-600">
               <div className="h-full p-6 rounded-2xl bg-black/80 text-center backdrop-blur">
                 <div className="mx-auto mb-4 h-10 w-10 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center">
                   <Icon className="h-5 w-5" />
@@ -48,7 +40,7 @@ export default function Industries() {
                   ))}
                 </ul>
               </div>
-            </motion.div>
+            </div>
           );
         })}
       </div>

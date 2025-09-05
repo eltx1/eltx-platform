@@ -1,8 +1,6 @@
 'use client';
 
 import { Shield, Zap, Network, Coins } from 'lucide-react';
-import { motion } from 'framer-motion';
-
 
 const data = [
   { icon: Shield, title: 'Secure', desc: 'Audited smart contracts keep your assets safe.' },
@@ -16,15 +14,11 @@ export default function Features() {
     <section className="py-16 px-4">
       <h2 className="text-2xl font-bold text-center mb-8">Why ELTX?</h2>
       <div className="grid gap-6 sm:grid-cols-2 max-w-4xl mx-auto">
-        {data.map((d, i) => {
+        {data.map((d) => {
           const Icon = d.icon;
           return (
-            <motion.div
+            <div
               key={d.title}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.1 }}
               className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-600 to-cyan-600 hover:translate-y-0.5 transition-transform"
             >
               <div className="h-full p-6 rounded-2xl bg-black/80 text-center backdrop-blur">
@@ -34,7 +28,8 @@ export default function Features() {
                 <h3 className="font-semibold mb-2">{d.title}</h3>
                 <p className="text-sm opacity-80">{d.desc}</p>
               </div>
-            </motion.div>
+
+            </div>
           );
         })}
       </div>
