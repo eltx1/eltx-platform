@@ -19,6 +19,7 @@ export default function EarnPage() {
     const load = async () => {
       const res = await apiFetch<any[]>('/staking/plans');
       if (!res.error && res.data) setPlans(res.data);
+
     };
     load();
   }, []);
