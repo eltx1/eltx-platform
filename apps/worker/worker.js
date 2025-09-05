@@ -140,6 +140,7 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
 
   const confirmEdge = Math.max(block.number - CONFIRMATIONS, 0);
 
+
   const txs = await getTxs(provider, block);
   for (const tx of txs) {
     if (!tx || !tx.to || tx.value === 0n) continue;
@@ -174,6 +175,7 @@ async function handleBlock(pool, provider, addrMap, addressColumn, block, tip) {
     [CHAIN_ID, confirmEdge]
   );
   const hasBalances = await tableExists(pool, 'user_balances');
+
   for (const dep of rows) {
     try {
       if (hasBalances) {
