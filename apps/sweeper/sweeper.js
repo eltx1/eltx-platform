@@ -14,7 +14,7 @@ const OMNIBUS_PK = process.env.OMNIBUS_PK;
 if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK required');
 
 const TOKENS = process.env.TOKENS_JSON ? JSON.parse(process.env.TOKENS_JSON) : [];
-const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '100000000000000');
+const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '300000000000000');
 const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
 const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
@@ -151,8 +151,14 @@ async function processAddress(row, provider, pool, omnibus) {
   let balBNB = await provider.getBalance(addr);
   const gasPrice = await resolveGasPriceWei(provider);
   const txCost = gasPrice * 21000n;
+  let eligibleBNB = balBNB > MIN_SWEEP_WEI_BNB && balBNB >= txCost * 10n;
+  let reasonBNB = 'ok';
+  if (!eligibleBNB) {
+    reasonBNB = balBNB <= MIN_SWEEP_WEI_BNB ? 'below_min' : 'needs_gas';
+  }
+  console.log(`[CHK] addr=${addr} bnb=${balBNB} eligible=${eligibleBNB} reason=${reasonBNB}`);
 
-  if (balBNB > MIN_SWEEP_WEI_BNB && balBNB >= txCost * 10n) {
+  if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
       const sendAmount = balBNB - txCost;
@@ -179,7 +185,9 @@ async function processAddress(row, provider, pool, omnibus) {
     try {
       const erc = new ethers.Contract(token.address, erc20Abi, provider);
       const bal = await erc.balanceOf(addr);
-      if (bal <= 0n) {
+      const tokenEligible = bal > 0n;
+      console.log(`[ERC20] sym=${token.symbol} bal=${bal} eligible=${tokenEligible}`);
+      if (!tokenEligible) {
         releaseLock(key);
         continue;
       }
@@ -218,6 +226,15 @@ async function processAddress(row, provider, pool, omnibus) {
 async function main() {
   console.log(`[BOOT] sweeper ${VERSION} chain=${CHAIN_ID} rpc=${maskUrl(RPC_HTTP)} rate_limit=${SWEEP_RATE_LIMIT_PER_MIN}/min`);
   const pool = await initDb();
+  const [countRows] = await pool.query('SELECT COUNT(*) AS c FROM wallet_addresses WHERE chain_id=?', [CHAIN_ID]);
+  const addrCount = Number(countRows[0].c || 0);
+  if (addrCount === 0) {
+    console.warn(`[WARN] no wallet_addresses loaded for chain=${CHAIN_ID}`);
+  } else {
+    const [sampleRows] = await pool.query('SELECT address FROM wallet_addresses WHERE chain_id=? ORDER BY id DESC LIMIT 3', [CHAIN_ID]);
+    const sample = sampleRows.map((r) => r.address).join(',');
+    console.log(`[WATCH] addresses count=${addrCount} sample=[${sample}]`);
+  }
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const omnibus = new ethers.Wallet(OMNIBUS_PK, provider);
   console.log(`[RPC] ok chainId=${CHAIN_ID} tip=${await provider.getBlockNumber()}`);
@@ -225,6 +242,9 @@ async function main() {
   async function loop() {
     try {
       const list = await getCandidates(pool);
+      if (list.length === 0) {
+        console.warn(`[WARN] no wallet_addresses loaded for chain=${CHAIN_ID}`);
+      }
       for (const row of list) {
         await processAddress(row, provider, pool, omnibus);
       }
