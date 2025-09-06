@@ -15,7 +15,7 @@ if (!RPC_HTTP) throw new Error('RPC_HTTP is required');
 
 const CONCURRENCY = 5;
 
-const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
+const { TRANSFER_TOPIC } = require('../../api/src/services/shared/erc20');
 const tokenMeta = [];
 function addToken(symbol, envKey) {
   const addr = process.env[envKey];
