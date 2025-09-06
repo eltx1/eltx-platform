@@ -14,7 +14,7 @@ const OMNIBUS_PK = process.env.OMNIBUS_PK;
 if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK required');
 
 const TOKENS = process.env.TOKENS_JSON ? JSON.parse(process.env.TOKENS_JSON) : [];
-const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '300000000000000');
+const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '100000000000000');
 const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
 const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
