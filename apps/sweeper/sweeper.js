@@ -17,7 +17,6 @@ const TOKENS = process.env.TOKENS_JSON ? JSON.parse(process.env.TOKENS_JSON) : [
 const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '300000000000000');
 const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
 const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
-const GAS_PRICE_CAP = BigInt(process.env.GAS_PRICE_CAP_GWEI || '5') * 1_000_000_000n;
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
 const SWEEP_RATE_LIMIT_PER_MIN = Number(process.env.SWEEP_RATE_LIMIT_PER_MIN || 12);
 
@@ -46,6 +45,42 @@ async function withRetry(fn, attempts = TX_MAX_RETRY) {
     }
   }
   throw err;
+}
+
+// helper: احصل على gasPrice (wei) مع fallback وcap
+async function resolveGasPriceWei(provider, capGwei = Number(process.env.GAS_PRICE_CAP_GWEI || 3)) {
+  // cap بالـ wei
+  const capWei = BigInt(Math.max(1, capGwei)) * 1_000_000_000n;
+
+  // 1) v6: getFeeData().gasPrice
+  try {
+    const fd = await provider.getFeeData(); // ethers v6
+    if (fd && fd.gasPrice != null) {
+      const gp = BigInt(fd.gasPrice.toString());
+      const chosen = gp > capWei ? capWei : gp;
+      console.log(`[GAS] feeData gasPrice=${gp} wei (~${Number(gp) / 1e9} gwei) cap=${capGwei} → using=${chosen} wei`);
+      return chosen;
+    }
+  } catch (e) {
+    console.warn('[GAS] getFeeData failed, fallback to eth_gasPrice', e?.code || e?.message || e);
+  }
+
+  // 2) JSON-RPC مباشر
+  try {
+    const hex = await provider.send('eth_gasPrice', []);
+    if (typeof hex === 'string') {
+      const gp = BigInt(hex);
+      const chosen = gp > capWei ? capWei : gp;
+      console.log(`[GAS] rpc eth_gasPrice=${gp} wei (~${Number(gp) / 1e9} gwei) cap=${capGwei} → using=${chosen} wei`);
+      return chosen;
+    }
+  } catch (e) {
+    console.warn('[GAS] eth_gasPrice failed', e?.code || e?.message || e);
+  }
+
+  // 3) fallback نهائي: استخدم الـ cap نفسه (gwei → wei)
+  console.log(`[GAS] fallback: using cap only ${capGwei} gwei`);
+  return capWei;
 }
 
 // ---- init ----
@@ -114,8 +149,7 @@ async function processAddress(row, provider, pool, omnibus) {
     return;
   }
   let balBNB = await provider.getBalance(addr);
-  let gasPrice = await provider.getGasPrice();
-  if (gasPrice > GAS_PRICE_CAP) gasPrice = GAS_PRICE_CAP;
+  const gasPrice = await resolveGasPriceWei(provider);
   const txCost = gasPrice * 21000n;
 
   if (balBNB > MIN_SWEEP_WEI_BNB && balBNB >= txCost * 10n) {
@@ -167,7 +201,7 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       const tokenWallet = wallet.connect(provider);
       const contract = new ethers.Contract(token.address, erc20Abi, tokenWallet);
-      const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal));
+      const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice }));
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
       await tx.wait(1);
       console.log(`[CONFIRMED] tx=${tx.hash}`);
@@ -195,7 +229,7 @@ async function main() {
         await processAddress(row, provider, pool, omnibus);
       }
     } catch (e) {
-      console.error('[ERR][LOOP]', e.code || e.message);
+      console.error('[ERR][LOOP]', e?.code || e?.name || 'ERR', e?.message || e, (e?.stack || '').split('\n')[0]);
     }
     setTimeout(loop, 30 * 1000);
   }
