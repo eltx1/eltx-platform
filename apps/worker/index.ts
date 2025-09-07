@@ -1,3 +1,13 @@
+import './bootstrap/loadEnv.ts';
+import { assertRequiredEnv } from './bootstrap/loadEnv.ts';
+
+try {
+  assertRequiredEnv();
+} catch (e) {
+  console.error(e instanceof Error ? e.message : e);
+  process.exit(1);
+}
+
 import { createPool } from 'mysql2/promise';
 import { getDepositAddressesBatch } from '../shared/wallet/addresses.ts';
 import { scanAddress } from './scanAddress.ts';

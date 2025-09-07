@@ -1,8 +1,13 @@
 import { ethers } from 'ethers';
 
-const RPC_HTTP = process.env.RPC_HTTP || process.env.BSC_RPC_URL;
-if (!RPC_HTTP) throw new Error('RPC_HTTP missing');
-const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
+const RPC_HTTP = process.env.RPC_HTTP?.trim();
+if (!RPC_HTTP) {
+  throw new Error(
+    'RPC_HTTP missing. Make sure apps/worker/.env or project .env is loaded before imports. ' +
+      'See README for required ENV and copy command for apps/worker/.env.'
+  );
+}
+const CHAIN_ID = Number(process.env.CHAIN_ID);
 
 export const rpcProvider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
 
