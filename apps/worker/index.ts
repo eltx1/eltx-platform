@@ -1,53 +1,42 @@
-import './bootstrap/loadEnv.ts';
-import { assertRequiredEnv } from './bootstrap/loadEnv.ts';
+import { config as dotenv } from 'dotenv';
+import { resolve } from 'path';
 
-try {
-  assertRequiredEnv();
-} catch (e) {
-  console.error(e instanceof Error ? e.message : e);
-  process.exit(1);
-}
+dotenv({ path: resolve(process.cwd(), 'apps/worker/.env') });
+dotenv({ path: resolve(process.cwd(), '.env'), override: false });
 
-import { createPool } from 'mysql2/promise';
-import { getDepositAddressesBatch } from '../shared/wallet/addresses.ts';
-import { scanAddress } from './scanAddress.ts';
-const PAGE_SIZE = 500;
-const MAX_CONCURRENCY = 4;
+import { getAllDepositAddresses } from './services/addresses.ts';
+import { scanOneAddress } from './services/addressScanner.ts';
 
-async function main() {
-  if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
-  const db = createPool(process.env.DATABASE_URL);
-
-  let cursor = 0;
-  const queue: { address: string; user_id: number }[] = [];
-
-  while (true) {
-    if (queue.length === 0) {
-      const { rows, nextCursor } = await getDepositAddressesBatch(db, { limit: PAGE_SIZE, cursor });
-      cursor = nextCursor ?? 0;
-      queue.push(...rows);
-      if (queue.length === 0) {
-        await new Promise((r) => setTimeout(r, 5000));
-        continue;
-      }
-    }
-
-    const batch = queue.splice(0, PAGE_SIZE);
-    const chunks = [];
-    for (let i = 0; i < batch.length; i += MAX_CONCURRENCY) {
-      chunks.push(batch.slice(i, i + MAX_CONCURRENCY));
-    }
-    for (const group of chunks) {
-      await Promise.all(
-        group.map((row) =>
-          scanAddress(db, row.address, row.user_id).catch((e) => console.error('[ERR][scan]', e.message))
-        )
-      );
-    }
+function assertRequiredEnv() {
+  const required = ['RPC_HTTP', 'RPC_WS', 'CONFIRMATIONS', 'DATABASE_URL'];
+  const missing = required.filter((k) => !process.env[k] || String(process.env[k]).trim() === '');
+  if (missing.length) {
+    throw new Error(`Missing required env vars: ${missing.join(', ')}`);
   }
 }
 
-main().catch((e) => {
-  console.error('[ERR][worker]', e);
+const SCAN_CONCURRENCY = Number(process.env.WORKER_CONCURRENCY || 3);
+const SLEEP_MS = Number(process.env.WORKER_SLEEP_MS || 1500);
+
+async function main() {
+  assertRequiredEnv();
+  while (true) {
+    const addrs = await getAllDepositAddresses();
+    for (let i = 0; i < addrs.length; i += SCAN_CONCURRENCY) {
+      const chunk = addrs.slice(i, i + SCAN_CONCURRENCY);
+      await Promise.allSettled(
+        chunk.map((a) =>
+          scanOneAddress(a).catch((e) => {
+            console.error('[ERR][scan]', e?.message || e);
+          })
+        )
+      );
+    }
+    await new Promise((r) => setTimeout(r, SLEEP_MS));
+  }
+}
+
+main().catch((err) => {
+  console.error('[FATAL]', err);
   process.exit(1);
 });
