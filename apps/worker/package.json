@@ -4,7 +4,8 @@
   "private": true,
   "main": "index.ts",
   "scripts": {
-    "start": "ts-node index.ts"
+    "worker": "ts-node index.ts",
+    "start": "npm run worker"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
