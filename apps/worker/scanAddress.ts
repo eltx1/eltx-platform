@@ -1,7 +1,7 @@
-import { getLatestBlockNumber, getLogs, getBlocksWithTxsBatch, rpcProvider } from './services/bscRpc';
-import { TOKENS_IN_SCOPE, TRANSFER_TOPIC } from './services/tokenMaps';
-import { upsertDeposit, markConfirmed } from './services/deposits';
-import { getAddressProgress, updateAddressProgress } from './services/addressProgress';
+import { getLatestBlockNumber, getLogs, getBlocksWithTxsBatch, rpcProvider } from './services/bscRpc.ts';
+import { TOKENS_IN_SCOPE, TRANSFER_TOPIC } from './services/tokenMaps.ts';
+import { upsertDeposit, markConfirmed } from './services/deposits.ts';
+import { getAddressProgress, updateAddressProgress } from './services/addressProgress.ts';
 import type { Pool } from 'mysql2/promise';
 import { ethers } from 'ethers';
 
