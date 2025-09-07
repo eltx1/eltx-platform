@@ -10,7 +10,7 @@ import { getAllDepositAddresses } from './services/addresses.ts';
 import { scanOneAddress } from './services/addressScanner.ts';
 
 function assertRequiredEnv() {
-  const required = ['RPC_HTTP', 'RPC_WS', 'CONFIRMATIONS', 'DATABASE_URL'];
+  const required = ['RPC_HTTP', 'CONFIRMATIONS', 'DATABASE_URL', 'CHAIN_ID'];
   const missing = required.filter((k) => !process.env[k] || String(process.env[k]).trim() === '');
   if (missing.length) {
     throw new Error(`Missing required env vars: ${missing.join(', ')}`);
