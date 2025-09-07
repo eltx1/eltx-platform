@@ -183,6 +183,7 @@ export async function scanOneAddress(addr: string, latest: number, verbose: bool
         }
         await new Promise((r) => setImmediate(r));
       }
+      await new Promise((r) => setImmediate(r));
     }
   } catch (e) {
     logger.error('SCAN', 'ADDR', `addr=${shortAddr(addr)} err=${e?.message || e}`);

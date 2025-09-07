@@ -1,5 +1,3 @@
-import { sql } from './db.ts';
-
 const DEFAULT_RECENT_BLOCKS = Number(process.env.USER_SCAN_RECENT_BLOCKS || 1000);
 const SAFETY_BUFFER = Number(process.env.USER_SCAN_SAFETY || 12);
 
