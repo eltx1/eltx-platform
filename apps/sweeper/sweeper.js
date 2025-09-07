@@ -145,7 +145,7 @@ async function processAddress(row, provider, pool, omnibus) {
   try {
     wallet = deriveWallet(index, provider);
   } catch (e) {
-    console.error(`[ERR][WALLET] addr=${addr} code=${e.code || e.message}`);
+    console.error(`[ERR][WALLET] addr=${addr}`, e);
     errorCount++;
     return;
   }
@@ -189,14 +189,14 @@ async function processAddress(row, provider, pool, omnibus) {
               pool,
             );
           } catch (e) {
-            console.error('[POST-OK][ERR]', e.code || e.message);
+            console.error('[POST-OK][ERR]', e);
           }
         } else {
           console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
         }
         sweepCount++;
       } catch (e) {
-        console.error('[ERR][SWEEP]', e.code || e.message);
+        console.error('[ERR][SWEEP]', e);
         errorCount++;
         try {
           await recordDepositOnSweepFail(
@@ -211,7 +211,7 @@ async function processAddress(row, provider, pool, omnibus) {
             pool,
           );
         } catch (err) {
-          console.error('[POST-FAIL][ERR]', err.code || err.message);
+          console.error('[POST-FAIL][ERR]', err);
         }
       } finally {
         releaseLock(key);
@@ -243,7 +243,7 @@ async function processAddress(row, provider, pool, omnibus) {
           dripCount++;
           balBNB += GAS_DRIP_WEI;
         } catch (e) {
-          console.error('[ERR][DRIP]', e.code || e.message);
+          console.error('[ERR][DRIP]', e);
           errorCount++;
           releaseLock(key);
           continue;
@@ -271,14 +271,14 @@ async function processAddress(row, provider, pool, omnibus) {
             pool,
           );
         } catch (e) {
-          console.error('[POST-OK][ERR]', e.code || e.message);
+          console.error('[POST-OK][ERR]', e);
         }
       } else {
         console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
       }
       sweepCount++;
     } catch (e) {
-      console.error('[ERR][SWEEP]', e.code || e.message);
+      console.error('[ERR][SWEEP]', e);
       errorCount++;
       try {
         await recordDepositOnSweepFail(
@@ -293,7 +293,7 @@ async function processAddress(row, provider, pool, omnibus) {
           pool,
         );
       } catch (err) {
-        console.error('[POST-FAIL][ERR]', err.code || err.message);
+        console.error('[POST-FAIL][ERR]', err);
       }
     } finally {
       releaseLock(key);
