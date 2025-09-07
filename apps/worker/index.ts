@@ -1,8 +1,10 @@
 import { config as dotenv } from 'dotenv';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv({ path: resolve(process.cwd(), 'apps/worker/.env') });
-dotenv({ path: resolve(process.cwd(), '.env'), override: false });
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv({ path: resolve(__dirname, '.env') });
+dotenv({ path: resolve(__dirname, '../../.env'), override: false });
 
 import { getAllDepositAddresses } from './services/addresses.ts';
 import { scanOneAddress } from './services/addressScanner.ts';
