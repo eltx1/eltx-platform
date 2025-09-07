@@ -36,7 +36,7 @@ module.exports = function createUserScanner(db) {
           await upsertDeposit(db, {
             user_id: userId,
             chain_id: CHAIN_ID,
-            to_address: addr,
+            address: addr,
             tx_hash: log.transactionHash,
             block_number: log.blockNumber,
             block_hash: log.blockHash,
@@ -65,7 +65,7 @@ module.exports = function createUserScanner(db) {
         await upsertDeposit(db, {
           user_id: userId,
           chain_id: CHAIN_ID,
-          to_address: to,
+          address: to,
           tx_hash: tx.hash,
           block_number: block.number,
           block_hash: block.hash,
