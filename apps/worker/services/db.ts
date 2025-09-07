@@ -1,4 +1,11 @@
 import { createPool } from 'mysql2/promise';
+import { config as dotenv } from 'dotenv';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv({ path: resolve(__dirname, '../.env') });
+dotenv({ path: resolve(__dirname, '../../../.env'), override: false });
 
 if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL missing');
