@@ -46,6 +46,10 @@ const pool = mysql.createPool(
   }
 );
 
+// start background scanner runner
+const startRunner = require('./background/runner');
+startRunner(pool);
+
 // ensure wallet tables exist
 (async () => {
   try {
@@ -412,6 +416,61 @@ app.post('/wallet/refresh', walletLimiter, async (req, res, next) => {
       [userId, bal.toString()]
     );
     res.json({ ok: true, balance_wei: bal.toString(), balance: ethers.formatEther(bal) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// On-demand wallet scan endpoints
+const { getLatestBlockNumber } = require('./src/services/bscRpc');
+const { enqueueUserScan, getJobStatus } = require('./src/services/scanJobs');
+const { getLastScannedBlock } = require('./src/services/userScanProgress');
+
+app.post('/api/wallet/refresh', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const latest = await getLatestBlockNumber();
+    const N = Number(process.env.USER_SCAN_RECENT_BLOCKS) || 1000;
+    const baseline = latest - N + 1;
+    const last = await getLastScannedBlock(pool, userId);
+    const fromBlock = Math.max(baseline, last ? last + 1 : baseline);
+    const toBlock = latest;
+    const jobId = await enqueueUserScan(pool, userId, fromBlock, toBlock);
+    console.log(`[wallet/refresh] user=${userId} range=${fromBlock}-${toBlock} job=${jobId}`);
+    res.status(202).json({
+      ok: true,
+      status: 202,
+      jobId,
+      range: { from: fromBlock, to: toBlock },
+      message: 'Scanning recent blocks in background (snapshot)',
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/wallet/refresh/:jobId', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    console.log(`[wallet/refresh] status check user=${userId} job=${req.params.jobId}`);
+    const job = await getJobStatus(pool, req.params.jobId, userId);
+    if (!job) return next({ status: 404, code: 'NOT_FOUND', message: 'Job not found' });
+    res.json({ ok: true, job });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/api/transactions', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    console.log(`[transactions] user=${userId} limit=${limit}`);
+    const [rows] = await pool.query(
+      'SELECT * FROM wallet_deposits WHERE user_id=? ORDER BY block_number DESC, id DESC LIMIT ?',
+      [userId, limit]
+    );
+    res.json({ ok: true, transactions: rows });
   } catch (err) {
     next(err);
   }
