@@ -1,4 +1,4 @@
-import { sql } from './db.ts';
+import { sql, pool } from './db.ts';
 
 export async function upsertDeposit(row: {
   to_address: string;
@@ -11,8 +11,8 @@ export async function upsertDeposit(row: {
   status: 'pending' | 'confirmed';
   confirmations: number;
   source: string;
-}) {
-  await sql.query(
+}): Promise<boolean> {
+  const [res]: any = await pool.query(
     `INSERT INTO wallet_deposits (
       to_address, from_address, token_symbol, token_address, amount_wei,
       tx_hash, block_number, status, confirmations, source
@@ -31,6 +31,7 @@ export async function upsertDeposit(row: {
       row.source,
     ]
   );
+  return res.affectedRows === 1;
 }
 
 export async function markConfirmed(txHash: string, blockNumber: number) {

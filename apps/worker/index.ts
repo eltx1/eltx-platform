@@ -1,17 +1,24 @@
 import { config as dotenv } from 'dotenv';
-import { resolve } from 'path';
+import { dirname, resolve } from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv({ path: resolve(process.cwd(), 'apps/worker/.env') });
-dotenv({ path: resolve(process.cwd(), '.env'), override: false });
+const __dirname = dirname(fileURLToPath(import.meta.url));
+dotenv({ path: resolve(__dirname, '.env') });
+dotenv({ path: resolve(__dirname, '../../.env'), override: false });
 
 import { getAllDepositAddresses } from './services/addresses.ts';
 import { scanOneAddress } from './services/addressScanner.ts';
+import { getLatestBlockNumber } from './services/bscRpc.ts';
+
+const ENV_PATHS = [resolve(__dirname, '.env'), resolve(__dirname, '../../.env')];
 
 function assertRequiredEnv() {
-  const required = ['RPC_HTTP', 'RPC_WS', 'CONFIRMATIONS', 'DATABASE_URL'];
+  const required = ['RPC_HTTP', 'RPC_WS', 'CONFIRMATIONS', 'DATABASE_URL', 'CHAIN_ID'];
   const missing = required.filter((k) => !process.env[k] || String(process.env[k]).trim() === '');
   if (missing.length) {
-    throw new Error(`Missing required env vars: ${missing.join(', ')}`);
+    throw new Error(
+      `Missing required env vars: ${missing.join(', ')}. Searched .env files at ${ENV_PATHS.join(', ')}`
+    );
   }
 }
 
@@ -22,11 +29,12 @@ async function main() {
   assertRequiredEnv();
   while (true) {
     const addrs = await getAllDepositAddresses();
+    const tip = await getLatestBlockNumber();
     for (let i = 0; i < addrs.length; i += SCAN_CONCURRENCY) {
       const chunk = addrs.slice(i, i + SCAN_CONCURRENCY);
       await Promise.allSettled(
         chunk.map((a) =>
-          scanOneAddress(a).catch((e) => {
+          scanOneAddress(a, tip).catch((e) => {
             console.error('[ERR][scan]', e?.message || e);
           })
         )
