@@ -6,11 +6,11 @@ import type { Pool } from 'mysql2/promise';
 import { ethers } from 'ethers';
 
 const RECENT_WINDOW = 1000;
-const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
+const CONFIRMATIONS = Number(process.env.CONFIRMATIONS);
 
 export async function scanAddress(db: Pool, address: string, userId: number) {
   const addr = address.toLowerCase();
-  const chainId = Number(process.env.CHAIN_ID || 56);
+  const chainId = Number(process.env.CHAIN_ID);
 
   const toBlock = await getLatestBlockNumber();
   const progress = await getAddressProgress(db, addr);

@@ -13,7 +13,7 @@ export async function getDepositAddressesBatch(
     cursor = 0,
   }: { limit: number; cursor?: number }
 ): Promise<{ rows: AddressRow[]; nextCursor: number | null }> {
-  const chainId = Number(process.env.CHAIN_ID || 56);
+  const chainId = Number(process.env.CHAIN_ID);
   const [rows] = await db.query(
     'SELECT id, address, user_id FROM wallet_addresses WHERE chain_id=? AND id>? ORDER BY id ASC LIMIT ?',
     [chainId, cursor, limit]
