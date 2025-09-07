@@ -1,21 +1,11 @@
-import { sql } from './db.ts';
-
 const DEFAULT_RECENT_BLOCKS = Number(process.env.USER_SCAN_RECENT_BLOCKS || 1000);
-const SAFETY_BUFFER = Number(process.env.USER_SCAN_SAFETY || 12);
 
-export async function getFromBlockForAddress(addr: string, latestBlock: number): Promise<number> {
-  const row = await sql.oneOrNone<{ max_block: number }>(
-    `SELECT MAX(block_number) AS max_block FROM wallet_deposits WHERE LOWER(to_address) = LOWER(?)`,
-    [addr]
-  );
-
+// Previous iterations of the worker attempted to persist per-address
+// scan progress in a dedicated table. That table no longer exists and the
+// worker simply rescans a recent window of blocks for every address on each
+// loop. Any duplicate deposits are handled by the database via
+// `ON DUPLICATE KEY` clauses in the upsert logic.
+export async function getFromBlockForAddress(_addr: string, latestBlock: number): Promise<number> {
   const baseline = latestBlock - DEFAULT_RECENT_BLOCKS + 1;
-  const maxBlock = row?.max_block ? Number(row.max_block) : null;
-
-  if (!maxBlock) {
-    return Math.max(0, baseline);
-  }
-
-  const from = Math.max(baseline, maxBlock - SAFETY_BUFFER);
-  return Math.max(0, from);
+  return Math.max(0, baseline);
 }
