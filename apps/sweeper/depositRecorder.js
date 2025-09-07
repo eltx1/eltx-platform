@@ -1,13 +1,14 @@
+// Fallback-only deposit recorder: DB-only, no RPC
 const crypto = require('crypto');
 
 async function upsertDeposit(pool, row) {
   const keySql =
-    'SELECT confirmations, status FROM wallet_deposits WHERE tx_hash=? AND to_address=? AND (token_address <=> ?)';
+    'SELECT confirmations, status FROM wallet_deposits WHERE tx_hash=? AND address=? AND (token_address <=> ?)';
   let prev;
   try {
     const [kRows] = await pool.query(keySql, [
       row.tx_hash.toLowerCase(),
-      row.to_address.toLowerCase(),
+      row.address.toLowerCase(),
       row.token_address ? row.token_address.toLowerCase() : null,
     ]);
     prev = kRows[0];
@@ -16,13 +17,13 @@ async function upsertDeposit(pool, row) {
     return { error: e };
   }
   const sql = `INSERT INTO wallet_deposits (
-    user_id, to_address, from_address, token_symbol, token_address,
+    user_id, address, from_address, token_symbol, token_address,
     amount_wei, tx_hash, block_number, status, confirmations, source
   ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
   ON DUPLICATE KEY UPDATE status=VALUES(status), confirmations=VALUES(confirmations), last_update_at=CURRENT_TIMESTAMP`;
   const params = [
     row.user_id,
-    row.to_address.toLowerCase(),
+    row.address.toLowerCase(),
     row.from_address.toLowerCase(),
     row.token_symbol,
     row.token_address ? row.token_address.toLowerCase() : null,
@@ -69,7 +70,7 @@ async function recordDepositAfterSweepSuccess(ctx, pool) {
     const conf = confirmations ?? 1;
     const res = await upsertDeposit(pool, {
       user_id: userId,
-      to_address: addr,
+      address: addr,
       from_address: addr,
       token_symbol: tokenSymbol,
       token_address: tokenAddressOrNull ? tokenAddressOrNull.toLowerCase() : null,
@@ -122,7 +123,7 @@ async function recordDepositOnSweepFail(ctx, pool) {
     const failHash = 'sweeper_fail:' + crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 32);
     const res = await upsertDeposit(pool, {
       user_id: userId,
-      to_address: addr,
+      address: addr,
       from_address: addr,
       token_symbol: tokenSymbol,
       token_address: tokenAddressOrNull ? tokenAddressOrNull.toLowerCase() : null,
