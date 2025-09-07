@@ -1,158 +1,187 @@
-// Fallback-only deposit recorder: DB-only, no RPC
 const crypto = require('crypto');
 
-async function upsertDeposit(pool, row) {
-  const keySql =
-    'SELECT confirmations, status FROM wallet_deposits WHERE tx_hash=? AND address=? AND (token_address <=> ?)';
-  let prev;
-  try {
-    const [kRows] = await pool.query(keySql, [
-      row.tx_hash.toLowerCase(),
-      row.address.toLowerCase(),
-      row.token_address ? row.token_address.toLowerCase() : null,
-    ]);
-    prev = kRows[0];
-  } catch (e) {
-    console.error('[POST][ERR][DB] select', e, { row });
-    return { error: e };
-  }
-  const sql = `INSERT INTO wallet_deposits (
-    user_id, address, token_symbol, token_address,
-    amount_wei, tx_hash, block_number, status, confirmations, source
-  ) VALUES (?,?,?,?,?,?,?,?,?,?)
-  ON DUPLICATE KEY UPDATE status=VALUES(status), confirmations=VALUES(confirmations), last_update_at=CURRENT_TIMESTAMP`;
-  const params = [
-    row.user_id,
-    row.address.toLowerCase(),
-    row.token_symbol,
-    row.token_address ? row.token_address.toLowerCase() : null,
-    row.amount_wei.toString(),
-    row.tx_hash.toLowerCase(),
-    row.block_number,
-    row.status,
-    row.confirmations,
-    row.source,
-  ];
-  try {
-    console.log('[POST][DB] insert row=', row);
-    console.log('[POST][DB] insert params=', params);
-    await pool.query(sql, params);
-  } catch (e) {
-    console.error('[POST][ERR][DB] insert', e, { row, params });
-    return { error: e };
-  }
-  if (prev) return { kind: 'updated', prev };
-  return { kind: 'new', prev: null };
-}
-
-async function recordDepositAfterSweepSuccess(ctx, pool) {
+async function detectAndUpsertDeposit(ctx, pool) {
   const start = Date.now();
   const {
-    userId,
-    depositAddress,
-    tokenSymbol,
-    tokenAddressOrNull,
-    eligibleBalanceWei,
-    sweptAmountWei,
-    sweepTxHash,
-    sweepBlockNumber,
-    confirmations,
+    chainId,
+    address,
+    tokenAddress,
+    amountWei,
+    txHash,
+    blockNumber,
+    nowTs,
   } = ctx;
-  const addr = (depositAddress || '').toLowerCase();
-  const amount = BigInt(sweptAmountWei ?? eligibleBalanceWei ?? 0);
-  console.log(
-    `[POST-OK][BEGIN] user=${userId ?? 'null'} addr=${addr} token=${tokenSymbol} tx=${sweepTxHash} amount=${amount}`,
-  );
-  if (!userId || amount <= 0n) {
-    console.log(`[POST][DONE] mode=ok took=${Date.now() - start}ms`);
+  const addr = (address || '').toLowerCase();
+  const tokenAddr = tokenAddress ? tokenAddress.toLowerCase() : null;
+  const amountStr = BigInt(amountWei || 0).toString();
+  const ts = typeof nowTs === 'number' ? nowTs : Date.now();
+  let userId;
+  try {
+    const [uRows] = await pool.query(
+      'SELECT user_id FROM wallet_addresses WHERE chain_id=? AND address=? LIMIT 1',
+      [chainId, addr],
+    );
+    if (!uRows[0]) {
+      console.warn(
+        `[DEPOSIT][UPSERT] user=null addr=${addr} token=${tokenAddr || 'BNB'} wei=${amountStr} tx=${txHash || 'pending'} action=skip-no-user`,
+      );
+      return;
+    }
+    userId = uRows[0].user_id;
+  } catch (e) {
+    console.error('[DEPOSIT][ERR] select_user', e);
     return;
   }
+
+  let action = 'insert';
   try {
-    const conf = confirmations ?? 1;
-    const res = await upsertDeposit(pool, {
-      user_id: userId,
-      address: addr,
-      token_symbol: tokenSymbol,
-      token_address: tokenAddressOrNull ? tokenAddressOrNull.toLowerCase() : null,
-      amount_wei: amount,
-      tx_hash: sweepTxHash,
-      block_number: sweepBlockNumber || 0,
-      status: 'confirmed',
-      confirmations: conf,
-      source: 'sweeper',
-    });
-    if (res.error) {
-      console.error('[POST][ERR] mode=ok', res.error);
-    } else if (res.kind === 'new') {
-      console.log(
-        `[POST][NEW] user=${userId} token=${tokenSymbol} to=${addr} amount=${amount} src=sweeper`,
-      );
+    if (txHash) {
+      const tx = txHash.toLowerCase();
+      const [rows] = await pool.query('SELECT id FROM wallet_deposits WHERE tx_hash=? LIMIT 1', [tx]);
+      if (rows[0]) {
+        await pool.query(
+          'UPDATE wallet_deposits SET block_number=?, confirmations=0, status=\'pending\', created_at=FROM_UNIXTIME(?/1000) WHERE id=?',
+          [blockNumber ?? 0, ts, rows[0].id],
+        );
+        action = 'update';
+      } else {
+        const amt = BigInt(amountStr);
+        const min = (amt * 99n) / 100n;
+        const max = (amt * 101n) / 100n;
+        const [pRows] = await pool.query(
+          `SELECT id FROM wallet_deposits WHERE user_id=? AND chain_id=? AND address=? AND (token_address <=> ?) AND tx_hash LIKE 'pending:%' AND created_at > DATE_SUB(FROM_UNIXTIME(?/1000), INTERVAL 1 DAY) AND amount_wei BETWEEN ? AND ? ORDER BY id DESC LIMIT 1`,
+          [
+            userId,
+            chainId,
+            addr,
+            tokenAddr,
+            ts,
+            min.toString(),
+            max.toString(),
+          ],
+        );
+        if (pRows[0]) {
+          await pool.query(
+            'UPDATE wallet_deposits SET tx_hash=?, block_number=?, created_at=FROM_UNIXTIME(?/1000) WHERE id=?',
+            [tx, blockNumber ?? 0, ts, pRows[0].id],
+          );
+          action = 'update';
+        } else {
+          await pool.query(
+            `INSERT INTO wallet_deposits (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,FROM_UNIXTIME(?/1000))`,
+            [
+              userId,
+              chainId,
+              addr,
+              tokenAddr,
+              amountStr,
+              tx,
+              blockNumber ?? 0,
+              0,
+              'pending',
+              0,
+              ts,
+            ],
+          );
+          action = 'insert';
+        }
+      }
     } else {
-      console.log(
-        `[POST][UPD] user=${userId} token=${tokenSymbol} to=${addr} tx=${sweepTxHash} conf:${res.prev.confirmations}->${conf} status:${res.prev.status}->confirmed src=sweeper`,
+      const amt = BigInt(amountStr);
+      if (amt <= 0n) {
+        console.log(`[DEPOSIT][UPSERT] user=${userId} addr=${addr} token=${tokenAddr || 'BNB'} wei=${amountStr} tx=pending action=skip-zero`);
+        return;
+      }
+      const min = (amt * 99n) / 100n;
+      const max = (amt * 101n) / 100n;
+      const [rows] = await pool.query(
+        `SELECT id FROM wallet_deposits WHERE user_id=? AND chain_id=? AND address=? AND (token_address <=> ?) AND status IN ('pending','swept','confirmed') AND created_at > DATE_SUB(FROM_UNIXTIME(?/1000), INTERVAL 1 DAY) AND amount_wei BETWEEN ? AND ? ORDER BY id DESC LIMIT 1`,
+        [
+          userId,
+          chainId,
+          addr,
+          tokenAddr,
+          ts,
+          min.toString(),
+          max.toString(),
+        ],
       );
+      if (rows[0]) {
+        await pool.query('UPDATE wallet_deposits SET created_at=FROM_UNIXTIME(?/1000) WHERE id=?', [ts, rows[0].id]);
+        action = 'update';
+      } else {
+        const placeholder = `pending:${addr}:${ts}`.slice(0, 80);
+        await pool.query(
+          `INSERT INTO wallet_deposits (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,FROM_UNIXTIME(?/1000))`,
+          [
+            userId,
+            chainId,
+            addr,
+            tokenAddr,
+            amountStr,
+            placeholder,
+            0,
+            0,
+            'pending',
+            0,
+            ts,
+          ],
+        );
+        action = 'insert';
+      }
     }
   } catch (e) {
-    console.error('[POST][ERR] mode=ok', e);
+    console.error('[DEPOSIT][ERR][UPSERT]', e);
+    return;
   } finally {
-    console.log(`[POST][DONE] mode=ok took=${Date.now() - start}ms`);
+    console.log(
+      `[DEPOSIT][UPSERT] user=${userId} addr=${addr} token=${tokenAddr || 'BNB'} wei=${amountStr} tx=${txHash || 'pending'} action=${action}`,
+    );
+    console.log(`[DEPOSIT][DONE] took=${Date.now() - start}ms`);
   }
 }
 
-async function recordDepositOnSweepFail(ctx, pool) {
+async function recordSweepFailure(ctx, pool) {
   const start = Date.now();
-  const {
-    userId,
-    depositAddress,
-    tokenSymbol,
-    tokenAddressOrNull,
-    eligibleBalanceWei,
-    failReason,
-  } = ctx;
+  const { chainId, userId, depositAddress, tokenAddress, amountWei, failReason } = ctx;
   const addr = (depositAddress || '').toLowerCase();
-  const amount = BigInt(eligibleBalanceWei || 0);
-  console.log(
-    `[POST-FAIL][BEGIN] user=${userId ?? 'null'} addr=${addr} token=${tokenSymbol} amount=${amount} reason=${failReason}`,
-  );
-  if (!userId || amount <= 0n) {
-    console.log(`[POST][DONE] mode=fail took=${Date.now() - start}ms`);
+  const tokenAddr = tokenAddress ? tokenAddress.toLowerCase() : null;
+  const amountStr = BigInt(amountWei || 0).toString();
+  if (!userId || BigInt(amountStr) <= 0n) {
+    console.log(`[DEPOSIT][FAIL] skip user=${userId} amount=${amountStr}`);
     return;
   }
+  const hashInput = `${userId}|${addr}|${tokenAddr || 'BNB'}`;
+  const failHash =
+    'sweeper_fail:' + crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 64);
   try {
-    const hashInput = `${userId}|${addr}|${tokenAddressOrNull || tokenSymbol}`;
-    const failHash = 'sweeper_fail:' + crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 32);
-    const res = await upsertDeposit(pool, {
-      user_id: userId,
-      address: addr,
-      token_symbol: tokenSymbol,
-      token_address: tokenAddressOrNull ? tokenAddressOrNull.toLowerCase() : null,
-      amount_wei: amount,
-      tx_hash: failHash,
-      block_number: null,
-      status: 'pending',
-      confirmations: 0,
-      source: 'sweeper_fail',
-    });
-    if (res.error) {
-      console.error('[POST][ERR] mode=fail', res.error);
-    } else if (res.kind === 'new') {
-      console.log(
-        `[POST][NEW] user=${userId} token=${tokenSymbol} to=${addr} amount=${amount} src=sweeper_fail`,
-      );
-    } else {
-      console.log(
-        `[POST][UPD] user=${userId} token=${tokenSymbol} to=${addr} tx=${failHash} src=sweeper_fail`,
-      );
-    }
+    await pool.query(
+      `INSERT INTO wallet_deposits (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE created_at=VALUES(created_at)`,
+      [
+        userId,
+        chainId,
+        addr,
+        tokenAddr,
+        amountStr,
+        failHash,
+        0,
+        0,
+        'pending',
+        0,
+      ],
+    );
+    console.log(
+      `[DEPOSIT][FAIL] user=${userId} addr=${addr} token=${tokenAddr || 'BNB'} wei=${amountStr} reason=${failReason}`,
+    );
   } catch (e) {
-    console.error('[POST][ERR] mode=fail', e);
+    console.error('[DEPOSIT][ERR][FAIL]', e);
   } finally {
-    console.log(`[POST][DONE] mode=fail took=${Date.now() - start}ms`);
+    console.log(`[DEPOSIT][FAIL] done in ${Date.now() - start}ms`);
   }
 }
 
 module.exports = {
-  recordDepositAfterSweepSuccess,
-  recordDepositOnSweepFail,
+  detectAndUpsertDeposit,
+  recordSweepFailure,
 };
 

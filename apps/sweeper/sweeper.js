@@ -3,8 +3,8 @@ const { ethers } = require('ethers');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const {
-  recordDepositAfterSweepSuccess,
-  recordDepositOnSweepFail,
+  detectAndUpsertDeposit,
+  recordSweepFailure,
 } = require('./depositRecorder');
 
 // ---- env ----
@@ -23,6 +23,8 @@ const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
 const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
 const SWEEP_RATE_LIMIT_PER_MIN = Number(process.env.SWEEP_RATE_LIMIT_PER_MIN || 12);
+const RECORD_DEPOSITS_ON_DETECT =
+  (process.env.RECORD_DEPOSITS_ON_DETECT || 'true').toLowerCase() !== 'false';
 
 // ---- utils ----
 function maskUrl(url) {
@@ -169,27 +171,46 @@ async function processAddress(row, provider, pool, omnibus) {
       const sendAmount = balBNB - txCost;
       try {
         console.log(`[ELIGIBLE] addr=${addr} asset=BNB amount=${sendAmount}`);
-        const tx = await withRetry(() => wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }));
+        if (RECORD_DEPOSITS_ON_DETECT) {
+          try {
+            await detectAndUpsertDeposit(
+              {
+                chainId: CHAIN_ID,
+                address: addr,
+                tokenAddress: null,
+                amountWei: sendAmount,
+                txHash: null,
+                blockNumber: null,
+                nowTs: Date.now(),
+              },
+              pool,
+            );
+          } catch (err) {
+            console.error('[DEPOSIT][ERR][detect]', err);
+          }
+        }
+        const tx = await withRetry(() =>
+          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
+        );
         console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
         const receipt = await tx.wait(1);
         console.log(`[CONFIRMED] tx=${tx.hash}`);
         if (receipt.status === 1) {
           try {
-            await recordDepositAfterSweepSuccess(
+            await detectAndUpsertDeposit(
               {
-                userId,
-                depositAddress: addr,
-                tokenSymbol: 'BNB',
-                tokenAddressOrNull: null,
-                eligibleBalanceWei: sendAmount,
-                sweptAmountWei: sendAmount,
-                sweepTxHash: tx.hash,
-                sweepBlockNumber: receipt.blockNumber,
+                chainId: CHAIN_ID,
+                address: addr,
+                tokenAddress: null,
+                amountWei: sendAmount,
+                txHash: tx.hash,
+                blockNumber: receipt.blockNumber,
+                nowTs: Date.now(),
               },
               pool,
             );
           } catch (e) {
-            console.error('[POST-OK][ERR]', e);
+            console.error('[DEPOSIT][ERR][update]', e);
           }
         } else {
           console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
@@ -199,13 +220,13 @@ async function processAddress(row, provider, pool, omnibus) {
         console.error('[ERR][SWEEP]', e);
         errorCount++;
         try {
-          await recordDepositOnSweepFail(
+          await recordSweepFailure(
             {
+              chainId: CHAIN_ID,
               userId,
               depositAddress: addr,
-              tokenSymbol: 'BNB',
-              tokenAddressOrNull: null,
-              eligibleBalanceWei: sendAmount,
+              tokenAddress: null,
+              amountWei: sendAmount,
               failReason: e.code || e.message,
             },
             pool,
@@ -234,6 +255,24 @@ async function processAddress(row, provider, pool, omnibus) {
         continue;
       }
       console.log(`[ELIGIBLE] addr=${addr} asset=${token.symbol} amount=${bal}`);
+      if (RECORD_DEPOSITS_ON_DETECT) {
+        try {
+          await detectAndUpsertDeposit(
+            {
+              chainId: CHAIN_ID,
+              address: addr,
+              tokenAddress: token.address,
+              amountWei: bal,
+              txHash: null,
+              blockNumber: null,
+              nowTs: Date.now(),
+            },
+            pool,
+          );
+        } catch (err) {
+          console.error('[DEPOSIT][ERR][detect]', err);
+        }
+      }
       balBNB = await provider.getBalance(addr);
       if (balBNB < txCost) {
         try {
@@ -257,21 +296,20 @@ async function processAddress(row, provider, pool, omnibus) {
       console.log(`[CONFIRMED] tx=${tx.hash}`);
       if (receipt.status === 1) {
         try {
-          await recordDepositAfterSweepSuccess(
+          await detectAndUpsertDeposit(
             {
-              userId,
-              depositAddress: addr,
-              tokenSymbol: token.symbol,
-              tokenAddressOrNull: token.address,
-              eligibleBalanceWei: bal,
-              sweptAmountWei: bal,
-              sweepTxHash: tx.hash,
-              sweepBlockNumber: receipt.blockNumber,
+              chainId: CHAIN_ID,
+              address: addr,
+              tokenAddress: token.address,
+              amountWei: bal,
+              txHash: tx.hash,
+              blockNumber: receipt.blockNumber,
+              nowTs: Date.now(),
             },
             pool,
           );
         } catch (e) {
-          console.error('[POST-OK][ERR]', e);
+          console.error('[DEPOSIT][ERR][update]', e);
         }
       } else {
         console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
@@ -281,13 +319,13 @@ async function processAddress(row, provider, pool, omnibus) {
       console.error('[ERR][SWEEP]', e);
       errorCount++;
       try {
-        await recordDepositOnSweepFail(
+        await recordSweepFailure(
           {
+            chainId: CHAIN_ID,
             userId,
             depositAddress: addr,
-            tokenSymbol: token.symbol,
-            tokenAddressOrNull: token.address,
-            eligibleBalanceWei: bal,
+            tokenAddress: token.address,
+            amountWei: bal,
             failReason: e.code || e.message,
           },
           pool,
