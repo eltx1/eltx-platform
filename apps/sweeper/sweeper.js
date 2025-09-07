@@ -170,17 +170,25 @@ async function processAddress(row, provider, pool, omnibus) {
         console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
         const receipt = await tx.wait(1);
         console.log(`[CONFIRMED] tx=${tx.hash}`);
-        try {
-          await recordDepositsAfterSweep({
-            userId,
-            address: addr,
-            token: { symbol: 'BNB', address: null },
-            sweepTxHash: tx.hash,
-            sweepBlockNumber: receipt.blockNumber,
-            sweptAmountWei: sendAmount,
-          }, provider, pool);
-        } catch (e) {
-          console.error('[ERR][DEPOSIT]', e.code || e.message);
+        if (receipt.status === 1) {
+          try {
+            await recordDepositsAfterSweep(
+              {
+                userId,
+                address: addr,
+                token: { symbol: 'BNB', address: null },
+                sweepTxHash: tx.hash,
+                sweepBlockNumber: receipt.blockNumber,
+                sweptAmountWei: sendAmount,
+              },
+              provider,
+              pool,
+            );
+          } catch (e) {
+            console.error('[ERR][DEPOSIT]', e.code || e.message);
+          }
+        } else {
+          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
         }
         sweepCount++;
       } catch (e) {
@@ -227,17 +235,25 @@ async function processAddress(row, provider, pool, omnibus) {
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
       const receipt = await tx.wait(1);
       console.log(`[CONFIRMED] tx=${tx.hash}`);
-      try {
-        await recordDepositsAfterSweep({
-          userId,
-          address: addr,
-          token,
-          sweepTxHash: tx.hash,
-          sweepBlockNumber: receipt.blockNumber,
-          sweptAmountWei: bal,
-        }, provider, pool);
-      } catch (e) {
-        console.error('[ERR][DEPOSIT]', e.code || e.message);
+      if (receipt.status === 1) {
+        try {
+          await recordDepositsAfterSweep(
+            {
+              userId,
+              address: addr,
+              token,
+              sweepTxHash: tx.hash,
+              sweepBlockNumber: receipt.blockNumber,
+              sweptAmountWei: bal,
+            },
+            provider,
+            pool,
+          );
+        } catch (e) {
+          console.error('[ERR][DEPOSIT]', e.code || e.message);
+        }
+      } else {
+        console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
       }
       sweepCount++;
     } catch (e) {
