@@ -13,7 +13,7 @@ async function upsertDeposit(pool, row) {
     ]);
     prev = kRows[0];
   } catch (e) {
-    console.error('[POST][ERR][DB]', e?.message || e);
+    console.error('[POST][ERR][DB] select', e, { row });
     return { error: e };
   }
   const sql = `INSERT INTO wallet_deposits (
@@ -34,9 +34,11 @@ async function upsertDeposit(pool, row) {
     row.source,
   ];
   try {
+    console.log('[POST][DB] insert row=', row);
+    console.log('[POST][DB] insert params=', params);
     await pool.query(sql, params);
   } catch (e) {
-    console.error('[POST][ERR][DB]', e?.message || e);
+    console.error('[POST][ERR][DB] insert', e, { row, params });
     return { error: e };
   }
   if (prev) return { kind: 'updated', prev };
@@ -80,7 +82,7 @@ async function recordDepositAfterSweepSuccess(ctx, pool) {
       source: 'sweeper',
     });
     if (res.error) {
-      console.error(`[POST][ERR] mode=ok reason=${res.error?.message || res.error}`);
+      console.error('[POST][ERR] mode=ok', res.error);
     } else if (res.kind === 'new') {
       console.log(
         `[POST][NEW] user=${userId} token=${tokenSymbol} to=${addr} amount=${amount} src=sweeper`,
@@ -91,7 +93,7 @@ async function recordDepositAfterSweepSuccess(ctx, pool) {
       );
     }
   } catch (e) {
-    console.error(`[POST][ERR] mode=ok reason=${e?.message || e}`);
+    console.error('[POST][ERR] mode=ok', e);
   } finally {
     console.log(`[POST][DONE] mode=ok took=${Date.now() - start}ms`);
   }
@@ -132,7 +134,7 @@ async function recordDepositOnSweepFail(ctx, pool) {
       source: 'sweeper_fail',
     });
     if (res.error) {
-      console.error(`[POST][ERR] mode=fail reason=${res.error?.message || res.error}`);
+      console.error('[POST][ERR] mode=fail', res.error);
     } else if (res.kind === 'new') {
       console.log(
         `[POST][NEW] user=${userId} token=${tokenSymbol} to=${addr} amount=${amount} src=sweeper_fail`,
@@ -143,7 +145,7 @@ async function recordDepositOnSweepFail(ctx, pool) {
       );
     }
   } catch (e) {
-    console.error(`[POST][ERR] mode=fail reason=${e?.message || e}`);
+    console.error('[POST][ERR] mode=fail', e);
   } finally {
     console.log(`[POST][DONE] mode=fail took=${Date.now() - start}ms`);
   }
