@@ -1,7 +1,6 @@
 import { createPool } from 'mysql2/promise';
 import { getDepositAddressesBatch } from '../shared/wallet/addresses.ts';
 import { scanAddress } from './scanAddress.ts';
-
 const PAGE_SIZE = 500;
 const MAX_CONCURRENCY = 4;
 
