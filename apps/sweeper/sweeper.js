@@ -2,7 +2,10 @@ const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-const { recordDepositsAfterSweep } = require('./depositRecorder');
+const {
+  recordDepositAfterSweepSuccess,
+  recordDepositOnSweepFail,
+} = require('./depositRecorder');
 
 // ---- env ----
 const VERSION = 'v1';
@@ -172,20 +175,21 @@ async function processAddress(row, provider, pool, omnibus) {
         console.log(`[CONFIRMED] tx=${tx.hash}`);
         if (receipt.status === 1) {
           try {
-            await recordDepositsAfterSweep(
+            await recordDepositAfterSweepSuccess(
               {
                 userId,
-                address: addr,
-                token: { symbol: 'BNB', address: null },
+                depositAddress: addr,
+                tokenSymbol: 'BNB',
+                tokenAddressOrNull: null,
+                eligibleBalanceWei: sendAmount,
+                sweptAmountWei: sendAmount,
                 sweepTxHash: tx.hash,
                 sweepBlockNumber: receipt.blockNumber,
-                sweptAmountWei: sendAmount,
               },
-              provider,
               pool,
             );
           } catch (e) {
-            console.error('[ERR][DEPOSIT]', e.code || e.message);
+            console.error('[POST-OK][ERR]', e.code || e.message);
           }
         } else {
           console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
@@ -194,6 +198,21 @@ async function processAddress(row, provider, pool, omnibus) {
       } catch (e) {
         console.error('[ERR][SWEEP]', e.code || e.message);
         errorCount++;
+        try {
+          await recordDepositOnSweepFail(
+            {
+              userId,
+              depositAddress: addr,
+              tokenSymbol: 'BNB',
+              tokenAddressOrNull: null,
+              eligibleBalanceWei: sendAmount,
+              failReason: e.code || e.message,
+            },
+            pool,
+          );
+        } catch (err) {
+          console.error('[POST-FAIL][ERR]', err.code || err.message);
+        }
       } finally {
         releaseLock(key);
       }
@@ -204,9 +223,10 @@ async function processAddress(row, provider, pool, omnibus) {
     const key = addr + '-' + token.symbol;
     if (sweepCount >= SWEEP_RATE_LIMIT_PER_MIN) break;
     if (!acquireLock(key)) continue;
+    let bal = 0n;
     try {
       const erc = new ethers.Contract(token.address, erc20Abi, provider);
-      const bal = await erc.balanceOf(addr);
+      bal = await erc.balanceOf(addr);
       const tokenEligible = bal > 0n;
       console.log(`[ERC20] sym=${token.symbol} bal=${bal} eligible=${tokenEligible}`);
       if (!tokenEligible) {
@@ -237,20 +257,21 @@ async function processAddress(row, provider, pool, omnibus) {
       console.log(`[CONFIRMED] tx=${tx.hash}`);
       if (receipt.status === 1) {
         try {
-          await recordDepositsAfterSweep(
+          await recordDepositAfterSweepSuccess(
             {
               userId,
-              address: addr,
-              token,
+              depositAddress: addr,
+              tokenSymbol: token.symbol,
+              tokenAddressOrNull: token.address,
+              eligibleBalanceWei: bal,
+              sweptAmountWei: bal,
               sweepTxHash: tx.hash,
               sweepBlockNumber: receipt.blockNumber,
-              sweptAmountWei: bal,
             },
-            provider,
             pool,
           );
         } catch (e) {
-          console.error('[ERR][DEPOSIT]', e.code || e.message);
+          console.error('[POST-OK][ERR]', e.code || e.message);
         }
       } else {
         console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
@@ -259,6 +280,21 @@ async function processAddress(row, provider, pool, omnibus) {
     } catch (e) {
       console.error('[ERR][SWEEP]', e.code || e.message);
       errorCount++;
+      try {
+        await recordDepositOnSweepFail(
+          {
+            userId,
+            depositAddress: addr,
+            tokenSymbol: token.symbol,
+            tokenAddressOrNull: token.address,
+            eligibleBalanceWei: bal,
+            failReason: e.code || e.message,
+          },
+          pool,
+        );
+      } catch (err) {
+        console.error('[POST-FAIL][ERR]', err.code || err.message);
+      }
     } finally {
       releaseLock(key);
     }
