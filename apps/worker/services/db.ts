@@ -11,7 +11,7 @@ if (!process.env.DATABASE_URL) {
   throw new Error('DATABASE_URL missing');
 }
 
-const pool = createPool(process.env.DATABASE_URL);
+export const pool = createPool(process.env.DATABASE_URL);
 
 async function query<T = any>(q: string, params: any[] = []): Promise<T[]> {
   const [rows] = await pool.query(q, params);
