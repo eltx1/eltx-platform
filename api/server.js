@@ -436,6 +436,7 @@ app.post('/api/wallet/refresh', walletLimiter, async (req, res, next) => {
     const fromBlock = Math.max(baseline, last ? last + 1 : baseline);
     const toBlock = latest;
     const jobId = await enqueueUserScan(pool, userId, fromBlock, toBlock);
+    console.log(`[wallet/refresh] user=${userId} range=${fromBlock}-${toBlock} job=${jobId}`);
     res.status(202).json({
       ok: true,
       status: 202,
@@ -451,6 +452,7 @@ app.post('/api/wallet/refresh', walletLimiter, async (req, res, next) => {
 app.get('/api/wallet/refresh/:jobId', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
+    console.log(`[wallet/refresh] status check user=${userId} job=${req.params.jobId}`);
     const job = await getJobStatus(pool, req.params.jobId, userId);
     if (!job) return next({ status: 404, code: 'NOT_FOUND', message: 'Job not found' });
     res.json({ ok: true, job });
@@ -463,6 +465,7 @@ app.get('/api/transactions', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const limit = Math.min(Number(req.query.limit) || 50, 100);
+    console.log(`[transactions] user=${userId} limit=${limit}`);
     const [rows] = await pool.query(
       'SELECT * FROM wallet_deposits WHERE user_id=? ORDER BY block_number DESC, id DESC LIMIT ?',
       [userId, limit]

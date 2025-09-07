@@ -18,6 +18,7 @@ module.exports = function createUserScanner(db) {
     const addresses = await getUserAddresses(userId);
     if (!addresses.length) return;
     const addrSet = new Set(addresses.map((a) => a.toLowerCase()));
+    console.log(`[scanner] user=${userId} range=${fromBlock}-${toBlock} addrs=${addresses.length}`);
     // Scan ERC20 transfers
     for (const t of Object.values(tokenMap)) {
       if (!t.address) continue;
@@ -34,19 +35,19 @@ module.exports = function createUserScanner(db) {
           const confirmations = toBlock - log.blockNumber + 1;
           const status = confirmations >= CONFIRMATIONS ? 'confirmed' : 'pending';
           await upsertDeposit(db, {
-            user_id: userId,
-            chain_id: CHAIN_ID,
-            address: addr,
-            tx_hash: log.transactionHash,
-            block_number: log.blockNumber,
-            block_hash: log.blockHash,
-            token_address: t.address,
-            amount_wei: value.toString(),
-            confirmations,
-            status,
-            source: 'on_demand',
-            scanner_run_id: runId,
-          });
+              user_id: userId,
+              chain_id: CHAIN_ID,
+              address: addr,
+              tx_hash: log.transactionHash,
+              block_number: log.blockNumber,
+              block_hash: log.blockHash,
+              token_address: t.address,
+              amount_wei: value.toString(),
+              confirmations,
+              status,
+              source: 'on_demand',
+              scanner_run_id: runId,
+            });
           if (status === 'confirmed') await markConfirmed(db, log.transactionHash, log.blockNumber);
         }
       }
@@ -79,6 +80,7 @@ module.exports = function createUserScanner(db) {
         if (status === 'confirmed') await markConfirmed(db, tx.hash, block.number);
       }
     }
+    console.log(`[scanner] completed user=${userId} range=${fromBlock}-${toBlock}`);
   }
 
   return { scanRangeForUser };

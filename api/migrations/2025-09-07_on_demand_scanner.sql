@@ -5,8 +5,8 @@ ALTER TABLE wallet_deposits
   ADD COLUMN IF NOT EXISTS token_address_norm VARCHAR(42)
     AS (IFNULL(token_address, '0x0000000000000000000000000000000000000000')) STORED;
 
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_wallet_deposits_tx_token_to
-  ON wallet_deposits (tx_hash, token_address_norm, to_address);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_wallet_deposits_tx_token_addr
+  ON wallet_deposits (tx_hash, token_address_norm, address);
 
 ALTER TABLE wallet_deposits
   ADD COLUMN IF NOT EXISTS source ENUM('worker','on_demand') NOT NULL DEFAULT 'worker',
