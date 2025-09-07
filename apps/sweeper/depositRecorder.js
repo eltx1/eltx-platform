@@ -22,7 +22,6 @@ async function upsertDeposit(pool, row) {
     console.error('[POST][ERR][DB]', e?.message || e);
     throw e;
   }
-
   const sql = `INSERT INTO wallet_deposits (
     user_id, to_address, from_address, token_symbol, token_address,
     amount_wei, tx_hash, block_number, status, confirmations, source
@@ -224,4 +223,3 @@ async function recordDepositsAfterSweep(
 }
 
 module.exports = { recordDepositsAfterSweep };
-
