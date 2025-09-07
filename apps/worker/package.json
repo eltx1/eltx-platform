@@ -1,14 +1,15 @@
 {
   "name": "@eltx/worker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "main": "worker.js",
+  "main": "index.ts",
   "scripts": {
-    "start": "node worker.js"
+    "start": "ts-node index.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
     "ethers": "^6.11.1",
-    "mysql2": "^3.9.7"
+    "mysql2": "^3.9.7",
+    "ts-node": "^10.9.2"
   }
 }
