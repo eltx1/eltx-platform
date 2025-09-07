@@ -11,7 +11,7 @@ export async function upsertDeposit(row: {
   status: 'pending' | 'confirmed';
   confirmations: number;
   source: string;
-}): Promise<boolean> {
+}): Promise<'new' | 'updated' | 'duplicate'> {
   const [res]: any = await pool.query(
     `INSERT INTO wallet_deposits (
       to_address, from_address, token_symbol, token_address, amount_wei,
@@ -31,12 +31,15 @@ export async function upsertDeposit(row: {
       row.source,
     ]
   );
-  return res.affectedRows === 1;
+  if (res.affectedRows === 1) return 'new';
+  if (res.affectedRows === 2) return 'updated';
+  return 'duplicate';
 }
 
-export async function markConfirmed(txHash: string, blockNumber: number) {
-  await sql.query(
-    `UPDATE wallet_deposits SET status='confirmed', block_number=?, last_update_at=CURRENT_TIMESTAMP WHERE tx_hash=?`,
+export async function markConfirmed(txHash: string, blockNumber: number): Promise<boolean> {
+  const [res]: any = await sql.query(
+    `UPDATE wallet_deposits SET status='confirmed', block_number=?, last_update_at=CURRENT_TIMESTAMP WHERE tx_hash=? AND status<>'confirmed'`,
     [blockNumber, txHash.toLowerCase()]
   );
+  return res.affectedRows > 0;
 }
