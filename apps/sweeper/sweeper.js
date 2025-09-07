@@ -2,6 +2,7 @@ const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+const { recordDepositsAfterSweep } = require('./depositRecorder');
 
 // ---- env ----
 const VERSION = 'v1';
@@ -123,7 +124,7 @@ function releaseLock(key) {
 
 async function getCandidates(pool) {
   const [rows] = await pool.query(
-    "SELECT DISTINCT wd.address, wa.derivation_index FROM wallet_deposits wd JOIN wallet_addresses wa ON wd.address=wa.address WHERE wd.chain_id=? AND wd.status IN ('confirmed','swept') AND wd.credited=1 AND wa.derivation_index IS NOT NULL ORDER BY wd.id DESC LIMIT 1000",
+    "SELECT DISTINCT wd.address, wa.derivation_index, wa.user_id FROM wallet_deposits wd JOIN wallet_addresses wa ON wd.address=wa.address WHERE wd.chain_id=? AND wd.status IN ('confirmed','swept') AND wd.credited=1 AND wa.derivation_index IS NOT NULL ORDER BY wd.id DESC LIMIT 1000",
     [CHAIN_ID]
   );
   return rows;
@@ -132,6 +133,7 @@ async function getCandidates(pool) {
 async function processAddress(row, provider, pool, omnibus) {
   const addr = row.address.toLowerCase();
   const index = Number(row.derivation_index);
+  const userId = row.user_id;
   if (!Number.isInteger(index)) {
     console.warn(`[WARN] addr=${addr} invalid_index=${row.derivation_index}`);
     return;
@@ -166,8 +168,28 @@ async function processAddress(row, provider, pool, omnibus) {
         console.log(`[ELIGIBLE] addr=${addr} asset=BNB amount=${sendAmount}`);
         const tx = await withRetry(() => wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }));
         console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
-        await tx.wait(1);
+        const receipt = await tx.wait(1);
         console.log(`[CONFIRMED] tx=${tx.hash}`);
+        if (receipt.status === 1) {
+          try {
+            await recordDepositsAfterSweep(
+              {
+                userId,
+                address: addr,
+                token: { symbol: 'BNB', address: null },
+                sweepTxHash: tx.hash,
+                sweepBlockNumber: receipt.blockNumber,
+                sweptAmountWei: sendAmount,
+              },
+              provider,
+              pool,
+            );
+          } catch (e) {
+            console.error('[ERR][DEPOSIT]', e.code || e.message);
+          }
+        } else {
+          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+        }
         sweepCount++;
       } catch (e) {
         console.error('[ERR][SWEEP]', e.code || e.message);
@@ -211,8 +233,28 @@ async function processAddress(row, provider, pool, omnibus) {
       const contract = new ethers.Contract(token.address, erc20Abi, tokenWallet);
       const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice }));
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
-      await tx.wait(1);
+      const receipt = await tx.wait(1);
       console.log(`[CONFIRMED] tx=${tx.hash}`);
+      if (receipt.status === 1) {
+        try {
+          await recordDepositsAfterSweep(
+            {
+              userId,
+              address: addr,
+              token,
+              sweepTxHash: tx.hash,
+              sweepBlockNumber: receipt.blockNumber,
+              sweptAmountWei: bal,
+            },
+            provider,
+            pool,
+          );
+        } catch (e) {
+          console.error('[ERR][DEPOSIT]', e.code || e.message);
+        }
+      } else {
+        console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+      }
       sweepCount++;
     } catch (e) {
       console.error('[ERR][SWEEP]', e.code || e.message);
