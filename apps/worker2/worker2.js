@@ -119,35 +119,35 @@ async function refreshAddresses() {
 
 // ---- upsert ----
 async function upsertDeposit(row) {
+  const ZERO = '0x0000000000000000000000000000000000000000';
+  const address = row.address.toLowerCase();
+  const tokenAddress = (row.token_address ? row.token_address : ZERO).toLowerCase();
+  const txHash = row.tx_hash && row.tx_hash.trim()
+    ? row.tx_hash.toLowerCase()
+    : `manual:worker2:${address}:${row.block_number || 0}`;
+  const logIndex = row.log_index ?? 0;
   try {
-    const [exist] = await pool.query('SELECT id FROM wallet_deposits WHERE tx_hash = ? LIMIT 1', [row.tx_hash]);
-    if (exist.length) {
-      await pool.query(
-        'UPDATE wallet_deposits SET confirmations=?, status=?, credited=?, block_number=? WHERE id=?',
-        [row.confirmations, row.status, row.credited, row.block_number, exist[0].id]
-      );
-      console.log('[W2][UPSERT] update ok');
-      return 'update';
-    }
     await pool.query(
       `INSERT INTO wallet_deposits
-       (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,NOW())`,
+       (user_id, chain_id, address, token_address, amount_wei, tx_hash, log_index, block_number, confirmations, status, credited, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW())
+       ON DUPLICATE KEY UPDATE confirmations=VALUES(confirmations), status=VALUES(status), credited=VALUES(credited), block_number=VALUES(block_number), last_update_at=CURRENT_TIMESTAMP`,
       [
         row.user_id,
         row.chain_id,
-        row.address,
-        row.token_address,
+        address,
+        tokenAddress,
         row.amount_wei,
-        row.tx_hash,
+        txHash,
+        logIndex,
         row.block_number,
         row.confirmations,
         row.status,
         row.credited,
       ]
     );
-    console.log('[W2][UPSERT] insert ok');
-    return 'insert';
+    console.log('[W2][UPSERT] upsert ok');
+    return 'upsert';
   } catch (e) {
     console.error('[W2][ERR][SQL] upsert', e);
     return 'error';
