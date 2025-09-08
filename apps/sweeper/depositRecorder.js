@@ -10,11 +10,17 @@ async function detectAndUpsertDeposit(ctx, pool) {
     txHash,
     blockNumber,
     nowTs,
+    status = 'pending',
+    credited = 0,
   } = ctx;
   const addr = (address || '').toLowerCase();
   const tokenAddr = tokenAddress ? tokenAddress.toLowerCase() : null;
   const amountStr = BigInt(amountWei || 0).toString();
   const ts = typeof nowTs === 'number' ? nowTs : Date.now();
+  const statusVal = ['pending', 'swept', 'confirmed'].includes(status)
+    ? status
+    : 'pending';
+  const creditedVal = Number(credited) === 1 ? 1 : 0;
   let userId;
   try {
     const [uRows] = await pool.query(
@@ -40,8 +46,8 @@ async function detectAndUpsertDeposit(ctx, pool) {
       const [rows] = await pool.query('SELECT id FROM wallet_deposits WHERE tx_hash=? LIMIT 1', [tx]);
       if (rows[0]) {
         await pool.query(
-          'UPDATE wallet_deposits SET block_number=?, confirmations=0, status=\'pending\', created_at=FROM_UNIXTIME(?/1000) WHERE id=?',
-          [blockNumber ?? 0, ts, rows[0].id],
+          'UPDATE wallet_deposits SET block_number=?, confirmations=0, status=?, credited=?, created_at=FROM_UNIXTIME(?/1000) WHERE id=?',
+          [blockNumber ?? 0, statusVal, creditedVal, ts, rows[0].id],
         );
         action = 'update';
       } else {
@@ -62,8 +68,8 @@ async function detectAndUpsertDeposit(ctx, pool) {
         );
         if (pRows[0]) {
           await pool.query(
-            'UPDATE wallet_deposits SET tx_hash=?, block_number=?, created_at=FROM_UNIXTIME(?/1000) WHERE id=?',
-            [tx, blockNumber ?? 0, ts, pRows[0].id],
+            'UPDATE wallet_deposits SET tx_hash=?, block_number=?, confirmations=0, status=?, credited=?, created_at=FROM_UNIXTIME(?/1000) WHERE id=?',
+            [tx, blockNumber ?? 0, statusVal, creditedVal, ts, pRows[0].id],
           );
           action = 'update';
         } else {
@@ -78,8 +84,8 @@ async function detectAndUpsertDeposit(ctx, pool) {
               tx,
               blockNumber ?? 0,
               0,
-              'pending',
-              0,
+              statusVal,
+              creditedVal,
               ts,
             ],
           );
@@ -122,8 +128,8 @@ async function detectAndUpsertDeposit(ctx, pool) {
             placeholder,
             0,
             0,
-            'pending',
-            0,
+            statusVal,
+            creditedVal,
             ts,
           ],
         );
@@ -143,10 +149,23 @@ async function detectAndUpsertDeposit(ctx, pool) {
 
 async function recordSweepFailure(ctx, pool) {
   const start = Date.now();
-  const { chainId, userId, depositAddress, tokenAddress, amountWei, failReason } = ctx;
+  const {
+    chainId,
+    userId,
+    depositAddress,
+    tokenAddress,
+    amountWei,
+    failReason,
+    status = 'pending',
+    credited = 0,
+  } = ctx;
   const addr = (depositAddress || '').toLowerCase();
   const tokenAddr = tokenAddress ? tokenAddress.toLowerCase() : null;
   const amountStr = BigInt(amountWei || 0).toString();
+  const statusVal = ['pending', 'swept', 'confirmed'].includes(status)
+    ? status
+    : 'pending';
+  const creditedVal = Number(credited) === 1 ? 1 : 0;
   if (!userId || BigInt(amountStr) <= 0n) {
     console.log(`[DEPOSIT][FAIL] skip user=${userId} amount=${amountStr}`);
     return;
@@ -166,8 +185,8 @@ async function recordSweepFailure(ctx, pool) {
         failHash,
         0,
         0,
-        'pending',
-        0,
+        statusVal,
+        creditedVal,
       ],
     );
     console.log(
