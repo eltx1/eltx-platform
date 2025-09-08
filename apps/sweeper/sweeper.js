@@ -162,7 +162,6 @@ async function processAddress(row, provider, pool, omnibus) {
   if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
-      const amountDec = ethers.formatUnits(balBNB, 18);
       const sendAmount = balBNB - txCost;
       const userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
       if (!userId) {
@@ -183,7 +182,7 @@ async function processAddress(row, provider, pool, omnibus) {
             depositAddressLc: addr,
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
-            amountTokenDecimalStr: amountDec,
+            amountWeiStr: sendAmount.toString(),
             status: 'swept',
           });
         }
@@ -200,7 +199,7 @@ async function processAddress(row, provider, pool, omnibus) {
             depositAddressLc: addr,
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
-            amountTokenDecimalStr: amountDec,
+            amountWeiStr: sendAmount.toString(),
             status: 'confirmed',
           });
         }
@@ -216,7 +215,6 @@ async function processAddress(row, provider, pool, omnibus) {
     if (!acquireLock(key)) continue;
     let bal = 0n;
     let userId;
-    let amountDec;
     try {
       const erc = new ethers.Contract(token.address, erc20Abi, provider);
       bal = await erc.balanceOf(addr);
@@ -227,7 +225,6 @@ async function processAddress(row, provider, pool, omnibus) {
         continue;
       }
       userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
-      amountDec = ethers.formatUnits(bal, token.decimals || 18);
       if (!userId) {
         console.log(`[POST][SKIP] no user for address=${addr}`);
       }
@@ -270,7 +267,7 @@ async function processAddress(row, provider, pool, omnibus) {
           depositAddressLc: addr,
           tokenSymbol: token.symbol,
           tokenAddressLc: token.address.toLowerCase(),
-          amountTokenDecimalStr: amountDec,
+          amountWeiStr: bal.toString(),
           status: 'swept',
         });
       }
@@ -288,7 +285,7 @@ async function processAddress(row, provider, pool, omnibus) {
           depositAddressLc: addr,
           tokenSymbol: token.symbol,
           tokenAddressLc: token.address.toLowerCase(),
-          amountTokenDecimalStr: amountDec,
+          amountWeiStr: bal.toString(),
           status: 'confirmed',
         });
       }
