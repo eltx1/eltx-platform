@@ -1,3 +1,20 @@
+Options -MultiViews
+DirectoryIndex disabled
+
+RewriteEngine On
+RewriteBase /
+
+# سيب ملفات موجودة فعلاً (مثل .well-known) تتخدم محليًا
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# دعم WebSocket للـ dev/HMR (اختياري)
+RewriteCond %{HTTP:Upgrade} =websocket [NC]
+RewriteRule ^(.*)$ ws://127.0.0.1:3000/$1 [P,L]
+
+# باقي الطلبات → بروكسي على Next (مرّر المسار والكويري كامل)
+RewriteRule ^(.*)$ http://127.0.0.1:3000/$1 [P,L,QSA]
+
 # Disable caching for API routes
 <IfModule mod_headers.c>
   SetEnvIfNoCase Request_URI ^/api/ no_cache
