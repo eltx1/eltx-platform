@@ -13,6 +13,7 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   try {
     const res = await fetch(url, {
       credentials: 'include',
+      cache: 'no-store',
       ...options,
       headers: {
         'Content-Type': 'application/json',
