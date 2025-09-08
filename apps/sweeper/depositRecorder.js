@@ -54,13 +54,26 @@ async function recordUserDepositNoTx(
   const statusVal = status === 'swept' ? 'swept' : 'confirmed';
   const txHash = `manual:sweeper:${chainId}:${addrLc}:${tokenAddrLc}:${amtWei}`;
   try {
-    await pool.query(
+    const tokenSym = (tokenSymbol || '').toUpperCase();
+    const [res] = await pool.query(
       `INSERT INTO wallet_deposits (user_id, chain_id, address, token_symbol, token_address, amount_wei, tx_hash, log_index, block_number, block_hash, confirmations, status, credited, source, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?, ?, 1, 'sweeper', NOW())
        ON DUPLICATE KEY UPDATE status=VALUES(status), credited=1, confirmations=VALUES(confirmations), last_update_at=NOW()`,
-      [userId, chainId, addrLc, tokenSymbol, tokenAddrLc, amtWei, txHash, 0, null, '', confirmations, statusVal],
+      [userId, chainId, addrLc, tokenSym, tokenAddrLc, amtWei, txHash, 0, null, '', confirmations, statusVal],
     );
-    console.log(`[POST][CREDIT] user=${userId} addr=${addrLc} sym=${tokenSymbol} amount=${amtWei} status=${statusVal} tx='${txHash}'`);
+    if (res.affectedRows === 1) {
+      const asset = tokenAddrLc === ZERO ? 'native' : tokenSym;
+      await pool.query(
+        `INSERT INTO user_balances (user_id, asset, balance_wei)
+         VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+        [userId, asset, amtWei],
+      );
+    }
+
+    console.log(
+      `[POST][CREDIT] user=${userId} addr=${addrLc} sym=${tokenSym} amount=${amtWei} status=${statusVal} tx='${txHash}'`,
+    );
   } catch (e) {
     console.error('[POST][ERR][recordUserDepositNoTx]', e);
   }

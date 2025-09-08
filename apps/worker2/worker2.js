@@ -129,13 +129,14 @@ async function upsertDeposit(row) {
   try {
     await pool.query(
       `INSERT INTO wallet_deposits
-       (user_id, chain_id, address, token_address, amount_wei, tx_hash, log_index, block_number, confirmations, status, credited, created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW())
+       (user_id, chain_id, address, token_symbol, token_address, amount_wei, tx_hash, log_index, block_number, confirmations, status, credited, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NOW())
        ON DUPLICATE KEY UPDATE confirmations=VALUES(confirmations), status=VALUES(status), credited=VALUES(credited), block_number=VALUES(block_number), last_update_at=CURRENT_TIMESTAMP`,
       [
         row.user_id,
         row.chain_id,
         address,
+        row.token_symbol,
         tokenAddress,
         row.amount_wei,
         txHash,
@@ -191,6 +192,7 @@ async function scanNative(from, tip) {
         user_id: userId,
         chain_id: CHAIN_ID,
         address: toLc,
+        token_symbol: 'BNB',
         token_address: null,
         amount_wei: val.toString(),
         tx_hash: tx.hash,
@@ -241,6 +243,7 @@ async function scanErc20(from, tip) {
           user_id: userId,
           chain_id: CHAIN_ID,
           address: toLc,
+          token_symbol: token.symbol || token.address,
           token_address: token.address.toLowerCase(),
           amount_wei: amount.toString(),
           tx_hash: log.transactionHash,
