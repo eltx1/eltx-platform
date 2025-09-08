@@ -36,6 +36,11 @@ app.use((req, res, next) => {
 });
 app.use(express.json());
 app.use(cookieParser());
+// ensure wallet routes are not cached
+app.use(['/wallet', '/api/wallet'], (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 const pool = mysql.createPool(
   process.env.DATABASE_URL || {
