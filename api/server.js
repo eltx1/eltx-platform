@@ -162,19 +162,11 @@ addToken('USDT', 'TOKEN_USDT');
 addToken('USDC', 'TOKEN_USDC');
 if (process.env.TOKEN_ELTX) addToken('ELTX', 'TOKEN_ELTX');
 
-function normalizeWeiDecimal(x) {
-  if (x === null || x === undefined) return '0';
-  const str = x.toString();
-  const i = str.indexOf('.');
-  return i >= 0 ? str.slice(0, i) : str;
-}
-
 function formatUnitsStr(weiStr, decimals = 18) {
-  try {
-    return ethers.formatUnits(BigInt(weiStr), decimals);
-  } catch {
-    return '0';
-  }
+  const num = parseFloat(weiStr);
+  if (isNaN(num)) return '0';
+  const divisor = 10 ** decimals;
+  return (num / divisor).toFixed(decimals);
 }
 
 async function requireUser(req) {
@@ -344,7 +336,7 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
       [userId, CHAIN_ID]
     );
     for (const row of rows) {
-      row.amount_wei = normalizeWeiDecimal(row.amount_wei);
+      row.amount_wei = row.amount_wei?.toString() ?? '0';
       if (!row.token_address) {
         row.symbol = 'BNB';
         row.decimals = 18;
@@ -374,7 +366,7 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address IS NULL AND status IN ('confirmed','swept') AND credited=1",
       [userId, CHAIN_ID]
     );
-    const bnbWei = normalizeWeiDecimal(bnbRow[0].sum);
+    const bnbWei = bnbRow[0].sum ? bnbRow[0].sum.toString() : '0';
     const assets = [
       { symbol: 'BNB', contract: null, decimals: 18, balance_wei: bnbWei, balance: formatUnitsStr(bnbWei, 18) },
     ];
@@ -484,7 +476,7 @@ app.get('/staking/plans', async (req, res, next) => {
       name: r.name || r.title,
       duration_days: r.duration_days ?? r.duration_months ?? null,
       apr_bps: r.apr_bps ?? r.daily_rate ?? null,
-      min_deposit_wei: r.min_deposit_wei ? normalizeWeiDecimal(r.min_deposit_wei) : undefined,
+      min_deposit_wei: r.min_deposit_wei ? r.min_deposit_wei.toString() : undefined,
     }));
     res.json({ ok: true, plans });
   } catch (err) {
