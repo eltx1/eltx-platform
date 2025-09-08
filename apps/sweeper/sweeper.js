@@ -170,33 +170,25 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       try {
         console.log(`[ELIGIBLE] addr=${addr} asset=BNB amount=${sendAmount}`);
-        const balCheck = await provider.getBalance(addr);
-        const needed = sendAmount + gasPrice * 21000n;
-        if (balCheck < needed) {
-          console.log(
-            `[SKIP] addr=${addr} reason=insufficient_balance have=${balCheck} needed=${needed}`,
-          );
-        } else {
-          const tx = await withRetry(() =>
-            wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
-          );
-          console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
-          const receipt = await tx.wait(1);
-          console.log(`[CONFIRMED] tx=${tx.hash}`);
-          if (userId) {
-            await recordUserDepositNoTx(pool, {
-              userId,
-              chainId: CHAIN_ID,
-              depositAddressLc: addr,
-              tokenSymbol: 'BNB',
-              tokenAddressLc: null,
-              amountTokenDecimalStr: amountDec,
-            });
-          }
-          if (receipt.status !== 1) {
-            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
-          }
-          sweepCount++;
+        const tx = await withRetry(() =>
+          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
+        );
+        console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
+        const receipt = await tx.wait(1);
+        console.log(`[CONFIRMED] tx=${tx.hash}`);
+        if (userId) {
+          await recordUserDepositNoTx(pool, {
+            userId,
+            chainId: CHAIN_ID,
+            depositAddressLc: addr,
+            tokenSymbol: 'BNB',
+            tokenAddressLc: null,
+            amountTokenDecimalStr: amountDec,
+            status: 'swept',
+          });
+        }
+        if (receipt.status !== 1) {
+          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
         }
       } catch (e) {
         console.error('[ERR][SWEEP]', e);
@@ -209,6 +201,7 @@ async function processAddress(row, provider, pool, omnibus) {
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
             amountTokenDecimalStr: amountDec,
+            status: 'confirmed',
           });
         }
       } finally {
@@ -278,6 +271,7 @@ async function processAddress(row, provider, pool, omnibus) {
           tokenSymbol: token.symbol,
           tokenAddressLc: token.address.toLowerCase(),
           amountTokenDecimalStr: amountDec,
+          status: 'swept',
         });
       }
       if (receipt.status !== 1) {
@@ -295,6 +289,7 @@ async function processAddress(row, provider, pool, omnibus) {
           tokenSymbol: token.symbol,
           tokenAddressLc: token.address.toLowerCase(),
           amountTokenDecimalStr: amountDec,
+          status: 'confirmed',
         });
       }
     } finally {
