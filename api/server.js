@@ -344,14 +344,16 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
       'SELECT tx_hash, token_address, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
       [userId, CHAIN_ID]
     );
+    const ZERO = '0x0000000000000000000000000000000000000000';
     for (const row of rows) {
+      row.token_address = (row.token_address || ZERO).toLowerCase();
       row.amount_wei = row.amount_wei?.toString() ?? '0';
-      if (!row.token_address) {
-        row.symbol = 'BNB';
+      if (row.token_address === ZERO) {
+        row.display_symbol = 'BNB';
         row.decimals = 18;
       } else {
-        const meta = tokenMeta[row.token_address.toLowerCase()];
-        row.symbol = meta ? meta.symbol : 'UNKNOWN';
+        const meta = tokenMeta[row.token_address];
+        row.display_symbol = meta ? meta.symbol : 'UNKNOWN';
         row.decimals = meta ? meta.decimals : 18;
       }
       row.amount_formatted = formatUnitsStr(row.amount_wei, row.decimals);
@@ -371,13 +373,21 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
     );
     if (!addrRows.length) return res.json({ ok: true, assets: [] });
     const userAddress = addrRows[0].address;
+    const ZERO = '0x0000000000000000000000000000000000000000';
     const [bnbRow] = await pool.query(
-      "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address IS NULL AND status IN ('confirmed','swept') AND credited=1",
-      [userId, CHAIN_ID]
+      "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address=? AND status IN ('confirmed','swept') AND credited=1",
+      [userId, CHAIN_ID, ZERO]
     );
     const bnbWei = bnbRow[0].sum ? bnbRow[0].sum.toString() : '0';
     const assets = [
-      { symbol: 'BNB', contract: null, decimals: 18, balance_wei: bnbWei, balance: formatUnitsStr(bnbWei, 18) },
+      {
+        symbol: 'BNB',
+        display_symbol: 'BNB',
+        contract: null,
+        decimals: 18,
+        balance_wei: bnbWei,
+        balance: formatUnitsStr(bnbWei, 18),
+      },
     ];
     const provider = new ethers.JsonRpcProvider(process.env.RPC_HTTP, CHAIN_ID);
     for (const addr in tokenMeta) {
@@ -394,6 +404,7 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       const wei = bal.toString();
       assets.push({
         symbol: meta.symbol,
+        display_symbol: meta.symbol,
         contract: meta.contract,
         decimals: meta.decimals,
         balance_wei: wei,

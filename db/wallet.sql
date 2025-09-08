@@ -75,17 +75,18 @@ CREATE TABLE IF NOT EXISTS wallet_deposits (
   chain_id INT UNSIGNED NOT NULL,
   address VARCHAR(64) NOT NULL,
   tx_hash VARCHAR(80) NOT NULL,
+  log_index INT UNSIGNED NOT NULL DEFAULT 0,
   block_number BIGINT UNSIGNED NOT NULL,
   block_hash VARCHAR(80) NOT NULL,
-  token_address VARCHAR(64) NULL,
+  token_address VARCHAR(64) NOT NULL DEFAULT '0x0000000000000000000000000000000000000000',
   amount_wei DECIMAL(65,0) NOT NULL,
   confirmations INT UNSIGNED NOT NULL DEFAULT 0,
   status ENUM('seen','confirmed','swept','orphaned') NOT NULL DEFAULT 'seen',
   credited TINYINT(1) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_tx (tx_hash),
+  UNIQUE KEY uniq_wallet_deposit (chain_id, token_address, address, tx_hash, log_index),
   INDEX idx_user_chain (user_id, chain_id),
-  INDEX idx_addr (address)
+  INDEX idx_addr_block (address, block_number)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 ALTER TABLE wallet_deposits

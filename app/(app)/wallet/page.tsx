@@ -7,12 +7,26 @@ import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import QRCode from 'qrcode.react';
 
+function formatWei(wei: string, decimals: number, precision = 6): string {
+  try {
+    const bn = BigInt(wei);
+    const base = 10n ** BigInt(decimals);
+    const integer = bn / base;
+    let frac = (bn % base).toString().padStart(decimals, '0');
+    if (precision >= 0) frac = frac.slice(0, precision).replace(/0+$/, '');
+    else frac = frac.replace(/0+$/, '');
+    return frac ? `${integer}.${frac}` : integer.toString();
+  } catch {
+    return '0';
+  }
+}
+
 type Deposit = {
   tx_hash: string;
+  token_address?: string;
   amount_wei: string;
-  symbol: string;
+  display_symbol: string;
   decimals: number;
-  amount_formatted: string;
   confirmations: number;
   status: string;
   created_at: string;
@@ -20,10 +34,10 @@ type Deposit = {
 
 type Asset = {
   symbol: string;
+  display_symbol: string;
   contract: string | null;
   decimals: number;
   balance_wei: string;
-  balance: string;
 };
 
 type WalletInfo = { chain_id: number; address: string };
@@ -116,8 +130,8 @@ export default function WalletPage() {
           <tbody>
             {assets.map((a) => (
               <tr key={a.symbol} className="border-t border-white/10">
-                <td className="py-1">{a.symbol}</td>
-                <td className="py-1">{Number(a.balance).toFixed(6)}</td>
+                <td className="py-1">{a.display_symbol || a.symbol}</td>
+                <td className="py-1">{formatWei(a.balance_wei, a.decimals)}</td>
                 <td className="py-1">
                   {a.contract && (
                     <button
@@ -154,7 +168,7 @@ export default function WalletPage() {
                 {d.tx_hash}
               </a>
               <div>
-                {Number(d.amount_formatted).toFixed(6)} {d.symbol}
+                {formatWei(d.amount_wei, d.decimals)} {d.display_symbol}
               </div>
               <div className="text-xs">{statusLabel(d.status)}</div>
             </div>
