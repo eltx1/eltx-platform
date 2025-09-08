@@ -27,10 +27,15 @@ try {
 }
 TOKENS = TOKENS
   .filter((t) => t && t.address)
-  .map((t) => ({
-    symbol: t.symbol || t.address,
-    address: String(t.address).toLowerCase(),
-  }));
+  .map((t) => {
+    try {
+      const addr = ethers.getAddress(String(t.address)).toLowerCase();
+      return { symbol: t.symbol || addr, address: addr };
+    } catch {
+      return null;
+    }
+  })
+  .filter(Boolean);
 
 function maskUrl(url) {
   try {
@@ -95,9 +100,13 @@ async function refreshAddresses() {
     watchSet = new Set();
     addrMap = new Map();
     for (const r of rows) {
-      const a = String(r.address).toLowerCase();
-      watchSet.add(a);
-      addrMap.set(a, r.user_id);
+      try {
+        const a = ethers.getAddress(String(r.address)).toLowerCase();
+        watchSet.add(a);
+        addrMap.set(a, r.user_id);
+      } catch {
+        console.warn('[W2][WARN] bad_addr', r.address);
+      }
     }
     console.log(`[W2][ADDR] loaded=${watchSet.size}`);
   } catch (e) {
@@ -106,105 +115,90 @@ async function refreshAddresses() {
 }
 
 // ---- upsert ----
-async function upsertDeposit(ctx) {
-  const {
-    userId,
-    address,
-    tokenAddress,
-    amountWei,
-    txHash,
-    blockNumber,
-    confirmations,
-    status,
-    credited,
-  } = ctx;
+async function upsertDeposit(row) {
   try {
-    const [rows] = await pool.query('SELECT id FROM wallet_deposits WHERE tx_hash=? LIMIT 1', [txHash]);
-    if (rows[0]) {
+    const [exist] = await pool.query('SELECT id FROM wallet_deposits WHERE tx_hash = ? LIMIT 1', [row.tx_hash]);
+    if (exist.length) {
       await pool.query(
         'UPDATE wallet_deposits SET confirmations=?, status=?, credited=?, block_number=? WHERE id=?',
-        [confirmations, status, credited, blockNumber, rows[0].id]
+        [row.confirmations, row.status, row.credited, row.block_number, exist[0].id]
       );
       console.log('[W2][UPSERT] update ok');
-    } else {
-      await pool.query(
-        'INSERT INTO wallet_deposits (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW())',
-        [
-          userId,
-          CHAIN_ID,
-          address,
-          tokenAddress,
-          amountWei,
-          txHash,
-          blockNumber,
-          confirmations,
-          status,
-          credited,
-        ]
-      );
-      console.log('[W2][UPSERT] insert ok');
+      return 'update';
     }
+    await pool.query(
+      `INSERT INTO wallet_deposits
+       (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,NOW())`,
+      [
+        row.user_id,
+        row.chain_id,
+        row.address,
+        row.token_address,
+        row.amount_wei,
+        row.tx_hash,
+        row.block_number,
+        row.confirmations,
+        row.status,
+        row.credited,
+      ]
+    );
+    console.log('[W2][UPSERT] insert ok');
+    return 'insert';
   } catch (e) {
     console.error('[W2][ERR][SQL] upsert', e);
+    return 'error';
   }
 }
 
 // ---- scanners ----
-const erc20Abi = require('../sweeper/erc20.json');
-const iface = new ethers.Interface(erc20Abi);
 const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)');
 
 async function scanNative(from, tip) {
   for (let b = from; b <= tip; b++) {
     let block;
     try {
-      block = await provider.getBlockWithTransactions(b);
+      block = await provider.getBlock(b, true);
     } catch (e) {
       console.error('[W2][ERR][RPC] block', e);
       continue;
     }
-    const candidates = [];
+    if (!block || !Array.isArray(block.transactions)) continue;
+
     for (const tx of block.transactions) {
       if (!tx.to) continue;
-      const to = tx.to.toLowerCase();
-      if (!watchSet.has(to)) continue;
-      if (tx.value <= 0n) continue;
-      candidates.push(tx);
-    }
-    for (let i = 0; i < candidates.length; i += 5) {
-      const chunk = candidates.slice(i, i + 5);
-      const receipts = await Promise.all(
-        chunk.map((t) => provider.getTransactionReceipt(t.hash).catch((e) => (console.error('[W2][ERR][RPC] receipt', e), null)))
-      );
-      for (let j = 0; j < chunk.length; j++) {
-        const tx = chunk[j];
-        const rcpt = receipts[j];
-        if (!rcpt || rcpt.status !== 1) continue;
-        const to = tx.to.toLowerCase();
-        const userId = addrMap.get(to);
-        if (!userId) {
-          console.warn(`[W2][WARN] user_not_found addr=${to}`);
-          continue;
-        }
-        const conf = tip - tx.blockNumber + 1;
-        const status = conf >= CONFIRMATIONS ? 'confirmed' : 'pending';
-        const credited = conf >= CONFIRMATIONS ? 1 : 0;
-        const amount = tx.value.toString();
-        console.log(
-          `[W2][BNB] deposit user=${userId} addr=${to} wei=${amount} tx=${tx.hash} conf=${conf} status=${status}`
-        );
-        await upsertDeposit({
-          userId,
-          address: to,
-          tokenAddress: null,
-          amountWei: amount,
-          txHash: tx.hash,
-          blockNumber: tx.blockNumber,
-          confirmations: conf,
-          status,
-          credited,
-        });
+      let toLc;
+      try {
+        toLc = ethers.getAddress(tx.to).toLowerCase();
+      } catch {
+        continue;
       }
+      if (!watchSet.has(toLc)) continue;
+      const val = BigInt(tx.value);
+      if (val <= 0n) continue;
+      const userId = addrMap.get(toLc);
+      if (!userId) {
+        console.warn(`[W2][WARN] user_not_found addr=${toLc}`);
+        continue;
+      }
+      const conf = Math.max(0, tip - Number(tx.blockNumber) + 1);
+      const status = conf >= CONFIRMATIONS ? 'confirmed' : 'pending';
+      const credited = status === 'confirmed' ? 1 : 0;
+      await upsertDeposit({
+        user_id: userId,
+        chain_id: CHAIN_ID,
+        address: toLc,
+        token_address: null,
+        amount_wei: val.toString(),
+        tx_hash: tx.hash,
+        block_number: Number(tx.blockNumber),
+        confirmations: conf,
+        status,
+        credited,
+      });
+      console.log(
+        `[W2][BNB] deposit user=${userId} addr=${toLc} wei=${val} tx=${tx.hash} conf=${conf} status=${status}`
+      );
     }
   }
 }
@@ -214,50 +208,50 @@ async function scanErc20(from, tip) {
     let logs = [];
     try {
       logs = await provider.getLogs({
-        address: token.address,
+        address: token.address.toLowerCase(),
         fromBlock: from,
         toBlock: tip,
         topics: [TRANSFER_TOPIC],
       });
     } catch (e) {
-      console.error('[W2][ERR][RPC] getLogs', token.address, e);
+      console.warn('[W2][ERC20][getLogs]', e?.shortMessage || e?.message || e);
       continue;
     }
     for (const log of logs) {
-      let parsed;
       try {
-        parsed = iface.parseLog(log);
+        if (!log || !log.topics || log.topics.length < 3) continue;
+        const toAddr = ethers.getAddress('0x' + log.topics[2].slice(26));
+        const toLc = toAddr.toLowerCase();
+        if (!watchSet.has(toLc)) continue;
+        const amount = BigInt(log.data);
+        if (amount <= 0n) continue;
+        const userId = addrMap.get(toLc);
+        if (!userId) {
+          console.warn(`[W2][WARN] user_not_found addr=${toLc}`);
+          continue;
+        }
+        const bn = Number(log.blockNumber);
+        const conf = Math.max(0, tip - bn + 1);
+        const status = conf >= CONFIRMATIONS ? 'confirmed' : 'pending';
+        const credited = status === 'confirmed' ? 1 : 0;
+        await upsertDeposit({
+          user_id: userId,
+          chain_id: CHAIN_ID,
+          address: toLc,
+          token_address: token.address.toLowerCase(),
+          amount_wei: amount.toString(),
+          tx_hash: log.transactionHash,
+          block_number: bn,
+          confirmations: conf,
+          status,
+          credited,
+        });
+        console.log(
+          `[W2][ERC20] token=${token.symbol || token.address} deposit user=${userId} addr=${toLc} wei=${amount} tx=${log.transactionHash} conf=${conf} status=${status}`
+        );
       } catch (e) {
-        console.error('[W2][ERR][LOGPARSE]', e);
-        continue;
+        console.warn('[W2][ERC20][SKIP]', e?.message || e);
       }
-      const to = String(parsed.args[1]).toLowerCase();
-      const value = parsed.args[2];
-      if (!watchSet.has(to)) continue;
-      if (value <= 0n) continue;
-      const userId = addrMap.get(to);
-      if (!userId) {
-        console.warn(`[W2][WARN] user_not_found addr=${to}`);
-        continue;
-      }
-      const conf = tip - log.blockNumber + 1;
-      const status = conf >= CONFIRMATIONS ? 'confirmed' : 'pending';
-      const credited = conf >= CONFIRMATIONS ? 1 : 0;
-      const amount = BigInt(value).toString();
-      console.log(
-        `[W2][ERC20] token=${token.symbol} deposit user=${userId} addr=${to} wei=${amount} tx=${log.transactionHash} conf=${conf} status=${status}`
-      );
-      await upsertDeposit({
-        userId,
-        address: to,
-        tokenAddress: token.address,
-        amountWei: amount,
-        txHash: log.transactionHash,
-        blockNumber: log.blockNumber,
-        confirmations: conf,
-        status,
-        credited,
-      });
     }
   }
 }
