@@ -4,6 +4,7 @@ import { ToastProvider } from './lib/toast';
 import { AuthProvider } from './lib/auth';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
+import ServiceWorkerManager from '../components/ServiceWorkerManager';
 
 export const metadata = {
   title: 'ELTX — Next',
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <LangProvider>
           <AuthProvider>
             <ToastProvider>
+              <ServiceWorkerManager />
               <NavBar />
               <main className="flex-1">{children}</main>
               <Footer />
