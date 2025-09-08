@@ -32,27 +32,20 @@ async function recordUserDepositNoTx(
     console.log(`[POST][SKIP] user=${userId} addr=${depositAddressLc} invalid_amount=${amt}`);
     return;
   }
+  const ZERO = '0x0000000000000000000000000000000000000000';
   const addrLc = (depositAddressLc || '').toLowerCase();
-  const tokenAddrLc = tokenAddressLc ? tokenAddressLc.toLowerCase() : null;
+  const tokenAddrLc = tokenAddressLc ? tokenAddressLc.toLowerCase() : ZERO;
   const confirmations = Number(process.env.CONFIRMATIONS || 12);
   const statusVal = status === 'swept' ? 'swept' : 'confirmed';
+  const txHash = `manual:sweeper:${chainId}:${addrLc}:${tokenAddrLc}:${amt}`;
   try {
-    const [rows] = await pool.query(
-      `SELECT id FROM wallet_deposits WHERE user_id=? AND chain_id=? AND LOWER(address)=? AND ((token_address IS NULL AND ? IS NULL) OR (LOWER(token_address)=?)) AND amount_wei=? AND source='sweeper' AND tx_hash='' AND created_at >= NOW() - INTERVAL 1 DAY LIMIT 1`,
-      [userId, chainId, addrLc, tokenAddrLc, tokenAddrLc, amt],
+    await pool.query(
+      `INSERT INTO wallet_deposits (user_id, chain_id, address, token_symbol, token_address, amount_wei, tx_hash, log_index, block_number, block_hash, confirmations, status, credited, source, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?, ?, 1, 'sweeper', NOW())
+       ON DUPLICATE KEY UPDATE status=VALUES(status), credited=1, confirmations=VALUES(confirmations), last_update_at=NOW()`,
+      [userId, chainId, addrLc, tokenSymbol, tokenAddrLc, amt, txHash, 0, null, '', confirmations, statusVal],
     );
-    if (rows[0]) {
-      await pool.query(
-        'UPDATE wallet_deposits SET status=?, credited=1, confirmations=?, last_update_at=NOW() WHERE id=?',
-        [statusVal, confirmations, rows[0].id],
-      );
-    } else {
-      await pool.query(
-        "INSERT INTO wallet_deposits (user_id, chain_id, address, token_symbol, token_address, amount_wei, tx_hash, block_number, block_hash, confirmations, status, credited, source, created_at) VALUES (?,?,?,?,?,?,?, ?, ?, ?, ?, 1, 'sweeper', NOW())",
-        [userId, chainId, addrLc, tokenSymbol, tokenAddrLc, amt, '', null, '', confirmations, statusVal],
-      );
-    }
-    console.log(`[POST][CREDIT] user=${userId} addr=${addrLc} sym=${tokenSymbol} amount=${amt} status=${statusVal} tx=''`);
+    console.log(`[POST][CREDIT] user=${userId} addr=${addrLc} sym=${tokenSymbol} amount=${amt} status=${statusVal} tx='${txHash}'`);
   } catch (e) {
     console.error('[POST][ERR][recordUserDepositNoTx]', e);
   }
