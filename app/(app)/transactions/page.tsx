@@ -1,4 +1,5 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -29,13 +30,23 @@ export default function TransactionsPage() {
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch<{ transactions: Deposit[] }>('/wallet/transactions').then(res => {
-      if (!res.ok) {
-        if (res.status === 401) router.replace('/login');
-      } else {
-        setDeposits(res.data.transactions || []);
-      }
-    });
+    const load = () => {
+      apiFetch<{ transactions: Deposit[] }>('/wallet/transactions').then(res => {
+        if (!res.ok) {
+          if (res.status === 401) router.replace('/login');
+        } else {
+          setDeposits(res.data.transactions || []);
+        }
+      });
+    };
+    load();
+    const id = setInterval(load, 10000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [router]);
 
   const statusLabel = (s: string) => {

@@ -1,0 +1,12 @@
+# Disable caching for API routes
+<IfModule mod_headers.c>
+  SetEnvIfNoCase Request_URI ^/api/ no_cache
+  Header set Cache-Control "no-store, no-cache, must-revalidate, max-age=0" env=no_cache
+  Header set Pragma "no-cache" env=no_cache
+</IfModule>
+
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresDefault "access plus 1 year"
+  ExpiresActive Off env=no_cache
+</IfModule>
