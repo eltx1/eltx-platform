@@ -170,26 +170,34 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       try {
         console.log(`[ELIGIBLE] addr=${addr} asset=BNB amount=${sendAmount}`);
-        const tx = await withRetry(() =>
-          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
-        );
-        console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
-        const receipt = await tx.wait(1);
-        console.log(`[CONFIRMED] tx=${tx.hash}`);
-        if (userId) {
-          await recordUserDepositNoTx(pool, {
-            userId,
-            chainId: CHAIN_ID,
-            depositAddressLc: addr,
-            tokenSymbol: 'BNB',
-            tokenAddressLc: null,
-            amountTokenDecimalStr: amountDec,
-          });
+        const balCheck = await provider.getBalance(addr);
+        const needed = sendAmount + gasPrice * 21000n;
+        if (balCheck < needed) {
+          console.log(
+            `[SKIP] addr=${addr} reason=insufficient_balance have=${balCheck} needed=${needed}`,
+          );
+        } else {
+          const tx = await withRetry(() =>
+            wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
+          );
+          console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
+          const receipt = await tx.wait(1);
+          console.log(`[CONFIRMED] tx=${tx.hash}`);
+          if (userId) {
+            await recordUserDepositNoTx(pool, {
+              userId,
+              chainId: CHAIN_ID,
+              depositAddressLc: addr,
+              tokenSymbol: 'BNB',
+              tokenAddressLc: null,
+              amountTokenDecimalStr: amountDec,
+            });
+          }
+          if (receipt.status !== 1) {
+            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+          }
+          sweepCount++;
         }
-        if (receipt.status !== 1) {
-          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
-        }
-        sweepCount++;
       } catch (e) {
         console.error('[ERR][SWEEP]', e);
         errorCount++;
@@ -232,9 +240,15 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       console.log(`[ELIGIBLE] addr=${addr} asset=${token.symbol} amount=${bal}`);
       balBNB = await provider.getBalance(addr);
-      if (balBNB < txCost) {
+      const tokenWallet = wallet.connect(provider);
+      const contract = new ethers.Contract(token.address, erc20Abi, tokenWallet);
+      const gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+      let needed = gasPrice * gasLimit;
+      if (balBNB < needed) {
         try {
-          const dripTx = await withRetry(() => omnibus.sendTransaction({ to: addr, value: GAS_DRIP_WEI, gasPrice, gasLimit: 21000 }));
+          const dripTx = await withRetry(() =>
+            omnibus.sendTransaction({ to: addr, value: GAS_DRIP_WEI, gasPrice, gasLimit: 21000 }),
+          );
           console.log(`[DRIP] addr=${addr} tx=${dripTx.hash}`);
           await dripTx.wait(1);
           dripCount++;
@@ -242,13 +256,17 @@ async function processAddress(row, provider, pool, omnibus) {
         } catch (e) {
           console.error('[ERR][DRIP]', e);
           errorCount++;
-          releaseLock(key);
+          continue;
+        }
+        needed = gasPrice * gasLimit;
+        if (balBNB < needed) {
+          console.log(
+            `[SKIP] addr=${addr} asset=${token.symbol} reason=insufficient_gas have=${balBNB} needed=${needed}`,
+          );
           continue;
         }
       }
-      const tokenWallet = wallet.connect(provider);
-      const contract = new ethers.Contract(token.address, erc20Abi, tokenWallet);
-      const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice }));
+      const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice, gasLimit }));
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
       const receipt = await tx.wait(1);
       console.log(`[CONFIRMED] tx=${tx.hash}`);
