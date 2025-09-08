@@ -1,5 +1,7 @@
 const { ethers } = require('ethers');
 
+const NATIVE_SYMBOL = process.env.NATIVE_SYMBOL || 'BNB';
+
 async function provisionUserAddress(db, userId, chainId = Number(process.env.CHAIN_ID || 56)) {
   if (!process.env.MASTER_MNEMONIC) {
     throw new Error('MASTER_MNEMONIC not set');
@@ -53,7 +55,7 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
   }
 }
 
-async function getUserBalance(db, userId, asset = 'native') {
+async function getUserBalance(db, userId, asset = NATIVE_SYMBOL) {
   const [rows] = await db.query(
     'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=?',
     [userId, asset]
@@ -61,4 +63,4 @@ async function getUserBalance(db, userId, asset = 'native') {
   return rows.length ? rows[0].balance_wei : '0';
 }
 
-module.exports = { provisionUserAddress, getUserBalance };
+module.exports = { provisionUserAddress, getUserBalance, NATIVE_SYMBOL };

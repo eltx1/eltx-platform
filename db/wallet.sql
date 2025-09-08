@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS wallet_deposits (
   user_id BIGINT UNSIGNED NOT NULL,
   chain_id INT UNSIGNED NOT NULL,
   address VARCHAR(64) NOT NULL,
+  token_symbol VARCHAR(32) NOT NULL DEFAULT 'BNB',
   tx_hash VARCHAR(80) NOT NULL,
   log_index INT UNSIGNED NOT NULL DEFAULT 0,
   block_number BIGINT UNSIGNED NOT NULL,
@@ -93,6 +94,7 @@ ALTER TABLE wallet_deposits
   DROP COLUMN IF EXISTS chain;
 ALTER TABLE wallet_deposits
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS token_symbol VARCHAR(32) NOT NULL DEFAULT 'BNB' AFTER address,
   ADD COLUMN IF NOT EXISTS confirmations INT UNSIGNED NOT NULL DEFAULT 0 AFTER amount_wei,
   ADD INDEX IF NOT EXISTS idx_user_chain (user_id, chain_id),
   ADD INDEX IF NOT EXISTS idx_addr (address);
@@ -100,18 +102,18 @@ ALTER TABLE wallet_deposits
 
 -- user balances per asset
 CREATE TABLE IF NOT EXISTS user_balances (
-  user_id BIGINT UNSIGNED NOT NULL,
-  asset VARCHAR(32) NOT NULL DEFAULT 'native',
+  user_id INT NOT NULL,
+  asset VARCHAR(32) NOT NULL DEFAULT 'BNB',
   balance_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, asset),
   INDEX idx_user_balances_user (user_id),
   CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-ALTER TABLE user_balances DROP COLUMN IF EXISTS usd_balance;
-
 
 ALTER TABLE user_balances
+  MODIFY COLUMN user_id INT NOT NULL,
+  MODIFY COLUMN asset VARCHAR(32) NOT NULL DEFAULT 'BNB',
   DROP COLUMN IF EXISTS chain,
   DROP COLUMN IF EXISTS status,
   DROP COLUMN IF EXISTS usd_balance;
