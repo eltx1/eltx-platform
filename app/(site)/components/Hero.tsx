@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { dict, useLang } from '../../lib/i18n';
 
 export default function Hero() {
@@ -14,7 +15,13 @@ export default function Hero() {
         <div className="animate-blob animation-delay-4000 absolute top-1/3 left-0 w-64 h-64 bg-indigo-500 opacity-20 blur-3xl rounded-full" />
       </div>
       <div className="flex items-center justify-center">
-        <img src="/assets/img/logo.jpeg" alt="ELTX" className="w-20 h-20 rounded" />
+        <Image
+          src="/assets/img/logo.jpeg"
+          alt="ELTX"
+          width={80}
+          height={80}
+          className="w-20 h-20 rounded"
+        />
       </div>
       <h1 className="text-3xl md:text-5xl font-black">{t.hero_title}</h1>
       <p className="text-[var(--muted)] max-w-md mx-auto">{t.hero_sub}</p>
