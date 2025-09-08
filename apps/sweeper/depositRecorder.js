@@ -15,7 +15,7 @@ async function resolveUserId(pool, { chainId, addressLc }) {
 
 async function recordUserDepositNoTx(
   pool,
-  { userId, chainId, depositAddressLc, tokenSymbol, tokenAddressLc, amountTokenDecimalStr, status },
+  { userId, chainId, depositAddressLc, tokenSymbol, tokenAddressLc, amountTokenDecimalStr },
 ) {
   const amt = amountTokenDecimalStr;
   if (!userId) {
@@ -28,7 +28,7 @@ async function recordUserDepositNoTx(
   }
   const addrLc = (depositAddressLc || '').toLowerCase();
   const tokenAddrLc = tokenAddressLc ? tokenAddressLc.toLowerCase() : null;
-  const statusVal = status === 'swept' ? 'swept' : 'confirmed';
+  const statusVal = 'confirmed';
   const confirmations = Number(process.env.CONFIRMATIONS || 12);
   try {
     const [rows] = await pool.query(

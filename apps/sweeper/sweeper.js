@@ -166,9 +166,9 @@ async function processAddress(row, provider, pool, omnibus) {
   if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
+      const amountDec = ethers.formatUnits(balBNB, 18);
       const sendAmount = balBNB - txCost;
       const userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
-      const amountDec = ethers.formatUnits(sendAmount, 18);
       if (!userId) {
         console.log(`[POST][SKIP] no user for address=${addr}`);
       }
@@ -180,7 +180,6 @@ async function processAddress(row, provider, pool, omnibus) {
         console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
         const receipt = await tx.wait(1);
         console.log(`[CONFIRMED] tx=${tx.hash}`);
-        const status = receipt.status === 1 ? 'swept' : 'confirmed';
         if (userId) {
           await recordUserDepositNoTx(pool, {
             userId,
@@ -189,7 +188,6 @@ async function processAddress(row, provider, pool, omnibus) {
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
             amountTokenDecimalStr: amountDec,
-            status,
           });
         }
         if (receipt.status !== 1) {
@@ -222,7 +220,6 @@ async function processAddress(row, provider, pool, omnibus) {
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
             amountTokenDecimalStr: amountDec,
-            status: 'confirmed',
           });
         }
       } finally {
@@ -274,7 +271,6 @@ async function processAddress(row, provider, pool, omnibus) {
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
       const receipt = await tx.wait(1);
       console.log(`[CONFIRMED] tx=${tx.hash}`);
-      const status = receipt.status === 1 ? 'swept' : 'confirmed';
       if (userId) {
         await recordUserDepositNoTx(pool, {
           userId,
@@ -283,7 +279,6 @@ async function processAddress(row, provider, pool, omnibus) {
           tokenSymbol: token.symbol,
           tokenAddressLc: token.address.toLowerCase(),
           amountTokenDecimalStr: amountDec,
-          status,
         });
       }
       if (receipt.status !== 1) {
@@ -316,7 +311,6 @@ async function processAddress(row, provider, pool, omnibus) {
           tokenSymbol: token.symbol,
           tokenAddressLc: token.address.toLowerCase(),
           amountTokenDecimalStr: amountDec,
-          status: 'confirmed',
         });
       }
     } finally {
