@@ -14,8 +14,8 @@ const RPC_HTTP = process.env.RPC_HTTP || 'https://bsc-dataseed.bnbchain.org';
 const RPC_WS = process.env.RPC_WS || '';
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
-const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS_2 || 10000);
-const HEAD_RANGE = Number(process.env.HEAD_RANGE || 200);
+const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS_2 || 30000);
+const HEAD_RANGE = Number(process.env.HEAD_RANGE || 250);
 
 let TOKENS = [];
 try {
@@ -109,6 +109,9 @@ async function refreshAddresses() {
       }
     }
     console.log(`[W2][ADDR] loaded=${watchSet.size}`);
+    if (watchSet.size) {
+      console.log('[W2][ADDR_LIST]', Array.from(watchSet).join(','));
+    }
   } catch (e) {
     console.error('[W2][ERR][SQL] addr_load', e);
   }
