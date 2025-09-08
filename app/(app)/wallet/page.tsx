@@ -130,7 +130,7 @@ export default function WalletPage() {
         <h2 className="font-semibold mb-2">{t.wallet.transactions}</h2>
         <div className="space-y-2">
           {deposits.map((d) => (
-            <div key={d.tx_hash} className="p-3 bg-white/5 rounded text-sm space-y-1">
+            <div key={d.tx_hash || d.created_at} className="p-3 bg-white/5 rounded text-sm space-y-1">
               <div className="flex justify-between text-xs opacity-70">
                 <span>{new Date(d.created_at).toLocaleString()}</span>
                 <span>{d.confirmations}</span>
