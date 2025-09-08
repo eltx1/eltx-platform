@@ -1,5 +1,3 @@
-const crypto = require('crypto');
-
 async function resolveUserId(pool, { chainId, addressLc }) {
   try {
     const [rows] = await pool.query(
@@ -200,62 +198,8 @@ async function detectAndUpsertDeposit(ctx, pool) {
     console.log(`[DEPOSIT][DONE] took=${Date.now() - start}ms`);
   }
 }
-
-async function recordSweepFailure(ctx, pool) {
-  const start = Date.now();
-  const {
-    chainId,
-    userId,
-    depositAddress,
-    tokenAddress,
-    amountWei,
-    failReason,
-    status = 'pending',
-    credited = 0,
-  } = ctx;
-  const addr = (depositAddress || '').toLowerCase();
-  const tokenAddr = tokenAddress ? tokenAddress.toLowerCase() : null;
-  const amountStr = BigInt(amountWei || 0).toString();
-  const statusVal = ['pending', 'swept', 'confirmed'].includes(status)
-    ? status
-    : 'pending';
-  const creditedVal = Number(credited) === 1 ? 1 : 0;
-  if (!userId || BigInt(amountStr) <= 0n) {
-    console.log(`[DEPOSIT][FAIL] skip user=${userId} amount=${amountStr}`);
-    return;
-  }
-  const hashInput = `${userId}|${addr}|${tokenAddr || 'BNB'}`;
-  const failHash =
-    'sweeper_fail:' + crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 64);
-  try {
-    await pool.query(
-      `INSERT INTO wallet_deposits (user_id, chain_id, address, token_address, amount_wei, tx_hash, block_number, confirmations, status, credited, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,NOW()) ON DUPLICATE KEY UPDATE created_at=VALUES(created_at)`,
-      [
-        userId,
-        chainId,
-        addr,
-        tokenAddr,
-        amountStr,
-        failHash,
-        0,
-        0,
-        statusVal,
-        creditedVal,
-      ],
-    );
-    console.log(
-      `[DEPOSIT][FAIL] user=${userId} addr=${addr} token=${tokenAddr || 'BNB'} wei=${amountStr} reason=${failReason}`,
-    );
-  } catch (e) {
-    console.error('[DEPOSIT][ERR][FAIL]', e);
-  } finally {
-    console.log(`[DEPOSIT][FAIL] done in ${Date.now() - start}ms`);
-  }
-}
-
 module.exports = {
   detectAndUpsertDeposit,
-  recordSweepFailure,
   resolveUserId,
   recordUserDepositNoTx,
 };

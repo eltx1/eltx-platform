@@ -2,11 +2,7 @@ const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-const {
-  recordSweepFailure,
-  resolveUserId,
-  recordUserDepositNoTx,
-} = require('./depositRecorder');
+const { resolveUserId, recordUserDepositNoTx } = require('./depositRecorder');
 
 // ---- env ----
 const VERSION = 'v1';
@@ -197,21 +193,6 @@ async function processAddress(row, provider, pool, omnibus) {
       } catch (e) {
         console.error('[ERR][SWEEP]', e);
         errorCount++;
-        try {
-          await recordSweepFailure(
-            {
-              chainId: CHAIN_ID,
-              userId,
-              depositAddress: addr,
-              tokenAddress: null,
-              amountWei: sendAmount,
-              failReason: e.code || e.message,
-            },
-            pool,
-          );
-        } catch (err) {
-          console.error('[POST-FAIL][ERR]', err);
-        }
         if (userId) {
           await recordUserDepositNoTx(pool, {
             userId,
@@ -288,21 +269,6 @@ async function processAddress(row, provider, pool, omnibus) {
     } catch (e) {
       console.error('[ERR][SWEEP]', e);
       errorCount++;
-      try {
-        await recordSweepFailure(
-          {
-            chainId: CHAIN_ID,
-            userId,
-            depositAddress: addr,
-            tokenAddress: token.address,
-            amountWei: bal,
-            failReason: e.code || e.message,
-          },
-          pool,
-        );
-      } catch (err) {
-        console.error('[POST-FAIL][ERR]', err);
-      }
       if (userId) {
         await recordUserDepositNoTx(pool, {
           userId,
