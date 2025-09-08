@@ -1,4 +1,5 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api';
@@ -50,7 +51,16 @@ export default function WalletPage() {
     if (txRes.ok) setDeposits(txRes.data.transactions);
   }, [t]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 10000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [load]);
 
   const handleRefresh = async () => {
     await apiFetch('/wallet/refresh', { method: 'POST' });
