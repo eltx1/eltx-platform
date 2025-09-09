@@ -149,6 +149,10 @@ async function processAddress(row, provider, pool, omnibus) {
     console.warn(`[WARN] addr_mismatch db=${addr} derived=${wallet.address}`);
     return;
   }
+  const userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
+  if (!userId) {
+    console.log(`[POST][SKIP] no user for address=${addr}`);
+  }
   let balBNB = await provider.getBalance(addr);
   const gasPrice = await resolveGasPriceWei(provider);
   const txCost = gasPrice * 21000n;
@@ -159,14 +163,22 @@ async function processAddress(row, provider, pool, omnibus) {
   }
   console.log(`[CHK] addr=${addr} bnb=${balBNB} eligible=${eligibleBNB} reason=${reasonBNB}`);
 
+  if (userId && balBNB > 0n) {
+    await recordUserDepositNoTx(pool, {
+      userId,
+      chainId: CHAIN_ID,
+      depositAddressLc: addr,
+      tokenSymbol: 'BNB',
+      tokenAddressLc: null,
+      amountWeiStr: balBNB.toString(),
+      status: 'confirmed',
+    });
+  }
+
   if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
       const sendAmount = balBNB - txCost;
-      const userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
-      if (!userId) {
-        console.log(`[POST][SKIP] no user for address=${addr}`);
-      }
       try {
         console.log(`[ELIGIBLE] addr=${addr} asset=BNB amount=${sendAmount}`);
         const tx = await withRetry(() =>
@@ -182,7 +194,7 @@ async function processAddress(row, provider, pool, omnibus) {
             depositAddressLc: addr,
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
-            amountWeiStr: sendAmount.toString(),
+            amountWeiStr: balBNB.toString(),
             status: 'swept',
           });
         }
@@ -199,7 +211,7 @@ async function processAddress(row, provider, pool, omnibus) {
             depositAddressLc: addr,
             tokenSymbol: 'BNB',
             tokenAddressLc: null,
-            amountWeiStr: sendAmount.toString(),
+            amountWeiStr: balBNB.toString(),
             status: 'confirmed',
           });
         }
@@ -214,7 +226,6 @@ async function processAddress(row, provider, pool, omnibus) {
     if (sweepCount >= SWEEP_RATE_LIMIT_PER_MIN) break;
     if (!acquireLock(key)) continue;
     let bal = 0n;
-    let userId;
     try {
       const erc = new ethers.Contract(token.address, erc20Abi, provider);
       bal = await erc.balanceOf(addr);
@@ -224,8 +235,17 @@ async function processAddress(row, provider, pool, omnibus) {
         releaseLock(key);
         continue;
       }
-      userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
-      if (!userId) {
+      if (userId) {
+        await recordUserDepositNoTx(pool, {
+          userId,
+          chainId: CHAIN_ID,
+          depositAddressLc: addr,
+          tokenSymbol: token.symbol,
+          tokenAddressLc: token.address.toLowerCase(),
+          amountWeiStr: bal.toString(),
+          status: 'confirmed',
+        });
+      } else {
         console.log(`[POST][SKIP] no user for address=${addr}`);
       }
       console.log(`[ELIGIBLE] addr=${addr} asset=${token.symbol} amount=${bal}`);
