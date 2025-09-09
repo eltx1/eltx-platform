@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
 const { ethers } = require('ethers');
-const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
+const { provisionUserAddress, getUserBalance, NATIVE_SYMBOL } = require('./src/services/wallet');
 require('dotenv').config();
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
@@ -69,6 +69,17 @@ startRunner(pool);
       .filter((s) => s && !s.startsWith('--'));
     const conn = await pool.getConnection();
     try {
+      await conn.query(
+        `CREATE TABLE IF NOT EXISTS user_balances (
+          user_id INT NOT NULL,
+          asset VARCHAR(32) NOT NULL DEFAULT '${NATIVE_SYMBOL}',
+          balance_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (user_id, asset),
+          INDEX idx_user_balances_user (user_id),
+          CONSTRAINT fk_user_balances_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+      );
       for (const sql of statements) {
         if (/DROP COLUMN IF EXISTS/i.test(sql) || /DROP INDEX IF EXISTS/i.test(sql)) {
           const table = sql.match(/ALTER TABLE\s+([`\w]+)/i)[1].replace(/`/g, '');
@@ -300,17 +311,29 @@ app.get('/wallet/me', walletLimiter, async (req, res, next) => {
     const userId = rows[0].id;
     const wallet = await provisionUserAddress(pool, userId, CHAIN_ID);
     const [deps] = await pool.query(
-      'SELECT tx_hash, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
+      'SELECT tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
       [userId, CHAIN_ID]
     );
     const depositSchema = z.object({
       tx_hash: z.string(),
+      token_address: z.string(),
+      token_symbol: z.string().nullable().optional(),
       amount_wei: z.string(),
       confirmations: z.coerce.number(),
       status: z.enum(['seen', 'confirmed', 'swept', 'orphaned']),
       created_at: z.coerce.date(),
     });
     const deposits = z.array(depositSchema).parse(deps);
+    const ZERO = '0x0000000000000000000000000000000000000000';
+    for (const row of deposits) {
+      row.token_address = (row.token_address || ZERO).toLowerCase();
+      if (row.token_address === ZERO) {
+        row.display_symbol = row.token_symbol || 'BNB';
+      } else {
+        const meta = tokenMeta[row.token_address];
+        row.display_symbol = row.token_symbol || (meta ? meta.symbol : 'UNKNOWN');
+      }
+    }
     res.json({ ok: true, wallet, deposits });
   } catch (err) {
     next(err);
@@ -341,7 +364,7 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
-      'SELECT tx_hash, token_address, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
+      'SELECT tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
       [userId, CHAIN_ID]
     );
     const ZERO = '0x0000000000000000000000000000000000000000';
@@ -349,11 +372,11 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
       row.token_address = (row.token_address || ZERO).toLowerCase();
       row.amount_wei = row.amount_wei?.toString() ?? '0';
       if (row.token_address === ZERO) {
-        row.display_symbol = 'BNB';
+        row.display_symbol = row.token_symbol || 'BNB';
         row.decimals = 18;
       } else {
         const meta = tokenMeta[row.token_address];
-        row.display_symbol = meta ? meta.symbol : 'UNKNOWN';
+        row.display_symbol = row.token_symbol || (meta ? meta.symbol : 'UNKNOWN');
         row.decimals = meta ? meta.decimals : 18;
       }
       row.amount_formatted = formatUnitsStr(row.amount_wei, row.decimals);
@@ -424,8 +447,8 @@ app.post('/wallet/refresh', walletLimiter, async (req, res, next) => {
     const provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL || process.env.RPC_HTTP, CHAIN_ID);
     const bal = await provider.getBalance(wallet.address);
     await pool.query(
-      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=VALUES(balance_wei)",
-      [userId, bal.toString()]
+      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei=VALUES(balance_wei)",
+      [userId, NATIVE_SYMBOL, bal.toString()]
     );
     res.json({ ok: true, balance_wei: bal.toString(), balance: ethers.formatEther(bal) });
   } catch (err) {
