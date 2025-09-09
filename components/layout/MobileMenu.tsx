@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { X } from 'lucide-react';
 import { Dispatch, SetStateAction, useEffect, useRef } from 'react';
+import { dict, useLang } from '../../app/lib/i18n';
 
 interface NavLink { href: string; label: string; }
 
@@ -20,6 +21,8 @@ export default function MobileMenu({
   logout: () => Promise<void>;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const { lang } = useLang();
+  const t = dict[lang];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -58,17 +61,17 @@ export default function MobileMenu({
         {!user && (
           <>
             <Link href="/login" onClick={() => setOpen(false)} className="hover:opacity-80">
-              Sign in
+              {t.nav.login}
             </Link>
             <Link href="/signup" onClick={() => setOpen(false)} className="hover:opacity-80">
-              Sign up
+              {t.nav.signup}
             </Link>
           </>
         )}
         {user && (
           <>
             <Link href="/dashboard" onClick={() => setOpen(false)} className="hover:opacity-80">
-              Dashboard
+              {t.nav.dashboard}
             </Link>
             <button
               onClick={async () => {
@@ -77,7 +80,7 @@ export default function MobileMenu({
               }}
               className="hover:opacity-80 text-left"
             >
-              Logout
+              {t.nav.logout}
             </button>
           </>
         )}
