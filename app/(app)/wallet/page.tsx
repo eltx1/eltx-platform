@@ -27,6 +27,7 @@ type Deposit = {
   amount_wei: string;
   display_symbol: string;
   decimals: number;
+  amount_formatted: string;
   confirmations: number;
   status: string;
   created_at: string;
@@ -159,20 +160,20 @@ export default function WalletPage() {
                 <span>{new Date(d.created_at).toLocaleString()}</span>
                 <span>{d.confirmations}</span>
               </div>
-              <a
-                href={`https://bscscan.com/tx/${d.tx_hash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="break-all underline"
-              >
-                {d.tx_hash}
-              </a>
-              <div>
-                {formatWei(d.amount_wei, d.decimals)} {d.display_symbol}
-              </div>
-              <div className="text-xs">{statusLabel(d.status)}</div>
+            <a
+              href={`https://bscscan.com/tx/${d.tx_hash}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all underline"
+            >
+              {d.tx_hash}
+            </a>
+            <div>
+              {Number(d.amount_formatted).toFixed(6)} {d.display_symbol}
             </div>
-          ))}
+            <div className="text-xs">{statusLabel(d.status)}</div>
+          </div>
+        ))}
           {deposits.length === 0 && <div className="text-sm">-</div>}
         </div>
       </div>
