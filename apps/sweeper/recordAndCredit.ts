@@ -15,7 +15,9 @@ export async function preRecordSweep(o: {
   const tokenAddr = o.tokenAddress && o.tokenAddress !== '' ? o.tokenAddress.toLowerCase() : NATIVE_ZERO;
   const asset = (o.assetSymbol || (tokenAddr === NATIVE_ZERO ? 'BNB' : '')).toUpperCase();
   const txHash = `pre:${randomUUID()}`;
-  console.log(JSON.stringify({ tag: 'SWP:PRE-RECORD:BEGIN', user_id: o.userId, asset, amount_wei: o.amountWei }));
+  console.log(
+    JSON.stringify({ tag: 'SWP:DEPOSIT:PRE_RECORD:BEGIN', user_id: o.userId, asset, amount_wei: o.amountWei })
+  );
   try {
     const sql = `INSERT INTO wallet_deposits
          (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
@@ -32,10 +34,19 @@ export async function preRecordSweep(o: {
       );
       if (rows.length) id = rows[0].id;
     }
-    console.log(JSON.stringify({ tag: 'SWP:PRE-RECORD:OK', user_id: o.userId, asset, tx_hash: txHash, amount_wei: o.amountWei, dup }));
+    console.log(
+      JSON.stringify({
+        tag: 'SWP:DEPOSIT:PRE_RECORD:OK',
+        user_id: o.userId,
+        asset,
+        tx_hash: txHash,
+        amount_wei: o.amountWei,
+        dup,
+      })
+    );
     return { id, txHash, asset, tokenAddr };
   } catch (e: any) {
-    console.log(JSON.stringify({ tag: 'SWP:PRE-RECORD:ERR', err: e.message }));
+    console.log(JSON.stringify({ tag: 'SWP:DEPOSIT:PRE_RECORD:ERR', err: e.message }));
     throw e;
   }
 }
@@ -56,7 +67,9 @@ export async function finalizeSweep(o: {
 }) {
   const pool = await getPool();
   const conn = await pool.getConnection();
-  console.log(JSON.stringify({ tag: 'SWP:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash }));
+  console.log(
+    JSON.stringify({ tag: 'SWP:DEPOSIT:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash })
+  );
   try {
     await conn.beginTransaction();
     try {
@@ -66,7 +79,15 @@ export async function finalizeSweep(o: {
       );
     } catch (e: any) {
       if (e.code === 'ER_DUP_ENTRY') {
-        console.log(JSON.stringify({ tag: 'SWP:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash, dup: true }));
+        console.log(
+          JSON.stringify({
+            tag: 'SWP:DEPOSIT:UPSERT:BEGIN',
+            id: o.id,
+            status: o.status,
+            tx_hash: o.finalTxHash,
+            dup: true,
+          })
+        );
         const [rows] = await conn.query<any[]>(
           `SELECT id FROM wallet_deposits WHERE chain_id=? AND address=? AND token_address_norm=? AND tx_hash=? AND log_index=0`,
           [o.chainId, o.address, o.tokenAddr, o.finalTxHash]
@@ -79,11 +100,11 @@ export async function finalizeSweep(o: {
           );
         }
       } else {
-        console.log(JSON.stringify({ tag: 'SWP:UPSERT:ERR', err: e.message }));
+        console.log(JSON.stringify({ tag: 'SWP:DEPOSIT:UPSERT:ERR', err: e.message }));
         throw e;
       }
     }
-    console.log(JSON.stringify({ tag: 'SWP:UPSERT:OK', id: o.id, status: o.status }));
+    console.log(JSON.stringify({ tag: 'SWP:DEPOSIT:UPSERT:OK', id: o.id, status: o.status }));
     console.log(JSON.stringify({ tag: 'SWP:CREDIT:BEGIN', forced: o.forced || false }));
     const [rows2] = await conn.query<any[]>(`SELECT credited FROM wallet_deposits WHERE id=? FOR UPDATE`, [o.id]);
     if (!rows2.length) throw new Error('deposit_missing');
