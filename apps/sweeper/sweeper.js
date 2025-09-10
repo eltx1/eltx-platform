@@ -281,7 +281,7 @@ async function processAddress(row, provider, pool, omnibus) {
         continue;
       }
       balBNB = await provider.getBalance(addr);
-      let gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+      let gasLimit = await contract.transfer.estimateGas(OMNIBUS_ADDRESS, bal, { gasPrice });
       let needed = gasPrice * gasLimit;
       if (balBNB < needed) {
         console.log(
@@ -301,7 +301,7 @@ async function processAddress(row, provider, pool, omnibus) {
           dripCount++;
           balBNB += GAS_DRIP_WEI;
           gasPrice = await resolveGasPriceWei(provider);
-          gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+          gasLimit = await contract.transfer.estimateGas(OMNIBUS_ADDRESS, bal, { gasPrice });
         } catch (e) {
           console.log(
             JSON.stringify({ tag: 'DRIP:ERR', providerCode: e.code, message: e.message })

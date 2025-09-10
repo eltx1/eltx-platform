@@ -175,10 +175,15 @@ addToken('USDC', 'TOKEN_USDC');
 if (process.env.TOKEN_ELTX) addToken('ELTX', 'TOKEN_ELTX');
 
 function formatUnitsStr(weiStr, decimals = 18) {
-  const num = parseFloat(weiStr);
-  if (isNaN(num)) return '0';
-  const divisor = 10 ** decimals;
-  return (num / divisor).toFixed(decimals);
+  try {
+    const wei = BigInt(weiStr);
+    const base = 10n ** BigInt(decimals);
+    const integer = wei / base;
+    const fraction = (wei % base).toString().padStart(decimals, '0');
+    return `${integer}.${fraction}`;
+  } catch {
+    return '0';
+  }
 }
 
 async function requireUser(req) {
@@ -346,7 +351,7 @@ app.get('/wallet/balance', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const balance_wei = await getUserBalance(pool, userId);
-    res.json({ ok: true, balance_wei, balance: ethers.formatEther(balance_wei) });
+    res.json({ ok: true, balance_wei, balance: ethers.formatEther(BigInt(balance_wei)) });
   } catch (err) {
     next(err);
   }
@@ -362,12 +367,13 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
     const ZERO = '0x0000000000000000000000000000000000000000';
     for (const row of rows) {
       row.token_address = (row.token_address || ZERO).toLowerCase();
-      row.amount_wei = row.amount_wei?.toString() ?? '0';
+      const rawWei = row.amount_wei?.toString() ?? '0';
+      row.amount_wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
       row.amount_int = row.amount_wei;
       if (row.token_address === ZERO) {
         row.display_symbol = row.token_symbol || 'BNB';
         row.decimals = 18;
-        row.amount = ethers.formatEther(row.amount_wei);
+        row.amount = ethers.formatEther(BigInt(row.amount_wei));
       } else {
         const meta = tokenMeta[row.token_address];
         row.display_symbol = row.token_symbol || (meta ? meta.symbol : 'UNKNOWN');
@@ -395,7 +401,8 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       const meta = tokenMetaBySymbol[sym];
       const decimals = meta ? meta.decimals : 18;
       const contract = meta ? meta.contract : null;
-      const wei = row.balance_wei?.toString() || '0';
+      const rawWei = row.balance_wei?.toString() || '0';
+      const wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
       assets.push({
         symbol: sym,
         display_symbol: sym,

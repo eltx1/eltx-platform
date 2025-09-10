@@ -58,7 +58,9 @@ async function getUserBalance(db, userId, asset = 'BNB') {
     'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=?',
     [userId, asset]
   );
-  return rows.length ? rows[0].balance_wei : '0';
+  if (!rows.length) return '0';
+  const raw = rows[0].balance_wei?.toString() || '0';
+  return raw.includes('.') ? raw.split('.')[0] : raw;
 }
 
 module.exports = { provisionUserAddress, getUserBalance };
