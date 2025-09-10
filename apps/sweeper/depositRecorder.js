@@ -54,7 +54,7 @@ async function recordUserDepositNoTx(
   const statusVal = status === 'swept' ? 'swept' : 'confirmed';
   const txHash = `manual:sweeper:${chainId}:${addrLc}:${tokenAddrLc}:${amtWei}`;
   try {
-    const tokenSym = (tokenSymbol || '').toUpperCase();
+    const tokenSym = (tokenSymbol || (tokenAddrLc === ZERO ? 'BNB' : '')).toUpperCase();
     const [res] = await pool.query(
       `INSERT INTO wallet_deposits (user_id, chain_id, address, token_symbol, token_address, amount_wei, tx_hash, log_index, block_number, block_hash, confirmations, status, credited, source, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?, ?, 1, 'sweeper', NOW())
@@ -62,7 +62,7 @@ async function recordUserDepositNoTx(
       [userId, chainId, addrLc, tokenSym, tokenAddrLc, amtWei, txHash, 0, null, '', confirmations, statusVal],
     );
     if (res.affectedRows === 1) {
-      const asset = tokenAddrLc === ZERO ? 'native' : tokenSym;
+      const asset = tokenSym || (tokenAddrLc === ZERO ? 'BNB' : '');
       await pool.query(
         `INSERT INTO user_balances (user_id, asset, balance_wei)
          VALUES (?,?,?)

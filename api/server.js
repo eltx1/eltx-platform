@@ -157,14 +157,17 @@ const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 
 // token metadata from env
 const tokenMeta = {};
+const tokenMetaBySymbol = {};
 function addToken(symbol, envKey) {
   const addr = process.env[envKey];
   if (addr) {
-    tokenMeta[addr.toLowerCase()] = {
+    const meta = {
       symbol,
       contract: addr,
       decimals: Number(process.env[`${envKey}_DECIMALS`] || 18),
     };
+    tokenMeta[addr.toLowerCase()] = meta;
+    tokenMetaBySymbol[symbol.toUpperCase()] = meta;
   }
 }
 addToken('USDT', 'TOKEN_USDT');
@@ -379,48 +382,24 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
 app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
-    const [addrRows] = await pool.query(
-      'SELECT address FROM wallet_addresses WHERE user_id=? AND chain_id=? LIMIT 1',
-      [userId, CHAIN_ID]
+    const [rows] = await pool.query(
+      'SELECT asset, balance_wei FROM user_balances WHERE user_id=?',
+      [userId]
     );
-    if (!addrRows.length) return res.json({ ok: true, assets: [] });
-    const userAddress = addrRows[0].address;
-    const ZERO = '0x0000000000000000000000000000000000000000';
-    const [bnbRow] = await pool.query(
-      "SELECT COALESCE(SUM(amount_wei),0) AS sum FROM wallet_deposits WHERE user_id=? AND chain_id=? AND token_address=? AND status IN ('confirmed','swept') AND (credited=1 OR status='swept')",
-      [userId, CHAIN_ID, ZERO]
-    );
-    const bnbWei = bnbRow[0].sum ? bnbRow[0].sum.toString() : '0';
-    const assets = [
-      {
-        symbol: 'BNB',
-        display_symbol: 'BNB',
-        contract: null,
-        decimals: 18,
-        balance_wei: bnbWei,
-        balance: formatUnitsStr(bnbWei, 18),
-      },
-    ];
-    const provider = new ethers.JsonRpcProvider(process.env.RPC_HTTP, CHAIN_ID);
-    for (const addr in tokenMeta) {
-      const meta = tokenMeta[addr];
-      const erc = new ethers.Contract(meta.contract, ['function balanceOf(address) view returns (uint256)', 'function decimals() view returns (uint8)'], provider);
-      if (isNaN(meta.decimals)) {
-        try {
-          meta.decimals = await erc.decimals();
-        } catch {
-          meta.decimals = 18;
-        }
-      }
-      const bal = await erc.balanceOf(userAddress);
-      const wei = bal.toString();
+    const assets = [];
+    for (const row of rows) {
+      const sym = (row.asset || '').toUpperCase();
+      const meta = tokenMetaBySymbol[sym];
+      const decimals = meta ? meta.decimals : 18;
+      const contract = meta ? meta.contract : null;
+      const wei = row.balance_wei?.toString() || '0';
       assets.push({
-        symbol: meta.symbol,
-        display_symbol: meta.symbol,
-        contract: meta.contract,
-        decimals: meta.decimals,
+        symbol: sym,
+        display_symbol: sym,
+        contract,
+        decimals,
         balance_wei: wei,
-        balance: formatUnitsStr(wei, meta.decimals),
+        balance: formatUnitsStr(wei, decimals),
       });
     }
     res.json({ ok: true, assets });
@@ -436,7 +415,7 @@ app.post('/wallet/refresh', walletLimiter, async (req, res, next) => {
     const provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL || process.env.RPC_HTTP, CHAIN_ID);
     const bal = await provider.getBalance(wallet.address);
     await pool.query(
-      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'native',?) ON DUPLICATE KEY UPDATE balance_wei=VALUES(balance_wei)",
+      "INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,'BNB',?) ON DUPLICATE KEY UPDATE balance_wei=VALUES(balance_wei)",
       [userId, bal.toString()]
     );
     res.json({ ok: true, balance_wei: bal.toString(), balance: ethers.formatEther(bal) });

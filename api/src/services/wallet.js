@@ -53,7 +53,7 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
   }
 }
 
-async function getUserBalance(db, userId, asset = 'native') {
+async function getUserBalance(db, userId, asset = 'BNB') {
   const [rows] = await db.query(
     'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=?',
     [userId, asset]
