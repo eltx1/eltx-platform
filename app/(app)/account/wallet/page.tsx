@@ -7,11 +7,12 @@ import { ethers } from 'ethers';
 
 type Deposit = {
   tx_hash: string;
-  amount_wei: string;
+  amount_int: string;
+  decimals: number;
+  display_symbol: string;
   confirmations: number;
   status: string;
   created_at: string;
-  amount_int: string;
 };
 type WalletInfo = { chain_id: number; address: string };
 
@@ -73,7 +74,7 @@ export default function WalletPage() {
           {deposits.map((d) => (
             <div key={d.tx_hash} className="p-3 bg-gray-100 rounded">
               <a href={`https://bscscan.com/tx/${d.tx_hash}`} target="_blank" rel="noopener noreferrer" className="break-all text-sm underline">{d.tx_hash}</a>
-              <div className="text-xs">{d.amount_wei} wei</div>
+              <div className="text-xs">{ethers.formatUnits(d.amount_int, d.decimals)} {d.display_symbol}</div>
               <div className="text-xs">{d.confirmations} conf — {d.status}</div>
               <div className="text-xs">{new Date(d.created_at).toLocaleString()}</div>
             </div>

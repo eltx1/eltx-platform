@@ -6,13 +6,12 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
+import { ethers } from 'ethers';
 type Deposit = {
   tx_hash: string;
-  amount_wei: string;
+  amount_int: string;
   symbol: string;
   decimals: number;
-  amount_formatted: string;
-  amount_int: string;
   confirmations: number;
   status: string;
   created_at: string;
@@ -91,7 +90,7 @@ export default function TransactionsPage() {
               {d.tx_hash}
             </a>
             <div>
-              {Number(d.amount_formatted).toFixed(6)} {d.symbol}
+              {Number(ethers.formatUnits(d.amount_int, d.decimals)).toFixed(6)} {d.symbol}
             </div>
             <div className="text-xs">{statusLabel(d.status)}</div>
           </div>

@@ -24,11 +24,9 @@ function formatWei(wei: string, decimals: number, precision = 6): string {
 type Deposit = {
   tx_hash: string;
   token_address?: string;
-  amount_wei: string;
+  amount_int: string;
   display_symbol: string;
   decimals: number;
-  amount_formatted: string;
-  amount_int: string;
   confirmations: number;
   status: string;
   created_at: string;
@@ -161,24 +159,24 @@ export default function WalletPage() {
                 <span>{new Date(d.created_at).toLocaleString()}</span>
                 <span>{d.confirmations}</span>
               </div>
-            {d.tx_hash ? (
-              <a
-                href={`https://bscscan.com/tx/${d.tx_hash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="break-all underline"
-              >
-                {d.tx_hash}
-              </a>
-            ) : (
-              <div>-</div>
-            )}
-            <div>
-              {Number(d.amount_formatted).toFixed(6)} {d.display_symbol}
+              {d.tx_hash ? (
+                <a
+                  href={`https://bscscan.com/tx/${d.tx_hash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="break-all underline"
+                >
+                  {d.tx_hash}
+                </a>
+              ) : (
+                <div>-</div>
+              )}
+              <div>
+                {formatWei(d.amount_int, d.decimals)} {d.display_symbol}
+              </div>
+              <div className="text-xs">{statusLabel(d.status)}</div>
             </div>
-            <div className="text-xs">{statusLabel(d.status)}</div>
-          </div>
-        ))}
+          ))}
           {deposits.length === 0 && <div className="text-sm">-</div>}
         </div>
       </div>

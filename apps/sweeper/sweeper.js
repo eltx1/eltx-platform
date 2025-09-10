@@ -28,6 +28,7 @@ const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
 const SWEEP_RATE_LIMIT_PER_MIN = Number(process.env.SWEEP_RATE_LIMIT_PER_MIN || 12);
 const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || '1');
+const GAS_LIMIT_BUFFER = BigInt(process.env.GAS_LIMIT_BUFFER || '5000');
 
 // ---- utils ----
 function maskUrl(url) {
@@ -280,8 +281,46 @@ async function processAddress(row, provider, pool, omnibus) {
         releaseLock(key);
         continue;
       }
+      const iface = contract.interface;
+      const hasTransfer = typeof contract.transfer === 'function';
+      const abiHasTransfer = !!(iface.getFunction && iface.getFunction('transfer'));
+      console.log(
+        JSON.stringify({ tag: 'ERC20:SEND:CHECK', hasTransfer, abiHasTransfer })
+      );
+      let data;
+      const amountBn = bal;
+      if (!hasTransfer) {
+        if (abiHasTransfer) {
+          data = iface.encodeFunctionData('transfer', [OMNIBUS_ADDRESS, amountBn]);
+        } else {
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: symbol,
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountCredit,
+              finalTxHash: `err:${pre.key}`,
+              status: 'send_error',
+              confirmations: 0,
+              forced: true,
+              error: 'no_transfer_fn',
+            });
+          }
+          releaseLock(key);
+          continue;
+        }
+      }
       balBNB = await provider.getBalance(addr);
-      let gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+      let gasLimit;
+      if (hasTransfer) {
+        gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, amountBn, { gasPrice });
+      } else {
+        gasLimit = await wallet.estimateGas({ to: reg.address, data, value: 0, gasPrice });
+      }
+      gasLimit += GAS_LIMIT_BUFFER;
       let needed = gasPrice * gasLimit;
       if (balBNB < needed) {
         console.log(
@@ -301,7 +340,12 @@ async function processAddress(row, provider, pool, omnibus) {
           dripCount++;
           balBNB += GAS_DRIP_WEI;
           gasPrice = await resolveGasPriceWei(provider);
-          gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+          if (hasTransfer) {
+            gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, amountBn, { gasPrice });
+          } else {
+            gasLimit = await wallet.estimateGas({ to: reg.address, data, value: 0, gasPrice });
+          }
+          gasLimit += GAS_LIMIT_BUFFER;
         } catch (e) {
           console.log(
             JSON.stringify({ tag: 'DRIP:ERR', providerCode: e.code, message: e.message })
@@ -335,12 +379,14 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       try {
         console.log(
-          JSON.stringify({ tag: 'SEND:BEGIN', symbol, amount: amountCredit, tx_hash: pre.txHash })
+          JSON.stringify({ tag: 'ERC20:SEND:BEGIN', symbol, amount: amountCredit, tx_hash: pre.txHash })
         );
         const tx = await withRetry(() =>
-          contract.transfer(OMNIBUS_ADDRESS, BigInt(amountCredit), { gasPrice, gasLimit })
+          hasTransfer
+            ? contract.transfer(OMNIBUS_ADDRESS, amountBn, { gasPrice, gasLimit })
+            : wallet.sendTransaction({ to: reg.address, data, value: 0, gasPrice, gasLimit })
         );
-        console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
+        console.log(JSON.stringify({ tag: 'ERC20:SEND:OK', tx_hash: tx.hash }));
         try {
           const receipt = await tx.wait(CONFIRMATIONS);
           console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
@@ -382,7 +428,7 @@ async function processAddress(row, provider, pool, omnibus) {
           }
         }
       } catch (e) {
-        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
+        console.log(JSON.stringify({ tag: 'ERC20:SEND:ERR', message: e.message }));
         if (userId) {
           await finalizeSweep({
             id: pre.id,
