@@ -13,27 +13,14 @@ async function preRecordSweep(o) {
     JSON.stringify({ tag: 'DEPOSIT:PRE_RECORD:BEGIN', user_id: o.userId, asset, amount_wei: o.amountWei, key })
   );
   try {
-    let id;
-    let reused = false;
-    const [rows] = await pool.query(
-      `SELECT id FROM wallet_deposits WHERE chain_id=? AND address=? AND token_address_norm=LOWER(?) AND amount_wei=? AND status IN ('pre_sweep','send_error','wait_error') LIMIT 1`,
-      [o.chainId, o.address, tokenAddr, o.amountWei]
-    );
-    if (rows.length) {
-      id = rows[0].id;
-      reused = true;
-      await pool.query(
-        `UPDATE wallet_deposits SET token_symbol=?, tx_hash=?, status='pre_sweep', confirmations=0, last_update_at=NOW() WHERE id=?`,
-        [asset, txHash, id]
-      );
-    } else {
-      const sql = `INSERT INTO wallet_deposits
-           (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
-            token_address, amount_wei, confirmations, status, credited, source, token_address_norm, created_at, last_update_at)
-           VALUES (?, ?, ?, ?, ?, 0, 0, '', ?, ?, 0, 'pre_sweep', 0, 'sweeper', LOWER(?), NOW(), NOW())`;
-      const [res] = await pool.query(sql, [o.userId, o.chainId, o.address, asset, txHash, tokenAddr, o.amountWei, tokenAddr]);
-      id = res.insertId;
-    }
+    const sql = `INSERT INTO wallet_deposits
+         (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
+          token_address, amount_wei, confirmations, status, credited, source, token_address_norm, created_at, last_update_at)
+         VALUES (?, ?, ?, ?, ?, 0, 0, '', ?, ?, 0, 'pre_sweep', 0, 'sweeper', LOWER(?), NOW(), NOW())
+         ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), token_symbol=VALUES(token_symbol), status='pre_sweep', confirmations=0, last_update_at=NOW()`;
+    const [res] = await pool.query(sql, [o.userId, o.chainId, o.address, asset, txHash, tokenAddr, o.amountWei, tokenAddr]);
+    const id = res.insertId;
+    const reused = res.affectedRows > 1;
     console.log(
       JSON.stringify({
         tag: 'DEPOSIT:PRE_RECORD:OK',
@@ -42,6 +29,7 @@ async function preRecordSweep(o) {
         tx_hash: txHash,
         amount_wei: o.amountWei,
         reused,
+        id,
         key,
       })
     );

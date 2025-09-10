@@ -1,6 +1,5 @@
 const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
-const Decimal = require('decimal.js');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const { resolveUserId } = require('./depositRecorder');
@@ -58,39 +57,35 @@ async function withRetry(fn, attempts = TX_MAX_RETRY) {
 }
 
 // helper: احصل على gasPrice (wei) مع fallback وcap
-async function resolveGasPriceWei(provider, capGwei = Number(process.env.GAS_PRICE_CAP_GWEI || 3)) {
-  // cap بالـ wei
-  const capWei = BigInt(Math.max(1, capGwei)) * 1_000_000_000n;
+async function resolveGasPriceWei(provider, minGwei = Number(process.env.GAS_PRICE_MIN_GWEI || 3)) {
+  const minWei = BigInt(Math.max(1, minGwei)) * 1_000_000_000n;
 
-  // 1) v6: getFeeData().gasPrice
   try {
-    const fd = await provider.getFeeData(); // ethers v6
+    const fd = await provider.getFeeData();
     if (fd && fd.gasPrice != null) {
-      const gp = BigInt(fd.gasPrice.toString());
-      const chosen = gp > capWei ? capWei : gp;
-      console.log(`[GAS] feeData gasPrice=${gp} wei (~${Number(gp) / 1e9} gwei) cap=${capGwei} → using=${chosen} wei`);
-      return chosen;
+      let gp = BigInt(fd.gasPrice.toString());
+      if (gp < minWei) gp = minWei;
+      console.log(`[GAS] feeData gasPrice=${gp} wei (~${Number(gp) / 1e9} gwei) min=${minGwei}`);
+      return gp;
     }
   } catch (e) {
     console.warn('[GAS] getFeeData failed, fallback to eth_gasPrice', e?.code || e?.message || e);
   }
 
-  // 2) JSON-RPC مباشر
   try {
     const hex = await provider.send('eth_gasPrice', []);
     if (typeof hex === 'string') {
-      const gp = BigInt(hex);
-      const chosen = gp > capWei ? capWei : gp;
-      console.log(`[GAS] rpc eth_gasPrice=${gp} wei (~${Number(gp) / 1e9} gwei) cap=${capGwei} → using=${chosen} wei`);
-      return chosen;
+      let gp = BigInt(hex);
+      if (gp < minWei) gp = minWei;
+      console.log(`[GAS] rpc eth_gasPrice=${gp} wei (~${Number(gp) / 1e9} gwei) min=${minGwei}`);
+      return gp;
     }
   } catch (e) {
     console.warn('[GAS] eth_gasPrice failed', e?.code || e?.message || e);
   }
 
-  // 3) fallback نهائي: استخدم الـ cap نفسه (gwei → wei)
-  console.log(`[GAS] fallback: using cap only ${capGwei} gwei`);
-  return capWei;
+  console.log(`[GAS] fallback: using min only ${minGwei} gwei`);
+  return minWei;
 }
 
 // ---- init ----
@@ -181,107 +176,7 @@ async function processAddress(row, provider, pool, omnibus) {
     console.log(`[POST][SKIP] no user for address=${addr}`);
   }
   let balBNB = await provider.getBalance(addr);
-  const gasPrice = await resolveGasPriceWei(provider);
-  const txCost = gasPrice * 21000n;
-  const originalSendAmount = balBNB - txCost - KEEP_BNB_DUST_WEI;
-  const gasBuffer = txCost * 2n; // extra buffer for fluctuating gas prices
-  const sendAmount = originalSendAmount - gasBuffer;
-  let eligibleBNB = sendAmount > 0n && balBNB > MIN_SWEEP_WEI_BNB;
-  let reasonBNB = 'ok';
-  if (!eligibleBNB) {
-    reasonBNB = balBNB <= MIN_SWEEP_WEI_BNB ? 'below_min' : 'needs_gas';
-  }
-  if (!eligibleBNB && reasonBNB === 'below_min') {
-    console.log('BNB:SKIP below_min');
-  }
-
-  if (eligibleBNB) {
-    const key = addr + '-BNB';
-    if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
-      const amountWei = sendAmount;
-      let pre;
-      try {
-        pre = await preRecordSweep({
-          userId,
-          chainId: CHAIN_ID,
-          address: addr,
-          assetSymbol: 'BNB',
-          amountWei: amountWei.toString(),
-        });
-      } catch (e) {
-        releaseLock(key);
-        return;
-      }
-      try {
-        console.log(JSON.stringify({ tag: 'SEND:BEGIN', symbol: 'BNB', amount: amountWei.toString(), tx_hash: pre.txHash }));
-        const tx = await withRetry(() =>
-          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: amountWei, gasPrice, gasLimit: 21000 }),
-        );
-        console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
-        try {
-          const receipt = await tx.wait(CONFIRMATIONS);
-          console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
-          if (userId) {
-            await finalizeSweep({
-              id: pre.id,
-              userId,
-              chainId: CHAIN_ID,
-              address: addr,
-              asset: 'BNB',
-              tokenAddr: pre.tokenAddr,
-              amountWei: amountWei.toString(),
-              finalTxHash: receipt.transactionHash,
-              status: 'swept',
-              confirmations: CONFIRMATIONS,
-            });
-          }
-          if (receipt.status !== 1) {
-            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
-          }
-        } catch (e) {
-          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: e.message }));
-          if (userId) {
-            await finalizeSweep({
-              id: pre.id,
-              userId,
-              chainId: CHAIN_ID,
-              address: addr,
-              asset: 'BNB',
-              tokenAddr: pre.tokenAddr,
-              amountWei: amountWei.toString(),
-              finalTxHash: `err:${pre.key}`,
-              status: 'wait_error',
-              confirmations: 0,
-              forced: true,
-              error: e.message,
-            });
-          }
-        }
-      } catch (e) {
-        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
-        if (userId) {
-            await finalizeSweep({
-              id: pre.id,
-              userId,
-              chainId: CHAIN_ID,
-              address: addr,
-              asset: 'BNB',
-              tokenAddr: pre.tokenAddr,
-              amountWei: amountWei.toString(),
-              finalTxHash: `err:${pre.key}`,
-              status: 'send_error',
-              confirmations: 0,
-              forced: true,
-              error: e.message,
-            });
-        }
-        errorCount++;
-      } finally {
-        console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
-        releaseLock(key);
-      }
-    }
-  }
+  let gasPrice = await resolveGasPriceWei(provider);
 
   for (const token of TOKENS) {
     const symbol = token.symbol.toUpperCase();
@@ -360,16 +255,14 @@ async function processAddress(row, provider, pool, omnibus) {
       if (!userId) {
         console.log(`[POST][SKIP] no user for address=${addr}`);
       }
-      const amountDb = new Decimal(bal.toString())
-        .div(new Decimal(10).pow(decimals))
-        .toFixed(18);
+      const amountDb = bal.toString();
       const amountCredit = bal.toString();
       console.log(
         JSON.stringify({
           tag: 'ERC20:UNITS',
           symbol,
           decimals,
-          amount_db_format: amountDb,
+          amount_db_integer: amountDb,
           amount_credit_integer: amountCredit,
         })
       );
@@ -388,7 +281,7 @@ async function processAddress(row, provider, pool, omnibus) {
         continue;
       }
       balBNB = await provider.getBalance(addr);
-      const gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+      let gasLimit = await contract.transfer.estimateGas(OMNIBUS_ADDRESS, bal, { gasPrice });
       let needed = gasPrice * gasLimit;
       if (balBNB < needed) {
         console.log(
@@ -407,6 +300,8 @@ async function processAddress(row, provider, pool, omnibus) {
           await dripTx.wait(1);
           dripCount++;
           balBNB += GAS_DRIP_WEI;
+          gasPrice = await resolveGasPriceWei(provider);
+          gasLimit = await contract.transfer.estimateGas(OMNIBUS_ADDRESS, bal, { gasPrice });
         } catch (e) {
           console.log(
             JSON.stringify({ tag: 'DRIP:ERR', providerCode: e.code, message: e.message })
@@ -513,6 +408,104 @@ async function processAddress(row, provider, pool, omnibus) {
       console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=${symbol}`, e);
       errorCount++;
       releaseLock(key);
+    }
+  }
+
+  // sweep remaining BNB after ERC20 transfers
+  balBNB = await provider.getBalance(addr);
+  gasPrice = await resolveGasPriceWei(provider);
+  const txCost = gasPrice * 21000n;
+  const originalSendAmount = balBNB - txCost - KEEP_BNB_DUST_WEI;
+  const gasBuffer = txCost * 2n;
+  const sendAmount = originalSendAmount - gasBuffer;
+  let eligibleBNB = sendAmount > 0n && balBNB > MIN_SWEEP_WEI_BNB;
+  if (!eligibleBNB) {
+    console.log('BNB:SKIP below_min');
+  } else {
+    const keyBNB = addr + '-BNB';
+    if (acquireLock(keyBNB) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
+      const amountWei = sendAmount;
+      let pre;
+      try {
+        pre = await preRecordSweep({
+          userId,
+          chainId: CHAIN_ID,
+          address: addr,
+          assetSymbol: 'BNB',
+          amountWei: amountWei.toString(),
+        });
+      } catch (e) {
+        releaseLock(keyBNB);
+        return;
+      }
+      try {
+        console.log(JSON.stringify({ tag: 'SEND:BEGIN', symbol: 'BNB', amount: amountWei.toString(), tx_hash: pre.txHash }));
+        const tx = await withRetry(() =>
+          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: amountWei, gasPrice, gasLimit: 21000 })
+        );
+        console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
+        try {
+          const receipt = await tx.wait(CONFIRMATIONS);
+          console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: 'BNB',
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: receipt.transactionHash,
+              status: 'swept',
+              confirmations: CONFIRMATIONS,
+            });
+          }
+          if (receipt.status !== 1) {
+            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+          }
+        } catch (e) {
+          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: e.message }));
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: 'BNB',
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: `err:${pre.key}`,
+              status: 'wait_error',
+              confirmations: 0,
+              forced: true,
+              error: e.message,
+            });
+          }
+        }
+      } catch (e) {
+        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
+        if (userId) {
+          await finalizeSweep({
+            id: pre.id,
+            userId,
+            chainId: CHAIN_ID,
+            address: addr,
+            asset: 'BNB',
+            tokenAddr: pre.tokenAddr,
+            amountWei: amountWei.toString(),
+            finalTxHash: `err:${pre.key}`,
+            status: 'send_error',
+            confirmations: 0,
+            forced: true,
+            error: e.message,
+          });
+        }
+        errorCount++;
+      } finally {
+        console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
+        releaseLock(keyBNB);
+      }
     }
   }
 }
