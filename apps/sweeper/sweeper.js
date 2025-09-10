@@ -159,13 +159,17 @@ async function processAddress(row, provider, pool, omnibus) {
   let balBNB = await provider.getBalance(addr);
   const gasPrice = await resolveGasPriceWei(provider);
   const txCost = gasPrice * 21000n;
-  const sendAmount = balBNB - txCost - KEEP_BNB_DUST_WEI;
+  const originalSendAmount = balBNB - txCost - KEEP_BNB_DUST_WEI;
+  const gasBuffer = txCost * 2n; // extra buffer for fluctuating gas prices
+  const sendAmount = originalSendAmount - gasBuffer;
   let eligibleBNB = sendAmount > 0n && balBNB > MIN_SWEEP_WEI_BNB;
   let reasonBNB = 'ok';
   if (!eligibleBNB) {
     reasonBNB = balBNB <= MIN_SWEEP_WEI_BNB ? 'below_min' : 'needs_gas';
   }
-  console.log(`[CHK] addr=${addr} bnb=${balBNB} eligible=${eligibleBNB} reason=${reasonBNB}`);
+  console.log(
+    `[CHK] addr=${addr} bnb=${balBNB} orig_send=${originalSendAmount} adj_send=${sendAmount} buffer=${gasBuffer} eligible=${eligibleBNB} reason=${reasonBNB}`,
+  );
 
   if (eligibleBNB) {
     const key = addr + '-BNB';
