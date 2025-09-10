@@ -61,7 +61,7 @@ async function recordUserDepositNoTx(
        ON DUPLICATE KEY UPDATE status=VALUES(status), credited=1, confirmations=VALUES(confirmations), last_update_at=NOW()`,
       [userId, chainId, addrLc, tokenSym, tokenAddrLc, amtWei, txHash, 0, 0, '0x', confirmations, statusVal],
     );
-    if (res.affectedRows === 1) {
+    if (res.affectedRows > 0) {
       const asset = tokenSym || (tokenAddrLc === ZERO ? 'BNB' : '');
       await pool.query(
         `INSERT INTO user_balances (user_id, asset, balance_wei)
