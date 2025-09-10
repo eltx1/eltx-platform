@@ -180,7 +180,7 @@ async function processAddress(row, provider, pool, omnibus) {
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
       const sendAmount = balBNB - txCost;
       try {
-        console.log(`[ELIGIBLE] addr=${addr} asset=BNB amount=${sendAmount}`);
+        console.log(`[PRE-SWEEP] addr=${addr} asset=BNB amount=${sendAmount}`);
         const tx = await withRetry(() =>
           wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
         );
@@ -202,7 +202,7 @@ async function processAddress(row, provider, pool, omnibus) {
           console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
         }
       } catch (e) {
-        console.error('[ERR][SWEEP]', e);
+        console.error(`[SWEEP ERROR] addr=${addr} asset=BNB`, e);
         errorCount++;
         if (userId) {
           await recordUserDepositNoTx(pool, {
@@ -216,6 +216,7 @@ async function processAddress(row, provider, pool, omnibus) {
           });
         }
       } finally {
+        console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
         releaseLock(key);
       }
     }
@@ -276,6 +277,7 @@ async function processAddress(row, provider, pool, omnibus) {
           continue;
         }
       }
+      console.log(`[PRE-SWEEP] addr=${addr} asset=${token.symbol} amount=${bal}`);
       const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice, gasLimit }));
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
       const receipt = await tx.wait(1);
@@ -296,7 +298,7 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       sweepCount++;
     } catch (e) {
-      console.error('[ERR][SWEEP]', e);
+      console.error(`[SWEEP ERROR] addr=${addr} asset=${token.symbol}`, e);
       errorCount++;
       if (userId) {
         await recordUserDepositNoTx(pool, {
@@ -310,6 +312,7 @@ async function processAddress(row, provider, pool, omnibus) {
         });
       }
     } finally {
+      console.log(`[POST-SWEEP] addr=${addr} asset=${token.symbol}`);
       releaseLock(key);
     }
   }
