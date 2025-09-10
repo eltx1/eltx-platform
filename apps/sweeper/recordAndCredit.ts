@@ -58,6 +58,7 @@ export async function recordAndCreditSweep(o: Opts) {
 
     // جبنا الصف للقفل والتأكد من شروط الاعتماد
     console.log("[REC] selecting deposit row");
+
     const [rows] = await conn.query<any[]>(
       `SELECT id, credited, status, confirmations, amount_wei, token_symbol
        FROM wallet_deposits
