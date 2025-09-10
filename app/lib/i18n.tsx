@@ -42,6 +42,12 @@ export const dict = {
       copied: 'Copied',
       qr: 'QR Code',
       transactions: 'Transactions',
+      transfer: {
+        to: 'Transfer to',
+        from: 'Transfer from',
+        sent: 'Sent',
+        received: 'Received',
+      },
       table: {
         time: 'Time',
         hash: 'Tx Hash',
@@ -61,6 +67,16 @@ export const dict = {
         pending: 'Pending',
         confirmed: 'Confirmed',
       },
+    },
+    pay: {
+      title: 'Pay',
+      to: 'Recipient User ID',
+      asset: 'Asset',
+      amount: 'Amount',
+      send: 'Send',
+      balance: 'Balance',
+      insufficient: 'Insufficient balance',
+      success: 'Transfer complete',
     },
     nav: {
       home: 'Home',
@@ -117,6 +133,7 @@ export const dict = {
       genericError: 'Something went wrong. Please try again.',
       copy: 'Copy',
       copied: 'Copied',
+      userId: 'User ID',
     },
     errors: {
       userExists: 'Email or username already exists.',
@@ -161,6 +178,12 @@ export const dict = {
       copied: 'تم النسخ',
       qr: 'رمز QR',
       transactions: 'المعاملات',
+      transfer: {
+        to: 'تحويل إلى',
+        from: 'تحويل من',
+        sent: 'تم الإرسال',
+        received: 'تم الاستلام',
+      },
       table: {
         time: 'الوقت',
         hash: 'معرّف المعاملة',
@@ -180,6 +203,16 @@ export const dict = {
         pending: 'معلق',
         confirmed: 'مؤكد',
       },
+    },
+    pay: {
+      title: 'الدفع',
+      to: 'معرّف المستخدم للمستلم',
+      asset: 'الأصل',
+      amount: 'الكمية',
+      send: 'إرسال',
+      balance: 'الرصيد',
+      insufficient: 'الرصيد غير كافٍ',
+      success: 'تم التحويل',
     },
     nav: {
       home: 'الرئيسية',
@@ -236,6 +269,7 @@ export const dict = {
       genericError: 'حدث خطأ. برجاء المحاولة مرة أخرى.',
       copy: 'نسخ',
       copied: 'تم النسخ',
+      userId: 'معرّف المستخدم',
     },
     errors: {
       userExists: 'البريد الإلكتروني أو اسم المستخدم موجود بالفعل.',
