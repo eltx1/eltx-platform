@@ -80,7 +80,7 @@ export default function Hero() {
         >
           <Link
             href={primaryHref}
-            className="px-6 py-2 rounded-full bg-gradient-to-r from-purple-600 to-cyan-500 text-black font-semibold hover:opacity-90"
+            className="px-6 py-2 rounded-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-500 text-white font-semibold shadow-lg hover:opacity-90 hover:scale-105 transition-transform"
           >
             {primaryLabel}
           </Link>
