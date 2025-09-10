@@ -59,7 +59,7 @@ async function recordUserDepositNoTx(
       `INSERT INTO wallet_deposits (user_id, chain_id, address, token_symbol, token_address, amount_wei, tx_hash, log_index, block_number, block_hash, confirmations, status, credited, source, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?, ?, 1, 'sweeper', NOW())
        ON DUPLICATE KEY UPDATE status=VALUES(status), credited=1, confirmations=VALUES(confirmations), last_update_at=NOW()`,
-      [userId, chainId, addrLc, tokenSym, tokenAddrLc, amtWei, txHash, 0, null, '', confirmations, statusVal],
+      [userId, chainId, addrLc, tokenSym, tokenAddrLc, amtWei, txHash, 0, 0, '0x', confirmations, statusVal],
     );
     console.log(`[SQL][wallet_deposits] affectedRows=${res.affectedRows} insertId=${res.insertId}`);
     let balanceUpdated = false;
