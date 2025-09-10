@@ -17,6 +17,7 @@ if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK require
 
 const TOKENS = process.env.TOKENS_JSON ? JSON.parse(process.env.TOKENS_JSON) : [];
 const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '300000000000000');
+const KEEP_BNB_DUST_WEI = BigInt(process.env.KEEP_BNB_DUST_WEI || '1000000000000000');
 const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
 const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
@@ -158,26 +159,28 @@ async function processAddress(row, provider, pool, omnibus) {
   let balBNB = await provider.getBalance(addr);
   const gasPrice = await resolveGasPriceWei(provider);
   const txCost = gasPrice * 21000n;
-  let eligibleBNB = balBNB > MIN_SWEEP_WEI_BNB && balBNB >= txCost * 10n;
+  const sendAmount = balBNB - txCost - KEEP_BNB_DUST_WEI;
+  let eligibleBNB = sendAmount > 0n && balBNB > MIN_SWEEP_WEI_BNB;
   let reasonBNB = 'ok';
   if (!eligibleBNB) {
     reasonBNB = balBNB <= MIN_SWEEP_WEI_BNB ? 'below_min' : 'needs_gas';
   }
   console.log(`[CHK] addr=${addr} bnb=${balBNB} eligible=${eligibleBNB} reason=${reasonBNB}`);
 
-    if (eligibleBNB) {
+  if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
-      const sendAmount = balBNB - txCost;
       try {
         console.log(`[PRE-SWEEP] addr=${addr} asset=BNB amount=${sendAmount}`);
         const tx = await withRetry(() =>
           wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
         );
         console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
-          const receipt = await tx.wait(CONFIRMATIONS);
-          console.log(`[CONFIRMED] tx=${tx.hash}`);
-          if (userId) {
+        const receipt = await tx.wait(CONFIRMATIONS);
+        console.log(`[CONFIRMED] tx=${tx.hash}`);
+        if (userId) {
+          console.log(`[REC][CALL] userId=${userId} tx=${receipt.transactionHash}`);
+          try {
             await recordAndCreditSweep({
               userId,
               chainId: CHAIN_ID,
@@ -189,12 +192,17 @@ async function processAddress(row, provider, pool, omnibus) {
               blockHash: receipt.blockHash,
               confirmations: CONFIRMATIONS,
             });
+            console.log(`[REC][DONE] userId=${userId} tx=${receipt.transactionHash}`);
+          } catch (e) {
+            console.error('[REC][CALL][ERR]', e);
+            throw e;
           }
-          if (receipt.status !== 1) {
-            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
-          }
+        }
+        if (receipt.status !== 1) {
+          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+        }
       } catch (e) {
-        console.error(`[SWEEP ERROR] addr=${addr} asset=BNB`, e);
+        console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=BNB`, e);
         errorCount++;
       } finally {
         console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
@@ -272,7 +280,7 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       sweepCount++;
     } catch (e) {
-      console.error(`[SWEEP ERROR] addr=${addr} asset=${token.symbol}`, e);
+      console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=${token.symbol}`, e);
       errorCount++;
     } finally {
       console.log(`[POST-SWEEP] addr=${addr} asset=${token.symbol}`);
