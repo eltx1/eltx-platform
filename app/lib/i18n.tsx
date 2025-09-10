@@ -42,6 +42,12 @@ export const dict = {
       copied: 'Copied',
       qr: 'QR Code',
       transactions: 'Transactions',
+      transfer: {
+        to: 'Transfer to',
+        from: 'Transfer from',
+        sent: 'Sent',
+        received: 'Received',
+      },
       table: {
         time: 'Time',
         hash: 'Tx Hash',
@@ -172,6 +178,12 @@ export const dict = {
       copied: 'تم النسخ',
       qr: 'رمز QR',
       transactions: 'المعاملات',
+      transfer: {
+        to: 'تحويل إلى',
+        from: 'تحويل من',
+        sent: 'تم الإرسال',
+        received: 'تم الاستلام',
+      },
       table: {
         time: 'الوقت',
         hash: 'معرّف المعاملة',

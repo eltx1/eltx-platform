@@ -366,12 +366,13 @@ app.get('/wallet/balance', walletLimiter, async (req, res, next) => {
 app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
-    const [rows] = await pool.query(
+    const [depRows] = await pool.query(
       'SELECT tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
       [userId, CHAIN_ID]
     );
     const ZERO = '0x0000000000000000000000000000000000000000';
-    for (const row of rows) {
+    for (const row of depRows) {
+      row.type = 'deposit';
       row.token_address = (row.token_address || ZERO).toLowerCase();
       const rawWei = row.amount_wei?.toString() ?? '0';
       row.amount_wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
@@ -388,7 +389,40 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
       }
       row.amount_formatted = formatUnitsStr(row.amount_wei, row.decimals);
     }
-    res.json({ ok: true, transactions: rows });
+
+    const [trRows] = await pool.query(
+      'SELECT from_user_id, to_user_id, asset, amount_wei, fee_wei, created_at FROM wallet_transfers WHERE from_user_id=? OR to_user_id=? ORDER BY created_at DESC LIMIT 50',
+      [userId, userId]
+    );
+    const transfers = [];
+    for (const row of trRows) {
+      const incoming = row.to_user_id === userId;
+      const meta = row.asset === 'BNB' ? { decimals: 18 } : tokenMetaBySymbol[row.asset];
+      const decimals = meta ? meta.decimals : 18;
+      const amtWei = BigInt(row.amount_wei);
+      const feeWei = BigInt(row.fee_wei);
+      const net = incoming ? amtWei - feeWei : amtWei;
+      transfers.push({
+        tx_hash: null,
+        token_address: ZERO,
+        token_symbol: row.asset,
+        amount_wei: net.toString(),
+        amount_int: net.toString(),
+        display_symbol: row.asset,
+        decimals,
+        amount_formatted: formatUnitsStr(net.toString(), decimals),
+        confirmations: 0,
+        status: incoming ? 'received' : 'sent',
+        created_at: row.created_at,
+        type: 'transfer',
+        direction: incoming ? 'in' : 'out',
+        counterparty: incoming ? row.from_user_id : row.to_user_id,
+      });
+    }
+
+    const allTx = [...depRows, ...transfers];
+    allTx.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    res.json({ ok: true, transactions: allTx.slice(0, 50) });
   } catch (err) {
     next(err);
   }
@@ -442,6 +476,10 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     await conn.beginTransaction();
     const [target] = await conn.query('SELECT id FROM users WHERE id=? FOR UPDATE', [to_user_id]);
     if (!target.length) throw { status: 404, message: 'User not found' };
+    const [feeRows] = await conn.query("SELECT value FROM platform_settings WHERE name='transfer_fee_bps'");
+    const feeBps = feeRows.length ? parseInt(feeRows[0].value, 10) || 0 : 0;
+    const feeWei = (amtWei * BigInt(feeBps)) / 10000n;
+    const recvAmt = amtWei - feeWei;
     const [balRows] = await conn.query(
       'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE',
       [fromUserId, asset]
@@ -451,9 +489,9 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND asset=?', [amtWei.toString(), fromUserId, asset]);
     await conn.query(
       'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-      [to_user_id, asset, amtWei.toString()]
+      [to_user_id, asset, recvAmt.toString()]
     );
-    await conn.query('INSERT INTO wallet_transfers (from_user_id, to_user_id, asset, amount_wei) VALUES (?,?,?,?)', [fromUserId, to_user_id, asset, amtWei.toString()]);
+    await conn.query('INSERT INTO wallet_transfers (from_user_id, to_user_id, asset, amount_wei, fee_wei) VALUES (?,?,?,?,?)', [fromUserId, to_user_id, asset, amtWei.toString(), feeWei.toString()]);
     await conn.commit();
     res.json({ ok: true });
   } catch (err) {

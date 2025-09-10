@@ -23,8 +23,8 @@ function formatWei(wei: string, decimals: number, precision = 6): string {
   }
 }
 
-type Deposit = {
-  tx_hash: string;
+type Transaction = {
+  tx_hash: string | null;
   token_address?: string;
   amount_wei: string;
   display_symbol: string;
@@ -34,6 +34,9 @@ type Deposit = {
   confirmations: number;
   status: string;
   created_at: string;
+  type: 'deposit' | 'transfer';
+  direction?: 'in' | 'out';
+  counterparty?: number;
 };
 
 type Asset = {
@@ -53,7 +56,7 @@ export default function WalletPage() {
   const toast = useToast();
   const [wallet, setWallet] = useState<WalletInfo | null>(null);
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [error, setError] = useState('');
   const [unauth, setUnauth] = useState(false);
 
@@ -66,8 +69,8 @@ export default function WalletPage() {
     setWallet(addrRes.data.wallet);
     const assetsRes = await apiFetch<{ assets: Asset[] }>('/wallet/assets');
     if (assetsRes.ok) setAssets(assetsRes.data.assets);
-    const txRes = await apiFetch<{ transactions: Deposit[] }>('/wallet/transactions');
-    if (txRes.ok) setDeposits(txRes.data.transactions);
+    const txRes = await apiFetch<{ transactions: Transaction[] }>('/wallet/transactions');
+    if (txRes.ok) setTransactions(txRes.data.transactions);
   }, [t]);
 
   useEffect(() => {
@@ -94,6 +97,8 @@ export default function WalletPage() {
     if (s === 'seen') return t.wallet.table.status.pending;
     if (s === 'confirmed' || s === 'swept') return t.wallet.table.status.confirmed;
     if (s === 'orphaned') return t.wallet.table.status.orphaned;
+     if (s === 'sent') return t.wallet.transfer.sent;
+     if (s === 'received') return t.wallet.transfer.received;
     return s;
   };
 
@@ -175,31 +180,35 @@ export default function WalletPage() {
       <div>
         <h2 className="font-semibold mb-2">{t.wallet.transactions}</h2>
         <div className="space-y-2">
-          {deposits.map((d) => (
-            <div key={d.tx_hash || d.created_at} className="p-3 bg-white/5 rounded text-sm space-y-1">
+          {transactions.map((d) => (
+            <div key={(d.tx_hash || '') + d.created_at} className="p-3 bg-white/5 rounded text-sm space-y-1">
               <div className="flex justify-between text-xs opacity-70">
                 <span>{new Date(d.created_at).toLocaleString()}</span>
                 <span>{d.confirmations}</span>
               </div>
-            {d.tx_hash ? (
-              <a
-                href={`https://bscscan.com/tx/${d.tx_hash}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="break-all underline"
-              >
-                {d.tx_hash}
-              </a>
-            ) : (
-              <div>-</div>
-            )}
-            <div>
-              {Number(d.amount_formatted).toFixed(6)} {d.display_symbol}
+              {d.tx_hash ? (
+                <a
+                  href={`https://bscscan.com/tx/${d.tx_hash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="break-all underline"
+                >
+                  {d.tx_hash}
+                </a>
+              ) : (
+                <div>
+                  {d.direction === 'out'
+                    ? `${t.wallet.transfer.to} ${d.counterparty}`
+                    : `${t.wallet.transfer.from} ${d.counterparty}`}
+                </div>
+              )}
+              <div>
+                {(d.direction === 'out' ? '-' : '') + Number(d.amount_formatted).toFixed(6)} {d.display_symbol}
+              </div>
+              <div className="text-xs">{statusLabel(d.status)}</div>
             </div>
-            <div className="text-xs">{statusLabel(d.status)}</div>
-          </div>
-        ))}
-          {deposits.length === 0 && <div className="text-sm">-</div>}
+          ))}
+          {transactions.length === 0 && <div className="text-sm">-</div>}
         </div>
       </div>
     </div>
