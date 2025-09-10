@@ -7,7 +7,7 @@ import Roadmap from '../components/home/Roadmap';
 
 export default function Page(){
   return(
-    <main className="space-y-24">
+    <main className="flex flex-col">
       <Hero />
       <Industries />
       <Features />

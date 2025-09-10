@@ -29,16 +29,16 @@ export default function Tokenomics() {
   };
 
   return (
-    <section className="py-16 px-4">
-      <h2 className="text-2xl font-bold text-center mb-8">Tokenomics</h2>
+    <section className="py-20 px-4 bg-gradient-to-b from-black via-cyan-900/20 to-black">
+      <h2 className="text-3xl font-bold text-center mb-12">Tokenomics</h2>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true }}
-        className="max-w-4xl mx-auto flex flex-col items-center gap-8 sm:flex-row"
+        className="max-w-6xl mx-auto flex flex-col items-center gap-8 sm:flex-row"
       >
         <div
-          className="donut animate-[spin_20s_linear_infinite]"
+          className="donut animate-[spin_20s_linear_infinite] p-4 bg-black/60 rounded-full backdrop-blur-xl border border-white/10"
           style={donutStyle}
         >
           <div className="hole text-black">

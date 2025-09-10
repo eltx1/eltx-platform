@@ -14,6 +14,8 @@
     "start:sweeper": "node apps/sweeper/sweeper.js"
   },
   "dependencies": {
+    "@tsparticles/react": "^3.0.0",
+    "@tsparticles/slim": "^3.9.1",
     "argon2": "^0.44.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",

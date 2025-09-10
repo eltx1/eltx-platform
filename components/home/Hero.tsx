@@ -3,18 +3,42 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAuth } from '../../app/lib/auth';
+import Particles, { initParticlesEngine } from '@tsparticles/react';
+import { useEffect, useMemo } from 'react';
+import { loadSlim } from '@tsparticles/slim';
 
 export default function Hero() {
   const { user } = useAuth();
   const primaryHref = user ? '/dashboard' : '/signup';
   const primaryLabel = user ? 'Dashboard' : 'Get Started';
   const [logoError, setLogoError] = useState(false);
+  useEffect(() => {
+    initParticlesEngine(async (engine) => {
+      await loadSlim(engine);
+    });
+  }, []);
+  const options = useMemo(
+    () => ({
+      fullScreen: false,
+      background: { color: 'transparent' },
+      particles: {
+        number: { value: 40 },
+        color: { value: '#a855f7' },
+        links: { enable: true, color: '#a855f7', opacity: 0.4 },
+        move: { enable: true, speed: 0.6 },
+        opacity: { value: 0.5 },
+        size: { value: { min: 1, max: 3 } },
+      },
+    }),
+    []
+  );
 
   return (
     <section className="relative overflow-hidden text-white py-24 text-center">
-      <div className="absolute inset-0 bg-gradient-to-br from-purple-700 via-fuchsia-600 to-cyan-500 animate-gradient-slow" />
+      <Particles id="hero-particles" options={options} className="absolute inset-0 -z-10" />
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-700 via-fuchsia-600 to-cyan-500 opacity-50 animate-gradient-slow" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.15),transparent)]" />
       <div className="absolute -top-24 -left-24 w-80 h-80 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
       <div className="absolute -bottom-32 -right-32 w-80 h-80 bg-cyan-600/30 rounded-full blur-3xl animate-blob animation-delay-2000" />
@@ -36,7 +60,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5 }}
-          className="text-4xl font-bold"
+          className="text-4xl font-extrabold bg-gradient-to-r from-purple-300 via-fuchsia-300 to-cyan-300 bg-clip-text text-transparent"
         >
           ELTX Platform
         </motion.h1>
