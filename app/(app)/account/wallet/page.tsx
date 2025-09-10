@@ -5,7 +5,14 @@ import Link from 'next/link';
 import { apiFetch } from '../../../lib/api';
 import { ethers } from 'ethers';
 
-type Deposit = { tx_hash: string; amount_wei: string; confirmations: number; status: string; created_at: string };
+type Deposit = {
+  tx_hash: string;
+  amount_wei: string;
+  confirmations: number;
+  status: string;
+  created_at: string;
+  amount_int: string;
+};
 type WalletInfo = { chain_id: number; address: string };
 
 export default function WalletPage() {
