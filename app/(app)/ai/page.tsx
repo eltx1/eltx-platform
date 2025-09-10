@@ -1,12 +1,12 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
-export default function AIPage() {
+function AIPageInner() {
   const { user } = useAuth();
   const router = useRouter();
 
@@ -81,6 +81,14 @@ export default function AIPage() {
         </button>
       </form>
     </div>
+  );
+}
+
+export default function AIPage() {
+  return (
+    <Suspense fallback={null}>
+      <AIPageInner />
+    </Suspense>
   );
 }
 
