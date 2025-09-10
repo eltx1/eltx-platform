@@ -2,7 +2,8 @@ const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
-const { resolveUserId, recordUserDepositNoTx } = require('./depositRecorder');
+const { resolveUserId } = require('./depositRecorder');
+const { recordAndCreditSweep } = require('./recordAndCredit');
 
 // ---- env ----
 const VERSION = 'v1';
@@ -20,6 +21,7 @@ const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
 const GAS_DRIP_WEI = BigInt(process.env.GAS_DRIP_WEI || '40000000000000');
 const TX_MAX_RETRY = Number(process.env.TX_MAX_RETRY || 3);
 const SWEEP_RATE_LIMIT_PER_MIN = Number(process.env.SWEEP_RATE_LIMIT_PER_MIN || 12);
+const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || '1');
 
 // ---- utils ----
 function maskUrl(url) {
@@ -163,19 +165,7 @@ async function processAddress(row, provider, pool, omnibus) {
   }
   console.log(`[CHK] addr=${addr} bnb=${balBNB} eligible=${eligibleBNB} reason=${reasonBNB}`);
 
-  if (userId && balBNB > 0n) {
-    await recordUserDepositNoTx(pool, {
-      userId,
-      chainId: CHAIN_ID,
-      depositAddressLc: addr,
-      tokenSymbol: 'BNB',
-      tokenAddressLc: null,
-      amountWeiStr: balBNB.toString(),
-      status: 'confirmed',
-    });
-  }
-
-  if (eligibleBNB) {
+    if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
       const sendAmount = balBNB - txCost;
@@ -185,36 +175,27 @@ async function processAddress(row, provider, pool, omnibus) {
           wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
         );
         console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
-        const receipt = await tx.wait(1);
-        console.log(`[CONFIRMED] tx=${tx.hash}`);
-        if (userId) {
-          await recordUserDepositNoTx(pool, {
-            userId,
-            chainId: CHAIN_ID,
-            depositAddressLc: addr,
-            tokenSymbol: 'BNB',
-            tokenAddressLc: null,
-            amountWeiStr: balBNB.toString(),
-            status: 'swept',
-          });
-        }
-        if (receipt.status !== 1) {
-          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
-        }
+          const receipt = await tx.wait(CONFIRMATIONS);
+          console.log(`[CONFIRMED] tx=${tx.hash}`);
+          if (userId) {
+            await recordAndCreditSweep({
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              assetSymbol: 'BNB',
+              amount: sendAmount.toString(),
+              sweepTxHash: receipt.transactionHash,
+              blockNumber: receipt.blockNumber,
+              blockHash: receipt.blockHash,
+              confirmations: CONFIRMATIONS,
+            });
+          }
+          if (receipt.status !== 1) {
+            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+          }
       } catch (e) {
         console.error(`[SWEEP ERROR] addr=${addr} asset=BNB`, e);
         errorCount++;
-        if (userId) {
-          await recordUserDepositNoTx(pool, {
-            userId,
-            chainId: CHAIN_ID,
-            depositAddressLc: addr,
-            tokenSymbol: 'BNB',
-            tokenAddressLc: null,
-            amountWeiStr: balBNB.toString(),
-            status: 'confirmed',
-          });
-        }
       } finally {
         console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
         releaseLock(key);
@@ -236,19 +217,9 @@ async function processAddress(row, provider, pool, omnibus) {
         releaseLock(key);
         continue;
       }
-      if (userId) {
-        await recordUserDepositNoTx(pool, {
-          userId,
-          chainId: CHAIN_ID,
-          depositAddressLc: addr,
-          tokenSymbol: token.symbol,
-          tokenAddressLc: token.address.toLowerCase(),
-          amountWeiStr: bal.toString(),
-          status: 'confirmed',
-        });
-      } else {
-        console.log(`[POST][SKIP] no user for address=${addr}`);
-      }
+        if (!userId) {
+          console.log(`[POST][SKIP] no user for address=${addr}`);
+        }
       console.log(`[ELIGIBLE] addr=${addr} asset=${token.symbol} amount=${bal}`);
       balBNB = await provider.getBalance(addr);
       const tokenWallet = wallet.connect(provider);
@@ -280,19 +251,22 @@ async function processAddress(row, provider, pool, omnibus) {
       console.log(`[PRE-SWEEP] addr=${addr} asset=${token.symbol} amount=${bal}`);
       const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice, gasLimit }));
       console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
-      const receipt = await tx.wait(1);
-      console.log(`[CONFIRMED] tx=${tx.hash}`);
-      if (userId) {
-        await recordUserDepositNoTx(pool, {
-          userId,
-          chainId: CHAIN_ID,
-          depositAddressLc: addr,
-          tokenSymbol: token.symbol,
-          tokenAddressLc: token.address.toLowerCase(),
-          amountWeiStr: bal.toString(),
-          status: 'swept',
-        });
-      }
+        const receipt = await tx.wait(CONFIRMATIONS);
+        console.log(`[CONFIRMED] tx=${tx.hash}`);
+        if (userId) {
+          await recordAndCreditSweep({
+            userId,
+            chainId: CHAIN_ID,
+            address: addr,
+            assetSymbol: token.symbol,
+            tokenAddress: token.address.toLowerCase(),
+            amount: bal.toString(),
+            sweepTxHash: receipt.transactionHash,
+            blockNumber: receipt.blockNumber,
+            blockHash: receipt.blockHash,
+            confirmations: CONFIRMATIONS,
+          });
+        }
       if (receipt.status !== 1) {
         console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
       }
@@ -300,17 +274,6 @@ async function processAddress(row, provider, pool, omnibus) {
     } catch (e) {
       console.error(`[SWEEP ERROR] addr=${addr} asset=${token.symbol}`, e);
       errorCount++;
-      if (userId) {
-        await recordUserDepositNoTx(pool, {
-          userId,
-          chainId: CHAIN_ID,
-          depositAddressLc: addr,
-          tokenSymbol: token.symbol,
-          tokenAddressLc: token.address.toLowerCase(),
-          amountWeiStr: bal.toString(),
-          status: 'confirmed',
-        });
-      }
     } finally {
       console.log(`[POST-SWEEP] addr=${addr} asset=${token.symbol}`);
       releaseLock(key);
