@@ -103,7 +103,7 @@ ALTER TABLE wallet_deposits
 -- user balances per asset
 CREATE TABLE IF NOT EXISTS user_balances (
   user_id BIGINT UNSIGNED NOT NULL,
-  asset VARCHAR(32) NOT NULL DEFAULT 'native',
+  asset VARCHAR(32) NOT NULL,
   balance_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, asset),
