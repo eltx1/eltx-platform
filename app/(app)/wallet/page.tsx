@@ -2,9 +2,11 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useState } from 'react';
+import { Copy } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
+import { useAuth } from '../../lib/auth';
 import QRCode from 'qrcode.react';
 
 function formatWei(wei: string, decimals: number, precision = 6): string {
@@ -45,6 +47,7 @@ type Asset = {
 type WalletInfo = { chain_id: number; address: string };
 
 export default function WalletPage() {
+  const { user } = useAuth();
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
@@ -97,6 +100,23 @@ export default function WalletPage() {
   return (
     <div className="p-4 space-y-6 overflow-x-hidden">
       <h1 className="text-xl font-semibold">{t.wallet.title}</h1>
+      {user && (
+        <div className="space-y-1">
+          <div className="text-sm opacity-80">{t.common.userId}</div>
+          <div className="p-3 bg-white/5 rounded flex items-center justify-between">
+            <span className="text-sm">{user.id}</span>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(String(user.id));
+                toast(t.common.copied);
+              }}
+              className="p-1 hover:text-white/80"
+            >
+              <Copy className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
       <div className="space-y-2">
         <div>{t.wallet.chainLabel}</div>
         <div className="text-sm break-all">{wallet.address}</div>
