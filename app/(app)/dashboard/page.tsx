@@ -3,7 +3,14 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
-import { Wallet, ReceiptText, CreditCard, HelpCircle, Settings, PiggyBank } from 'lucide-react';
+import {
+  Wallet,
+  ReceiptText,
+  CreditCard,
+  HelpCircle,
+  Settings,
+  Coins,
+} from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import AICard from '../../../components/dashboard/AICard';
 
@@ -26,13 +33,28 @@ export default function DashboardPage() {
         <a href="/wallet" className="btn btn-primary">Deposit</a>
       </div>
       <AICard />
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        <SectionCard title="Wallet" href="/wallet" icon={Wallet} />
-        <SectionCard title="Transactions" href="/transactions" icon={ReceiptText} />
-        <SectionCard title="Pay" href="/pay" icon={CreditCard} />
-        <SectionCard title="Earn" href="/earn" icon={PiggyBank} badge="New" />
-        <SectionCard title="Settings" href="/settings" icon={Settings} />
-        <SectionCard title="FAQ" href="/faq" icon={HelpCircle} />
+      <div className="space-y-8">
+        <div>
+          <h2 className="mb-4 text-sm font-semibold opacity-80">Payments</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <SectionCard title="Wallet" href="/wallet" icon={Wallet} />
+            <SectionCard title="Transactions" href="/transactions" icon={ReceiptText} />
+            <SectionCard title="Pay" href="/pay" icon={CreditCard} />
+          </div>
+        </div>
+        <div className="pt-8 border-t border-white/10">
+          <h2 className="mb-4 text-sm font-semibold opacity-80">Earn</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <SectionCard title="Staking" href="/staking" icon={Coins} />
+          </div>
+        </div>
+        <div className="pt-8 border-t border-white/10">
+          <h2 className="mb-4 text-sm font-semibold opacity-80">Profile</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <SectionCard title="Settings" href="/settings" icon={Settings} />
+            <SectionCard title="FAQ" href="/faq" icon={HelpCircle} />
+          </div>
+        </div>
       </div>
     </div>
   );
