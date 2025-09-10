@@ -8,7 +8,7 @@ export default function PrivacyPage() {
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-xl font-semibold">{t.footer.privacy}</h1>
-      <p className="opacity-80 text-sm">Privacy policy placeholder.</p>
+      <p className="opacity-80 text-sm">{t.pages.privacy}</p>
     </div>
   );
 }

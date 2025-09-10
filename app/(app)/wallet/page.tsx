@@ -160,14 +160,18 @@ export default function WalletPage() {
                 <span>{new Date(d.created_at).toLocaleString()}</span>
                 <span>{d.confirmations}</span>
               </div>
-            <a
-              href={`https://bscscan.com/tx/${d.tx_hash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="break-all underline"
-            >
-              {d.tx_hash}
-            </a>
+            {d.tx_hash ? (
+              <a
+                href={`https://bscscan.com/tx/${d.tx_hash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all underline"
+              >
+                {d.tx_hash}
+              </a>
+            ) : (
+              <div>-</div>
+            )}
             <div>
               {Number(d.amount_formatted).toFixed(6)} {d.display_symbol}
             </div>

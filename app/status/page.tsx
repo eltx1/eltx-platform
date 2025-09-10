@@ -8,7 +8,7 @@ export default function StatusPage() {
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-xl font-semibold">{t.footer.status}</h1>
-      <p className="opacity-80 text-sm">All systems operational.</p>
+      <p className="opacity-80 text-sm">{t.pages.status}</p>
     </div>
   );
 }

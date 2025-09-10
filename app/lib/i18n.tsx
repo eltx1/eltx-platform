@@ -82,6 +82,14 @@ export const dict = {
       privacy: 'Privacy',
       status: 'Status',
       contact: 'Contact',
+      tagline: 'The utility token platform.',
+    },
+    pages: {
+      about: 'ELTX is a utility token platform.',
+      docs: 'Documentation coming soon.',
+      terms: 'Terms of service placeholder.',
+      privacy: 'Privacy policy placeholder.',
+      status: 'All systems operational.',
     },
     contact: {
       email: 'Email',
@@ -193,6 +201,14 @@ export const dict = {
       privacy: 'الخصوصية',
       status: 'الحالة',
       contact: 'اتصل بنا',
+      tagline: 'منصة التوكنات الخدمية.',
+    },
+    pages: {
+      about: 'ELTX هي منصة للتوكنات الخدمية.',
+      docs: 'التوثيق قادم قريبًا.',
+      terms: 'نموذج شروط الخدمة.',
+      privacy: 'نموذج سياسة الخصوصية.',
+      status: 'جميع الأنظمة تعمل.',
     },
     contact: {
       email: 'البريد الإلكتروني',

@@ -8,7 +8,7 @@ export default function AboutPage() {
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-xl font-semibold">{t.footer.about}</h1>
-      <p className="opacity-80 text-sm">ELTX is a utility token platform.</p>
+      <p className="opacity-80 text-sm">{t.pages.about}</p>
     </div>
   );
 }

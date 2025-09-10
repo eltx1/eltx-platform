@@ -8,7 +8,7 @@ export default function TermsPage() {
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-xl font-semibold">{t.footer.terms}</h1>
-      <p className="opacity-80 text-sm">Terms of service placeholder.</p>
+      <p className="opacity-80 text-sm">{t.pages.terms}</p>
     </div>
   );
 }

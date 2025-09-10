@@ -8,7 +8,7 @@ export default function DocsPage() {
   return (
     <div className="p-4 space-y-4">
       <h1 className="text-xl font-semibold">{t.footer.docs}</h1>
-      <p className="opacity-80 text-sm">Documentation coming soon.</p>
+      <p className="opacity-80 text-sm">{t.pages.docs}</p>
     </div>
   );
 }
