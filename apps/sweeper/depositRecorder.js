@@ -61,18 +61,24 @@ async function recordUserDepositNoTx(
        ON DUPLICATE KEY UPDATE status=VALUES(status), credited=1, confirmations=VALUES(confirmations), last_update_at=NOW()`,
       [userId, chainId, addrLc, tokenSym, tokenAddrLc, amtWei, txHash, 0, null, '', confirmations, statusVal],
     );
+    console.log(`[SQL][wallet_deposits] affectedRows=${res.affectedRows} insertId=${res.insertId}`);
+    let balanceUpdated = false;
     if (res.affectedRows === 1) {
       const asset = tokenSym || (tokenAddrLc === ZERO ? 'BNB' : '');
-      await pool.query(
+      const [ubRes] = await pool.query(
         `INSERT INTO user_balances (user_id, asset, balance_wei)
          VALUES (?,?,?)
          ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
         [userId, asset, amtWei],
       );
+      balanceUpdated = ubRes.affectedRows > 0;
+      console.log(`[SQL][user_balances] affectedRows=${ubRes.affectedRows} insertId=${ubRes.insertId}`);
+    } else {
+      console.log('[SQL][user_balances] skipped');
     }
 
     console.log(
-      `[POST][CREDIT] user=${userId} addr=${addrLc} sym=${tokenSym} amount=${amtWei} status=${statusVal} tx='${txHash}'`,
+      `[POST][CREDIT] user=${userId} addr=${addrLc} sym=${tokenSym} amount=${amtWei} status=${statusVal} tx='${txHash}' balanceUpdated=${balanceUpdated}`,
     );
   } catch (e) {
     console.error('[POST][ERR][recordUserDepositNoTx]', e);
