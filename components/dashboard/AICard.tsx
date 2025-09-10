@@ -18,7 +18,7 @@ export default function AICard() {
         />
         <button
           className="btn btn-primary"
-          onClick={() => router.push('/ai')}
+          onClick={() => router.push(q ? `/ai?q=${encodeURIComponent(q)}` : '/ai')}
         >
           Ask
         </button>
