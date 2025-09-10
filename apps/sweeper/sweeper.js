@@ -1,5 +1,6 @@
 const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
+const Decimal = require('decimal.js');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const { resolveUserId } = require('./depositRecorder');
@@ -15,7 +16,12 @@ const OMNIBUS_ADDRESS = (process.env.OMNIBUS_ADDRESS || '').toLowerCase();
 const OMNIBUS_PK = process.env.OMNIBUS_PK;
 if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK required');
 
-const TOKENS = process.env.TOKENS_JSON ? JSON.parse(process.env.TOKENS_JSON) : [];
+const TOKEN_REGISTRY = require('../../config/registry/56.json');
+const TOKENS = Object.keys(TOKEN_REGISTRY).map((sym) => ({
+  symbol: sym,
+  address: TOKEN_REGISTRY[sym].address,
+  decimals: TOKEN_REGISTRY[sym].decimals,
+}));
 const MIN_SWEEP_WEI_BNB = BigInt(process.env.MIN_SWEEP_WEI_BNB || '300000000000000');
 const KEEP_BNB_DUST_WEI = BigInt(process.env.KEEP_BNB_DUST_WEI || '1000000000000000');
 const MIN_TOKEN_SWEEP_USD = Number(process.env.MIN_TOKEN_SWEEP_USD || '0');
@@ -260,68 +266,147 @@ async function processAddress(row, provider, pool, omnibus) {
   }
 
   for (const token of TOKENS) {
-    const key = addr + '-' + token.symbol;
+    const symbol = token.symbol.toUpperCase();
+    const key = addr + '-' + symbol;
     if (sweepCount >= SWEEP_RATE_LIMIT_PER_MIN) break;
     if (!acquireLock(key)) continue;
-    let bal = 0n;
     try {
-      const erc = new ethers.Contract(token.address, erc20Abi, provider);
-      bal = await erc.balanceOf(addr);
+      const reg = TOKEN_REGISTRY[symbol];
+      const signerAddress = wallet.address;
+      let contractDefined = false;
+      let reason = '';
+      let contract;
+      if (!reg) {
+        reason = 'missing_token_in_registry';
+      } else {
+        try {
+          contract = new ethers.Contract(reg.address, erc20Abi, wallet);
+          contractDefined = true;
+        } catch (e) {
+          reason = 'signer_missing';
+        }
+      }
+      console.log(
+        JSON.stringify({
+          tag: 'SWP:ERC20:BUILD_CONTRACT',
+          symbol,
+          tokenAddress: reg ? reg.address : '',
+          signerAddress,
+          contractDefined,
+          reason: contractDefined ? undefined : reason,
+        })
+      );
+      if (!contractDefined) {
+        releaseLock(key);
+        continue;
+      }
+      let decimals = reg.decimals;
+      if (decimals == null) {
+        try {
+          decimals = Number(await contract.decimals());
+        } catch {}
+      }
+      if (decimals == null) decimals = 18;
+      const bal = await contract.balanceOf(addr);
       const tokenEligible = bal > 0n;
-      console.log(`[ERC20] sym=${token.symbol} bal=${bal} eligible=${tokenEligible}`);
+      console.log(`[ERC20] sym=${symbol} bal=${bal} eligible=${tokenEligible}`);
       if (!tokenEligible) {
         releaseLock(key);
         continue;
       }
-        if (!userId) {
-          console.log(`[POST][SKIP] no user for address=${addr}`);
-        }
-      console.log(`[ELIGIBLE] addr=${addr} asset=${token.symbol} amount=${bal}`);
-      balBNB = await provider.getBalance(addr);
-      const tokenWallet = wallet.connect(provider);
-      const contract = new ethers.Contract(token.address, erc20Abi, tokenWallet);
-      const gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
-      let needed = gasPrice * gasLimit;
-      if (balBNB < needed) {
-        try {
-          const dripTx = await withRetry(() =>
-            omnibus.sendTransaction({ to: addr, value: GAS_DRIP_WEI, gasPrice, gasLimit: 21000 }),
-          );
-          console.log(`[DRIP] addr=${addr} tx=${dripTx.hash}`);
-          await dripTx.wait(1);
-          dripCount++;
-          balBNB += GAS_DRIP_WEI;
-        } catch (e) {
-          console.error('[ERR][DRIP]', e);
-          errorCount++;
-          continue;
-        }
-        needed = gasPrice * gasLimit;
-        if (balBNB < needed) {
-          console.log(
-            `[SKIP] addr=${addr} asset=${token.symbol} reason=insufficient_gas have=${balBNB} needed=${needed}`,
-          );
-          continue;
-        }
+      if (!userId) {
+        console.log(`[POST][SKIP] no user for address=${addr}`);
       }
-      const amountWei = bal;
+      const amountDb = new Decimal(bal.toString())
+        .div(new Decimal(10).pow(decimals))
+        .toFixed(18);
+      const amountCredit = bal.toString();
+      console.log(
+        JSON.stringify({
+          tag: 'SWP:ERC20:UNITS',
+          symbol,
+          decimals,
+          amount_input: bal.toString(),
+          amount_db_format: amountDb,
+          amount_credit_integer: amountCredit,
+        })
+      );
       let pre;
       try {
         pre = await preRecordSweep({
           userId,
           chainId: CHAIN_ID,
           address: addr,
-          assetSymbol: token.symbol,
-          tokenAddress: token.address.toLowerCase(),
-          amountWei: amountWei.toString(),
+          assetSymbol: symbol,
+          tokenAddress: reg.address.toLowerCase(),
+          amountWei: amountDb,
         });
       } catch (e) {
         releaseLock(key);
         continue;
       }
+      balBNB = await provider.getBalance(addr);
+      const gasLimit = await contract.estimateGas.transfer(OMNIBUS_ADDRESS, bal, { gasPrice });
+      let needed = gasPrice * gasLimit;
+      if (balBNB < needed) {
+        console.log(
+          JSON.stringify({
+            tag: 'SWP:DRIP:BEGIN',
+            depositAddr: addr,
+            neededWei: (needed - balBNB).toString(),
+            topupWei: GAS_DRIP_WEI.toString(),
+          })
+        );
+        try {
+          const dripTx = await withRetry(() =>
+            omnibus.sendTransaction({ to: addr, value: GAS_DRIP_WEI, gasPrice, gasLimit: 21000 })
+          );
+          console.log(JSON.stringify({ tag: 'SWP:DRIP:OK', txHash: dripTx.hash }));
+          await dripTx.wait(1);
+          dripCount++;
+          balBNB += GAS_DRIP_WEI;
+        } catch (e) {
+          console.log(
+            JSON.stringify({
+              tag: 'SWP:DRIP:ERR',
+              providerCode: e.code,
+              message: e.message,
+            })
+          );
+          errorCount++;
+        }
+        needed = gasPrice * gasLimit;
+        if (balBNB < needed) {
+          console.log(
+            `[SKIP] addr=${addr} asset=${symbol} reason=insufficient_gas have=${balBNB} needed=${needed}`
+          );
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: symbol,
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountCredit,
+              finalTxHash: `err:${Date.now()}`,
+              status: 'send_error',
+              confirmations: 0,
+              forced: true,
+              error: 'no_gas',
+            });
+          }
+          releaseLock(key);
+          continue;
+        }
+      }
       try {
-        console.log(JSON.stringify({ tag: 'SWP:SEND:BEGIN', user_id: userId, asset: token.symbol, address: addr, tx_hash: pre.txHash }));
-        const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, amountWei, { gasPrice, gasLimit }));
+        console.log(
+          JSON.stringify({ tag: 'SWP:SEND:BEGIN', user_id: userId, asset: symbol, address: addr, tx_hash: pre.txHash })
+        );
+        const tx = await withRetry(() =>
+          contract.transfer(OMNIBUS_ADDRESS, BigInt(amountCredit), { gasPrice, gasLimit })
+        );
         console.log(JSON.stringify({ tag: 'SWP:SEND:OK', tx_hash: tx.hash }));
         try {
           const receipt = await tx.wait(CONFIRMATIONS);
@@ -332,9 +417,9 @@ async function processAddress(row, provider, pool, omnibus) {
               userId,
               chainId: CHAIN_ID,
               address: addr,
-              asset: token.symbol.toUpperCase(),
+              asset: symbol,
               tokenAddr: pre.tokenAddr,
-              amountWei: amountWei.toString(),
+              amountWei: amountCredit,
               finalTxHash: receipt.transactionHash,
               status: 'swept',
               confirmations: CONFIRMATIONS,
@@ -352,9 +437,9 @@ async function processAddress(row, provider, pool, omnibus) {
               userId,
               chainId: CHAIN_ID,
               address: addr,
-              asset: token.symbol.toUpperCase(),
+              asset: symbol,
               tokenAddr: pre.tokenAddr,
-              amountWei: amountWei.toString(),
+              amountWei: amountCredit,
               finalTxHash: `err:${Date.now()}`,
               status: 'wait_error',
               confirmations: 0,
@@ -371,9 +456,9 @@ async function processAddress(row, provider, pool, omnibus) {
             userId,
             chainId: CHAIN_ID,
             address: addr,
-            asset: token.symbol.toUpperCase(),
+            asset: symbol,
             tokenAddr: pre.tokenAddr,
-            amountWei: amountWei.toString(),
+            amountWei: amountCredit,
             finalTxHash: `err:${Date.now()}`,
             status: 'send_error',
             confirmations: 0,
@@ -383,11 +468,11 @@ async function processAddress(row, provider, pool, omnibus) {
         }
         errorCount++;
       } finally {
-        console.log(`[POST-SWEEP] addr=${addr} asset=${token.symbol}`);
+        console.log(`[POST-SWEEP] addr=${addr} asset=${symbol}`);
         releaseLock(key);
       }
     } catch (e) {
-      console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=${token.symbol}`, e);
+      console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=${symbol}`, e);
       errorCount++;
       releaseLock(key);
     }
