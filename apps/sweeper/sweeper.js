@@ -231,7 +231,7 @@ async function processAddress(row, provider, pool, omnibus) {
               asset: 'BNB',
               tokenAddr: pre.tokenAddr,
               amountWei: amountWei.toString(),
-              finalTxHash: `err:${Date.now()}`,
+              finalTxHash: `err:${pre.key}`,
               status: 'wait_error',
               confirmations: 0,
               forced: true,
@@ -242,20 +242,20 @@ async function processAddress(row, provider, pool, omnibus) {
       } catch (e) {
         console.log(JSON.stringify({ tag: 'SWP:SEND:ERR', err: e.message }));
         if (userId) {
-          await finalizeSweep({
-            id: pre.id,
-            userId,
-            chainId: CHAIN_ID,
-            address: addr,
-            asset: 'BNB',
-            tokenAddr: pre.tokenAddr,
-            amountWei: amountWei.toString(),
-            finalTxHash: `err:${Date.now()}`,
-            status: 'send_error',
-            confirmations: 0,
-            forced: true,
-            error: e.message,
-          });
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: 'BNB',
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: `err:${pre.key}`,
+              status: 'send_error',
+              confirmations: 0,
+              forced: true,
+              error: e.message,
+            });
         }
         errorCount++;
       } finally {
@@ -389,7 +389,7 @@ async function processAddress(row, provider, pool, omnibus) {
               asset: symbol,
               tokenAddr: pre.tokenAddr,
               amountWei: amountCredit,
-              finalTxHash: `err:${Date.now()}`,
+              finalTxHash: `err:${pre.key}`,
               status: 'send_error',
               confirmations: 0,
               forced: true,
@@ -440,7 +440,7 @@ async function processAddress(row, provider, pool, omnibus) {
               asset: symbol,
               tokenAddr: pre.tokenAddr,
               amountWei: amountCredit,
-              finalTxHash: `err:${Date.now()}`,
+              finalTxHash: `err:${pre.key}`,
               status: 'wait_error',
               confirmations: 0,
               forced: true,
@@ -459,7 +459,7 @@ async function processAddress(row, provider, pool, omnibus) {
             asset: symbol,
             tokenAddr: pre.tokenAddr,
             amountWei: amountCredit,
-            finalTxHash: `err:${Date.now()}`,
+            finalTxHash: `err:${pre.key}`,
             status: 'send_error',
             confirmations: 0,
             forced: true,
