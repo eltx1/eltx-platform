@@ -6,39 +6,44 @@ const NATIVE_ZERO = "0x0000000000000000000000000000000000000000";
 async function recordAndCreditSweep(o) {
   const pool = await getPool();
   const conn = await pool.getConnection();
+  console.log(`[REC] start userId=${o.userId} address=${o.address} asset=${o.assetSymbol} amount=${o.amount} tx=${o.sweepTxHash}`);
   try {
     await conn.beginTransaction();
 
     const tokenAddr = (o.tokenAddress && o.tokenAddress !== "") ? o.tokenAddress : NATIVE_ZERO;
     const asset = (o.assetSymbol || "").toUpperCase();
     const amountWei = toWeiString(o.amount, 18);
+    console.log(`[REC] tokenAddr=${tokenAddr} asset=${asset} amountWei=${amountWei}`);
     if (amountWei.includes(".")) {
       console.log(`[REC][SKIP] amount_format_error amount=${o.amount}`);
       await conn.rollback();
       return { ok: false };
     }
 
-    await conn.query(
-      `INSERT INTO wallet_deposits
-       (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
-        token_address, amount_wei, confirmations, status, created_at, credited, token_address_norm, source, last_update_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'swept', NOW(), 0, LOWER(?), 'sweeper', NOW())
-       ON DUPLICATE KEY UPDATE
-         confirmations = GREATEST(confirmations, VALUES(confirmations)),
-         status = VALUES(status),
-         block_number = COALESCE(VALUES(block_number), block_number),
-         block_hash = COALESCE(VALUES(block_hash), block_hash),
-         last_update_at = NOW()`,
-      [
-        o.userId, o.chainId, o.address, asset,
-        o.sweepTxHash,
-        o.blockNumber ?? null, o.blockHash ?? null,
-        tokenAddr, amountWei,
-        o.confirmations,
-        tokenAddr
-      ]
-    );
+    // insert بدون فحص التكرار
+    try {
+      console.log("[REC] inserting deposit row");
+      await conn.query(
+        `INSERT INTO wallet_deposits
+         (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
+          token_address, amount_wei, confirmations, status, created_at, credited, token_address_norm, source, last_update_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'swept', NOW(), 0, LOWER(?), 'sweeper', NOW())`,
+        [
+          o.userId, o.chainId, o.address, asset,
+          o.sweepTxHash,
+          o.blockNumber ?? null, o.blockHash ?? null,
+          tokenAddr, amountWei,
+          o.confirmations,
+          tokenAddr
+        ]
+      );
+      console.log("[REC] insert success");
+    } catch (e) {
+      console.error("[REC][ERR] insert failed", e);
+      throw e;
+    }
 
+    console.log("[REC] selecting deposit row");
     const [rows] = await conn.query(
       `SELECT id, credited, status, confirmations, amount_wei, token_symbol
        FROM wallet_deposits
@@ -47,6 +52,7 @@ async function recordAndCreditSweep(o) {
     );
     if (!rows.length) throw new Error("deposit_row_missing");
     const d = rows[0];
+    console.log(`[REC] selected deposit id=${d.id} status=${d.status} confirmations=${d.confirmations}`);
 
     const amt = BigInt(d.amount_wei);
     if (
@@ -85,8 +91,10 @@ async function recordAndCreditSweep(o) {
     }
 
     await conn.commit();
+    console.log("[REC] commit success");
     return { ok: true };
   } catch (e) {
+    console.error("[REC][ERR]", e);
     try { await conn.rollback(); } catch {}
     throw e;
   } finally {

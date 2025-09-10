@@ -179,17 +179,24 @@ async function processAddress(row, provider, pool, omnibus) {
         const receipt = await tx.wait(CONFIRMATIONS);
         console.log(`[CONFIRMED] tx=${tx.hash}`);
         if (userId) {
-          await recordAndCreditSweep({
-            userId,
-            chainId: CHAIN_ID,
-            address: addr,
-            assetSymbol: 'BNB',
-            amount: sendAmount.toString(),
-            sweepTxHash: receipt.transactionHash,
-            blockNumber: receipt.blockNumber,
-            blockHash: receipt.blockHash,
-            confirmations: CONFIRMATIONS,
-          });
+          console.log(`[REC][CALL] userId=${userId} tx=${receipt.transactionHash}`);
+          try {
+            await recordAndCreditSweep({
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              assetSymbol: 'BNB',
+              amount: sendAmount.toString(),
+              sweepTxHash: receipt.transactionHash,
+              blockNumber: receipt.blockNumber,
+              blockHash: receipt.blockHash,
+              confirmations: CONFIRMATIONS,
+            });
+            console.log(`[REC][DONE] userId=${userId} tx=${receipt.transactionHash}`);
+          } catch (e) {
+            console.error('[REC][CALL][ERR]', e);
+            throw e;
+          }
         }
         if (receipt.status !== 1) {
           console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
