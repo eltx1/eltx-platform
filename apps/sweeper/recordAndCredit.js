@@ -10,7 +10,7 @@ async function preRecordSweep(o) {
   const key = createHash('sha256').update(`${o.address.toLowerCase()}|${tokenAddr}|${o.amountWei}`).digest('hex');
   const txHash = `pre:${key}`;
   console.log(
-    JSON.stringify({ tag: 'SWP:DEPOSIT:PRE_RECORD:BEGIN', user_id: o.userId, asset, amount_wei: o.amountWei, key })
+    JSON.stringify({ tag: 'DEPOSIT:PRE_RECORD:BEGIN', user_id: o.userId, asset, amount_wei: o.amountWei, key })
   );
   try {
     let id;
@@ -36,7 +36,7 @@ async function preRecordSweep(o) {
     }
     console.log(
       JSON.stringify({
-        tag: 'SWP:DEPOSIT:PRE_RECORD:OK',
+        tag: 'DEPOSIT:PRE_RECORD:OK',
         user_id: o.userId,
         asset,
         tx_hash: txHash,
@@ -47,7 +47,7 @@ async function preRecordSweep(o) {
     );
     return { id, txHash, asset, tokenAddr, key };
   } catch (e) {
-    console.log(JSON.stringify({ tag: 'SWP:DEPOSIT:PRE_RECORD:ERR', err: e.message }));
+    console.log(JSON.stringify({ tag: 'DEPOSIT:PRE_RECORD:ERR', err: e.message }));
     throw e;
   }
 }
@@ -57,10 +57,10 @@ async function finalizeSweep(o) {
   const conn = await pool.getConnection();
   const dayBucket = Math.floor(Date.now() / 86400000);
   const intentId = createHash('sha256')
-    .update(`${o.address.toLowerCase()}|${o.tokenAddr}|${o.amountWei}|${dayBucket}`)
+    .update(`${o.userId}|${o.tokenAddr}|${o.amountWei}|${dayBucket}`)
     .digest('hex');
   console.log(
-    JSON.stringify({ tag: 'SWP:DEPOSIT:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash })
+    JSON.stringify({ tag: 'DEPOSIT:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash })
   );
   try {
     await conn.beginTransaction();
@@ -73,7 +73,7 @@ async function finalizeSweep(o) {
       if (e.code === 'ER_DUP_ENTRY') {
         console.log(
           JSON.stringify({
-            tag: 'SWP:DEPOSIT:UPSERT:BEGIN',
+            tag: 'DEPOSIT:UPSERT:BEGIN',
             id: o.id,
             status: o.status,
             tx_hash: o.finalTxHash,
@@ -92,23 +92,23 @@ async function finalizeSweep(o) {
           );
         }
       } else {
-        console.log(JSON.stringify({ tag: 'SWP:DEPOSIT:UPSERT:ERR', err: e.message }));
+        console.log(JSON.stringify({ tag: 'DEPOSIT:UPSERT:ERR', err: e.message }));
         throw e;
       }
     }
-    console.log(JSON.stringify({ tag: 'SWP:DEPOSIT:UPSERT:OK', id: o.id, status: o.status }));
-    console.log(JSON.stringify({ tag: 'SWP:CREDIT:BEGIN', forced: o.forced || false }));
+    console.log(JSON.stringify({ tag: 'DEPOSIT:UPSERT:OK', id: o.id, status: o.status }));
+    console.log(JSON.stringify({ tag: 'CREDIT:BEGIN', forced: o.forced || false, intent_id: intentId }));
     const [rows2] = await conn.query(`SELECT credited, amount_wei FROM wallet_deposits WHERE id=? FOR UPDATE`, [o.id]);
     if (!rows2.length) throw new Error('deposit_missing');
     const start = new Date(dayBucket * 86400000);
     const end = new Date(start.getTime() + 86400000);
     const [dupRows] = await conn.query(
-      `SELECT id FROM wallet_deposits WHERE chain_id=? AND address=? AND token_address_norm=? AND amount_wei=? AND credited=1 AND created_at BETWEEN ? AND ? LIMIT 1`,
-      [o.chainId, o.address, o.tokenAddr, rows2[0].amount_wei, start, end]
+      `SELECT id FROM wallet_deposits WHERE chain_id=? AND user_id=? AND token_address_norm=? AND amount_wei=? AND credited=1 AND created_at BETWEEN ? AND ? LIMIT 1`,
+      [o.chainId, o.userId, o.tokenAddr, rows2[0].amount_wei, start, end]
     );
     if (dupRows.length && dupRows[0].id !== o.id) {
       await conn.query(`UPDATE wallet_deposits SET credited=1, last_update_at=NOW() WHERE id=?`, [o.id]);
-      console.log(JSON.stringify({ tag: 'SWP:IDEMPOTENT:SKIP', intent_id: intentId }));
+      console.log(JSON.stringify({ tag: 'CREDIT:SKIP', intent_id: intentId }));
     } else if (!rows2[0].credited && BigInt(o.amountWei) > 0n) {
       const [balRows] = await conn.query(`SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE`, [o.userId, o.asset]);
       const before = balRows.length ? BigInt(balRows[0].balance_wei) : 0n;
@@ -122,22 +122,23 @@ async function finalizeSweep(o) {
       await conn.query(`UPDATE wallet_deposits SET credited=1, last_update_at=NOW() WHERE id=?`, [o.id]);
       console.log(
         JSON.stringify({
-          tag: 'SWP:CREDIT:OK',
+          tag: 'CREDIT:OK',
           before: before.toString(),
           addInteger: o.amountWei,
           after: after.toString(),
           forced: o.forced || false,
           reason: o.error,
+          intent_id: intentId,
         })
       );
     } else {
-      console.log(JSON.stringify({ tag: 'SWP:CREDIT:SKIP', credited: rows2[0].credited }));
+      console.log(JSON.stringify({ tag: 'CREDIT:SKIP', credited: rows2[0].credited, intent_id: intentId }));
     }
     await conn.commit();
-    console.log(JSON.stringify({ tag: 'SWP:DONE', user_id: o.userId, asset: o.asset, tx_hash: o.finalTxHash, status: o.status, credited: 1 }));
+    console.log(JSON.stringify({ tag: 'DONE', user_id: o.userId, asset: o.asset, tx_hash: o.finalTxHash, status: o.status, credited: 1 }));
   } catch (e) {
     try { await conn.rollback(); } catch {}
-    console.log(JSON.stringify({ tag: 'SWP:CREDIT:ERR', err: e.message }));
+    console.log(JSON.stringify({ tag: 'CREDIT:ERR', err: e.message, intent_id: intentId }));
     throw e;
   } finally {
     conn.release();

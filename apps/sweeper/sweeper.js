@@ -99,11 +99,20 @@ async function initDb() {
   const pool = mysql.createPool(process.env.DATABASE_URL);
   const conn = await pool.getConnection();
   await conn.ping();
-  const host = conn.connection.config.host;
-  const dbName = conn.connection.config.database;
+  const [dbRows] = await conn.query('SELECT DATABASE() AS db');
+  const dbName = dbRows[0].db;
   conn.release();
-  console.log(`[DB] connected host=${host} db=${dbName}`);
-  return pool;
+  console.log(
+    JSON.stringify({
+      tag: 'BOOT:ENV',
+      chainId: CHAIN_ID,
+      dbName,
+      cwd: process.cwd(),
+      pm2_id: process.env.pm_id || null,
+    })
+  );
+  console.log(JSON.stringify({ tag: 'DB:SELECT', database: dbName }));
+  return { pool, dbName };
 }
 
 function deriveWallet(index, provider) {
@@ -131,12 +140,21 @@ function releaseLock(key) {
   inFlight.delete(key);
 }
 
-async function getCandidates(pool) {
+async function loadDepositAddresses(chainId, pool) {
+  console.log(JSON.stringify({ tag: 'ADDR:LOAD:BEGIN', chainId }));
   const [rows] = await pool.query(
-    "SELECT DISTINCT wd.address, wa.derivation_index, wa.user_id FROM wallet_deposits wd JOIN wallet_addresses wa ON wd.address=wa.address WHERE wd.chain_id=? AND wd.status IN ('confirmed','swept') AND wd.credited=1 AND wa.derivation_index IS NOT NULL ORDER BY wd.id DESC LIMIT 1000",
-    [CHAIN_ID]
+    'SELECT address, derivation_index, user_id FROM wallet_addresses WHERE chain_id=? AND address IS NOT NULL AND address<>""',
+    [chainId]
   );
-  return rows;
+  const list = rows.map((r) => ({ address: r.address.toLowerCase(), derivation_index: r.derivation_index, user_id: r.user_id }));
+  if (list.length === 0) {
+    console.log(JSON.stringify({ tag: 'ADDR:LOAD:ZERO' }));
+  } else {
+    console.log(
+      JSON.stringify({ tag: 'ADDR:LOAD:OK', rows: list.length, sample: list.slice(0, 3).map((r) => r.address) })
+    );
+  }
+  return list;
 }
 
 async function processAddress(row, provider, pool, omnibus) {
@@ -173,9 +191,9 @@ async function processAddress(row, provider, pool, omnibus) {
   if (!eligibleBNB) {
     reasonBNB = balBNB <= MIN_SWEEP_WEI_BNB ? 'below_min' : 'needs_gas';
   }
-  console.log(
-    `[CHK] addr=${addr} bnb=${balBNB} orig_send=${originalSendAmount} adj_send=${sendAmount} buffer=${gasBuffer} eligible=${eligibleBNB} reason=${reasonBNB}`,
-  );
+  if (!eligibleBNB && reasonBNB === 'below_min') {
+    console.log('BNB:SKIP below_min');
+  }
 
   if (eligibleBNB) {
     const key = addr + '-BNB';
@@ -195,14 +213,14 @@ async function processAddress(row, provider, pool, omnibus) {
         return;
       }
       try {
-        console.log(JSON.stringify({ tag: 'SWP:SEND:BEGIN', user_id: userId, asset: 'BNB', address: addr, tx_hash: pre.txHash }));
+        console.log(JSON.stringify({ tag: 'SEND:BEGIN', symbol: 'BNB', amount: amountWei.toString(), tx_hash: pre.txHash }));
         const tx = await withRetry(() =>
           wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: amountWei, gasPrice, gasLimit: 21000 }),
         );
-        console.log(JSON.stringify({ tag: 'SWP:SEND:OK', tx_hash: tx.hash }));
+        console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
         try {
           const receipt = await tx.wait(CONFIRMATIONS);
-          console.log(JSON.stringify({ tag: 'SWP:WAIT:OK', tx_hash: tx.hash }));
+          console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -221,7 +239,7 @@ async function processAddress(row, provider, pool, omnibus) {
             console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
           }
         } catch (e) {
-          console.log(JSON.stringify({ tag: 'SWP:WAIT:ERR', err: e.message }));
+          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: e.message }));
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -240,7 +258,7 @@ async function processAddress(row, provider, pool, omnibus) {
           }
         }
       } catch (e) {
-        console.log(JSON.stringify({ tag: 'SWP:SEND:ERR', err: e.message }));
+        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
         if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -288,15 +306,40 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       console.log(
         JSON.stringify({
-          tag: 'SWP:ERC20:BUILD_CONTRACT',
+          tag: 'ERC20:BUILD_CONTRACT',
           symbol,
           tokenAddress: reg ? reg.address : '',
           signerAddress,
           contractDefined,
-          reason: contractDefined ? undefined : reason,
         })
       );
       if (!contractDefined) {
+        if (userId) {
+          try {
+            const pre = await preRecordSweep({
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              assetSymbol: symbol,
+              tokenAddress: reg ? reg.address.toLowerCase() : undefined,
+              amountWei: '0',
+            });
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: symbol,
+              tokenAddr: pre.tokenAddr,
+              amountWei: '0',
+              finalTxHash: `err:${pre.key}`,
+              status: 'send_error',
+              confirmations: 0,
+              forced: true,
+              error: 'cannot_build_contract',
+            });
+          } catch {}
+        }
         releaseLock(key);
         continue;
       }
@@ -323,10 +366,9 @@ async function processAddress(row, provider, pool, omnibus) {
       const amountCredit = bal.toString();
       console.log(
         JSON.stringify({
-          tag: 'SWP:ERC20:UNITS',
+          tag: 'ERC20:UNITS',
           symbol,
           decimals,
-          amount_input: bal.toString(),
           amount_db_format: amountDb,
           amount_credit_integer: amountCredit,
         })
@@ -351,7 +393,7 @@ async function processAddress(row, provider, pool, omnibus) {
       if (balBNB < needed) {
         console.log(
           JSON.stringify({
-            tag: 'SWP:DRIP:BEGIN',
+            tag: 'DRIP:BEGIN',
             depositAddr: addr,
             neededWei: (needed - balBNB).toString(),
             topupWei: GAS_DRIP_WEI.toString(),
@@ -361,17 +403,13 @@ async function processAddress(row, provider, pool, omnibus) {
           const dripTx = await withRetry(() =>
             omnibus.sendTransaction({ to: addr, value: GAS_DRIP_WEI, gasPrice, gasLimit: 21000 })
           );
-          console.log(JSON.stringify({ tag: 'SWP:DRIP:OK', txHash: dripTx.hash }));
+          console.log(JSON.stringify({ tag: 'DRIP:OK', txHash: dripTx.hash }));
           await dripTx.wait(1);
           dripCount++;
           balBNB += GAS_DRIP_WEI;
         } catch (e) {
           console.log(
-            JSON.stringify({
-              tag: 'SWP:DRIP:ERR',
-              providerCode: e.code,
-              message: e.message,
-            })
+            JSON.stringify({ tag: 'DRIP:ERR', providerCode: e.code, message: e.message })
           );
           errorCount++;
         }
@@ -402,15 +440,15 @@ async function processAddress(row, provider, pool, omnibus) {
       }
       try {
         console.log(
-          JSON.stringify({ tag: 'SWP:SEND:BEGIN', user_id: userId, asset: symbol, address: addr, tx_hash: pre.txHash })
+          JSON.stringify({ tag: 'SEND:BEGIN', symbol, amount: amountCredit, tx_hash: pre.txHash })
         );
         const tx = await withRetry(() =>
           contract.transfer(OMNIBUS_ADDRESS, BigInt(amountCredit), { gasPrice, gasLimit })
         );
-        console.log(JSON.stringify({ tag: 'SWP:SEND:OK', tx_hash: tx.hash }));
+        console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
         try {
           const receipt = await tx.wait(CONFIRMATIONS);
-          console.log(JSON.stringify({ tag: 'SWP:WAIT:OK', tx_hash: tx.hash }));
+          console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -430,7 +468,7 @@ async function processAddress(row, provider, pool, omnibus) {
           }
           sweepCount++;
         } catch (e) {
-          console.log(JSON.stringify({ tag: 'SWP:WAIT:ERR', err: e.message }));
+          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: e.message }));
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -449,7 +487,7 @@ async function processAddress(row, provider, pool, omnibus) {
           }
         }
       } catch (e) {
-        console.log(JSON.stringify({ tag: 'SWP:SEND:ERR', err: e.message }));
+        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
         if (userId) {
           await finalizeSweep({
             id: pre.id,
@@ -481,28 +519,22 @@ async function processAddress(row, provider, pool, omnibus) {
 
 async function main() {
   console.log(`[BOOT] sweeper ${VERSION} chain=${CHAIN_ID} rpc=${maskUrl(RPC_HTTP)} rate_limit=${SWEEP_RATE_LIMIT_PER_MIN}/min`);
-  const pool = await initDb();
-  const [countRows] = await pool.query('SELECT COUNT(*) AS c FROM wallet_addresses WHERE chain_id=?', [CHAIN_ID]);
-  const addrCount = Number(countRows[0].c || 0);
-  if (addrCount === 0) {
-    console.warn(`[WARN] no wallet_addresses loaded for chain=${CHAIN_ID}`);
-  } else {
-    const [sampleRows] = await pool.query('SELECT address FROM wallet_addresses WHERE chain_id=? ORDER BY id DESC LIMIT 3', [CHAIN_ID]);
-    const sample = sampleRows.map((r) => r.address).join(',');
-    console.log(`[WATCH] addresses count=${addrCount} sample=[${sample}]`);
-  }
+  const { pool } = await initDb();
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const omnibus = new ethers.Wallet(OMNIBUS_PK, provider);
-  console.log(`[RPC] ok chainId=${CHAIN_ID} tip=${await provider.getBlockNumber()}`);
+  console.log(JSON.stringify({ tag: 'RPC:READY', chainId: CHAIN_ID, tip: await provider.getBlockNumber() }));
 
   async function loop() {
     try {
-      const list = await getCandidates(pool);
+      const list = await loadDepositAddresses(CHAIN_ID, pool);
       if (list.length === 0) {
-        console.warn(`[WARN] no wallet_addresses loaded for chain=${CHAIN_ID}`);
-      }
-      for (const row of list) {
-        await processAddress(row, provider, pool, omnibus);
+        console.log(JSON.stringify({ tag: 'SWEEP:SKIP', reason: 'no_addresses' }));
+      } else {
+        console.log(JSON.stringify({ tag: 'SWEEP:START', addresses: list.length }));
+        for (const row of list) {
+          console.log(JSON.stringify({ tag: 'SWEEP:ADDR', user_id: row.user_id, address: row.address }));
+          await processAddress(row, provider, pool, omnibus);
+        }
       }
     } catch (e) {
       console.error('[ERR][LOOP]', e?.code || e?.name || 'ERR', e?.message || e, (e?.stack || '').split('\n')[0]);
