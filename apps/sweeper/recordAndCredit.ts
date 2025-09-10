@@ -1,116 +1,112 @@
-import { getPool } from "./db";
-import { toWeiString } from "./lib/units";
+import { getPool } from './db';
+import { randomUUID } from 'crypto';
 
-const NATIVE_ZERO = "0x0000000000000000000000000000000000000000";
+const NATIVE_ZERO = '0x0000000000000000000000000000000000000000';
 
-type Opts = {
+export async function preRecordSweep(o: {
   userId: number;
-  chainId: number;         // 56 على BSC
-  address: string;         // عنوان الإيداع الذي تم سويپته
-  assetSymbol: string;     // "BNB" أو "USDT"/"USDC"
-  tokenAddress?: string;   // NATIVE_ZERO للناتيف
-  amount: string;          // ممكن decimal أو wei string
-  sweepTxHash: string;
-  blockNumber?: number|null;
-  blockHash?: string|null;
-  confirmations: number;   // CONFIRMATIONS
-};
+  chainId: number;
+  address: string;
+  assetSymbol?: string;
+  tokenAddress?: string;
+  amountWei: string;
+}) {
+  const pool = await getPool();
+  const tokenAddr = o.tokenAddress && o.tokenAddress !== '' ? o.tokenAddress.toLowerCase() : NATIVE_ZERO;
+  const asset = (o.assetSymbol || (tokenAddr === NATIVE_ZERO ? 'BNB' : '')).toUpperCase();
+  const txHash = `pre:${randomUUID()}`;
+  console.log(JSON.stringify({ tag: 'SWP:PRE-RECORD:BEGIN', user_id: o.userId, asset, amount_wei: o.amountWei }));
+  try {
+    const sql = `INSERT INTO wallet_deposits
+         (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
+          token_address, amount_wei, confirmations, status, credited, source, token_address_norm, created_at, last_update_at)
+         VALUES (?, ?, ?, ?, ?, 0, 0, '', ?, ?, 0, 'pre_sweep', 0, 'sweeper', LOWER(?), NOW(), NOW())
+         ON DUPLICATE KEY UPDATE status='pre_sweep', confirmations=0, last_update_at=VALUES(last_update_at), tx_hash=VALUES(tx_hash)`;
+    const [res] = await pool.query<any>(sql, [o.userId, o.chainId, o.address, asset, txHash, tokenAddr, o.amountWei, tokenAddr]);
+    const dup = res.affectedRows === 2;
+    let id = res.insertId as number;
+    if (!id) {
+      const [rows] = await pool.query<any[]>(
+        `SELECT id FROM wallet_deposits WHERE chain_id=? AND address=? AND token_address_norm=LOWER(?) AND tx_hash=? AND log_index=0`,
+        [o.chainId, o.address, tokenAddr, txHash]
+      );
+      if (rows.length) id = rows[0].id;
+    }
+    console.log(JSON.stringify({ tag: 'SWP:PRE-RECORD:OK', user_id: o.userId, asset, tx_hash: txHash, amount_wei: o.amountWei, dup }));
+    return { id, txHash, asset, tokenAddr };
+  } catch (e: any) {
+    console.log(JSON.stringify({ tag: 'SWP:PRE-RECORD:ERR', err: e.message }));
+    throw e;
+  }
+}
 
-export async function recordAndCreditSweep(o: Opts) {
+export async function finalizeSweep(o: {
+  id: number;
+  userId: number;
+  chainId: number;
+  address: string;
+  asset: string;
+  tokenAddr: string;
+  amountWei: string;
+  finalTxHash: string;
+  status: string;
+  confirmations?: number;
+  forced?: boolean;
+  error?: string;
+}) {
   const pool = await getPool();
   const conn = await pool.getConnection();
-  console.log(`[REC] start userId=${o.userId} address=${o.address} asset=${o.assetSymbol} amount=${o.amount} tx=${o.sweepTxHash}`);
+  console.log(JSON.stringify({ tag: 'SWP:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash }));
   try {
     await conn.beginTransaction();
-
-    const tokenAddr = (o.tokenAddress && o.tokenAddress !== "") ? o.tokenAddress : NATIVE_ZERO;
-    const asset = (o.assetSymbol || "").toUpperCase();
-    const amountWei = toWeiString(o.amount, 18);
-    console.log(`[REC] tokenAddr=${tokenAddr} asset=${asset} amountWei=${amountWei}`);
-    if (amountWei.includes(".")) {
-      console.log(`[REC][SKIP] amount_format_error amount=${o.amount}`);
-      await conn.rollback();
-      return { ok: false };
-    }
-
-    // 1) insert الإيداع بدون فحص التكرار
     try {
-      console.log("[REC] inserting deposit row");
       await conn.query(
-        `INSERT INTO wallet_deposits
-         (user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
-          token_address, amount_wei, confirmations, status, created_at, credited, token_address_norm, source, last_update_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, 'swept', NOW(), 0, LOWER(?), 'sweeper', NOW())`,
-        [
-          o.userId, o.chainId, o.address, asset,
-          o.sweepTxHash,
-          o.blockNumber ?? null, o.blockHash ?? null,
-          tokenAddr, amountWei,
-          o.confirmations,
-          tokenAddr
-        ]
+        `UPDATE wallet_deposits SET tx_hash=?, status=?, confirmations=?, last_update_at=NOW() WHERE id=?`,
+        [o.finalTxHash, o.status, o.confirmations || 0, o.id]
       );
-      console.log("[REC] insert success");
-    } catch (e) {
-      console.error("[REC][ERR] insert failed", e);
-      throw e;
+    } catch (e: any) {
+      if (e.code === 'ER_DUP_ENTRY') {
+        console.log(JSON.stringify({ tag: 'SWP:UPSERT:BEGIN', id: o.id, status: o.status, tx_hash: o.finalTxHash, dup: true }));
+        const [rows] = await conn.query<any[]>(
+          `SELECT id FROM wallet_deposits WHERE chain_id=? AND address=? AND token_address_norm=? AND tx_hash=? AND log_index=0`,
+          [o.chainId, o.address, o.tokenAddr, o.finalTxHash]
+        );
+        if (rows.length) {
+          o.id = rows[0].id;
+          await conn.query(
+            `UPDATE wallet_deposits SET status=?, confirmations=?, last_update_at=NOW() WHERE id=?`,
+            [o.status, o.confirmations || 0, o.id]
+          );
+        }
+      } else {
+        console.log(JSON.stringify({ tag: 'SWP:UPSERT:ERR', err: e.message }));
+        throw e;
+      }
     }
-
-    // جبنا الصف للقفل والتأكد من شروط الاعتماد
-    console.log("[REC] selecting deposit row");
-
-    const [rows] = await conn.query<any[]>(
-      `SELECT id, credited, status, confirmations, amount_wei, token_symbol
-       FROM wallet_deposits
-       WHERE tx_hash=? AND address=? AND token_address_norm=LOWER(?) FOR UPDATE`,
-      [o.sweepTxHash, o.address, tokenAddr]
-    );
-    if (!rows.length) throw new Error("deposit_row_missing");
-    const d = rows[0];
-    console.log(`[REC] selected deposit id=${d.id} status=${d.status} confirmations=${d.confirmations}`);
-
-    const amt = BigInt(d.amount_wei);
-    if (
-      !d.credited &&
-      (d.status === "swept" || d.status === "confirmed") &&
-      Number(d.confirmations) >= o.confirmations &&
-      amt > 0n &&
-      asset
-    ) {
-      const [balRows] = await conn.query<any[]>(
-        `SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE`,
-        [o.userId, asset]
-      );
+    console.log(JSON.stringify({ tag: 'SWP:UPSERT:OK', id: o.id, status: o.status }));
+    console.log(JSON.stringify({ tag: 'SWP:CREDIT:BEGIN', forced: o.forced || false }));
+    const [rows2] = await conn.query<any[]>(`SELECT credited FROM wallet_deposits WHERE id=? FOR UPDATE`, [o.id]);
+    if (!rows2.length) throw new Error('deposit_missing');
+    if (!rows2[0].credited && BigInt(o.amountWei) > 0n) {
+      const [balRows] = await conn.query<any[]>(`SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE`, [o.userId, o.asset]);
       const before = balRows.length ? BigInt(balRows[0].balance_wei) : 0n;
       await conn.query(
         `INSERT INTO user_balances (user_id, asset, balance_wei, created_at)
          VALUES (?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
-        [o.userId, asset, d.amount_wei]
+        [o.userId, o.asset, o.amountWei]
       );
-      const after = before + amt;
-
-      await conn.query(`UPDATE wallet_deposits SET credited=1, last_update_at=NOW() WHERE id=?`, [d.id]);
-      console.log(
-        `[CREDIT] depositId=${d.id} userId=${o.userId} asset=${asset} amountWei=${d.amount_wei} status=${d.status} confirmations=${d.confirmations} beforeBalance=${before} afterBalance=${after}`
-      );
+      const after = before + BigInt(o.amountWei);
+      await conn.query(`UPDATE wallet_deposits SET credited=1, last_update_at=NOW() WHERE id=?`, [o.id]);
+      console.log(JSON.stringify({ tag: 'SWP:CREDIT:OK', before: before.toString(), after: after.toString(), forced: o.forced || false, reason: o.error }));
     } else {
-      let reason = "";
-      if (d.credited || !(d.status === "swept" || d.status === "confirmed")) reason = "credit_skip:status";
-      else if (Number(d.confirmations) < o.confirmations) reason = "credit_skip:conf";
-      else if (amt <= 0n) reason = "credit_skip:amount_zero";
-      else if (!asset) reason = "credit_skip:asset_missing";
-      console.log(
-        `[CREDIT][SKIP] reason=${reason} depositId=${d.id} status=${d.status} confirmations=${d.confirmations} credited=${d.credited} amountWei=${d.amount_wei} asset=${asset}`
-      );
+      console.log(JSON.stringify({ tag: 'SWP:CREDIT:SKIP', credited: rows2[0].credited }));
     }
-
     await conn.commit();
-    console.log("[REC] commit success");
-    return { ok: true };
-  } catch (e) {
-    console.error("[REC][ERR]", e);
+    console.log(JSON.stringify({ tag: 'SWP:DONE', user_id: o.userId, asset: o.asset, tx_hash: o.finalTxHash, status: o.status, credited: 1 }));
+  } catch (e: any) {
     try { await conn.rollback(); } catch {}
+    console.log(JSON.stringify({ tag: 'SWP:CREDIT:ERR', err: e.message }));
     throw e;
   } finally {
     conn.release();

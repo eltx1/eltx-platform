@@ -3,7 +3,7 @@ const { ethers } = require('ethers');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const { resolveUserId } = require('./depositRecorder');
-const { recordAndCreditSweep } = require('./recordAndCredit');
+const { preRecordSweep, finalizeSweep } = require('./recordAndCredit');
 
 // ---- env ----
 const VERSION = 'v1';
@@ -174,39 +174,83 @@ async function processAddress(row, provider, pool, omnibus) {
   if (eligibleBNB) {
     const key = addr + '-BNB';
     if (acquireLock(key) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
+      const amountWei = sendAmount;
+      let pre;
       try {
-        console.log(`[PRE-SWEEP] addr=${addr} asset=BNB amount=${sendAmount}`);
+        pre = await preRecordSweep({
+          userId,
+          chainId: CHAIN_ID,
+          address: addr,
+          assetSymbol: 'BNB',
+          amountWei: amountWei.toString(),
+        });
+      } catch (e) {
+        releaseLock(key);
+        return;
+      }
+      try {
+        console.log(JSON.stringify({ tag: 'SWP:SEND:BEGIN', user_id: userId, asset: 'BNB', address: addr, tx_hash: pre.txHash }));
         const tx = await withRetry(() =>
-          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: sendAmount, gasPrice, gasLimit: 21000 }),
+          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: amountWei, gasPrice, gasLimit: 21000 }),
         );
-        console.log(`[SWEEP] addr=${addr} asset=BNB tx=${tx.hash}`);
-        const receipt = await tx.wait(CONFIRMATIONS);
-        console.log(`[CONFIRMED] tx=${tx.hash}`);
-        if (userId) {
-          console.log(`[REC][CALL] userId=${userId} tx=${receipt.transactionHash}`);
-          try {
-            await recordAndCreditSweep({
+        console.log(JSON.stringify({ tag: 'SWP:SEND:OK', tx_hash: tx.hash }));
+        try {
+          const receipt = await tx.wait(CONFIRMATIONS);
+          console.log(JSON.stringify({ tag: 'SWP:WAIT:OK', tx_hash: tx.hash }));
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
               userId,
               chainId: CHAIN_ID,
               address: addr,
-              assetSymbol: 'BNB',
-              amount: sendAmount.toString(),
-              sweepTxHash: receipt.transactionHash,
-              blockNumber: receipt.blockNumber,
-              blockHash: receipt.blockHash,
+              asset: 'BNB',
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: receipt.transactionHash,
+              status: 'swept',
               confirmations: CONFIRMATIONS,
             });
-            console.log(`[REC][DONE] userId=${userId} tx=${receipt.transactionHash}`);
-          } catch (e) {
-            console.error('[REC][CALL][ERR]', e);
-            throw e;
+          }
+          if (receipt.status !== 1) {
+            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+          }
+        } catch (e) {
+          console.log(JSON.stringify({ tag: 'SWP:WAIT:ERR', err: e.message }));
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: 'BNB',
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: `err:${Date.now()}`,
+              status: 'wait_error',
+              confirmations: 0,
+              forced: true,
+              error: e.message,
+            });
           }
         }
-        if (receipt.status !== 1) {
-          console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
-        }
       } catch (e) {
-        console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=BNB`, e);
+        console.log(JSON.stringify({ tag: 'SWP:SEND:ERR', err: e.message }));
+        if (userId) {
+          await finalizeSweep({
+            id: pre.id,
+            userId,
+            chainId: CHAIN_ID,
+            address: addr,
+            asset: 'BNB',
+            tokenAddr: pre.tokenAddr,
+            amountWei: amountWei.toString(),
+            finalTxHash: `err:${Date.now()}`,
+            status: 'send_error',
+            confirmations: 0,
+            forced: true,
+            error: e.message,
+          });
+        }
         errorCount++;
       } finally {
         console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
@@ -260,34 +304,91 @@ async function processAddress(row, provider, pool, omnibus) {
           continue;
         }
       }
-      console.log(`[PRE-SWEEP] addr=${addr} asset=${token.symbol} amount=${bal}`);
-      const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, bal, { gasPrice, gasLimit }));
-      console.log(`[SWEEP] addr=${addr} asset=${token.symbol} tx=${tx.hash}`);
-        const receipt = await tx.wait(CONFIRMATIONS);
-        console.log(`[CONFIRMED] tx=${tx.hash}`);
+      const amountWei = bal;
+      let pre;
+      try {
+        pre = await preRecordSweep({
+          userId,
+          chainId: CHAIN_ID,
+          address: addr,
+          assetSymbol: token.symbol,
+          tokenAddress: token.address.toLowerCase(),
+          amountWei: amountWei.toString(),
+        });
+      } catch (e) {
+        releaseLock(key);
+        continue;
+      }
+      try {
+        console.log(JSON.stringify({ tag: 'SWP:SEND:BEGIN', user_id: userId, asset: token.symbol, address: addr, tx_hash: pre.txHash }));
+        const tx = await withRetry(() => contract.transfer(OMNIBUS_ADDRESS, amountWei, { gasPrice, gasLimit }));
+        console.log(JSON.stringify({ tag: 'SWP:SEND:OK', tx_hash: tx.hash }));
+        try {
+          const receipt = await tx.wait(CONFIRMATIONS);
+          console.log(JSON.stringify({ tag: 'SWP:WAIT:OK', tx_hash: tx.hash }));
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: token.symbol.toUpperCase(),
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: receipt.transactionHash,
+              status: 'swept',
+              confirmations: CONFIRMATIONS,
+            });
+          }
+          if (receipt.status !== 1) {
+            console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+          }
+          sweepCount++;
+        } catch (e) {
+          console.log(JSON.stringify({ tag: 'SWP:WAIT:ERR', err: e.message }));
+          if (userId) {
+            await finalizeSweep({
+              id: pre.id,
+              userId,
+              chainId: CHAIN_ID,
+              address: addr,
+              asset: token.symbol.toUpperCase(),
+              tokenAddr: pre.tokenAddr,
+              amountWei: amountWei.toString(),
+              finalTxHash: `err:${Date.now()}`,
+              status: 'wait_error',
+              confirmations: 0,
+              forced: true,
+              error: e.message,
+            });
+          }
+        }
+      } catch (e) {
+        console.log(JSON.stringify({ tag: 'SWP:SEND:ERR', err: e.message }));
         if (userId) {
-          await recordAndCreditSweep({
+          await finalizeSweep({
+            id: pre.id,
             userId,
             chainId: CHAIN_ID,
             address: addr,
-            assetSymbol: token.symbol,
-            tokenAddress: token.address.toLowerCase(),
-            amount: bal.toString(),
-            sweepTxHash: receipt.transactionHash,
-            blockNumber: receipt.blockNumber,
-            blockHash: receipt.blockHash,
-            confirmations: CONFIRMATIONS,
+            asset: token.symbol.toUpperCase(),
+            tokenAddr: pre.tokenAddr,
+            amountWei: amountWei.toString(),
+            finalTxHash: `err:${Date.now()}`,
+            status: 'send_error',
+            confirmations: 0,
+            forced: true,
+            error: e.message,
           });
         }
-      if (receipt.status !== 1) {
-        console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
+        errorCount++;
+      } finally {
+        console.log(`[POST-SWEEP] addr=${addr} asset=${token.symbol}`);
+        releaseLock(key);
       }
-      sweepCount++;
     } catch (e) {
       console.error(`[SWEEP][ERR] sweep_send_failed addr=${addr} asset=${token.symbol}`, e);
       errorCount++;
-    } finally {
-      console.log(`[POST-SWEEP] addr=${addr} asset=${token.symbol}`);
       releaseLock(key);
     }
   }
