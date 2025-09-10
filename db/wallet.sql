@@ -128,8 +128,8 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('transfer_fee_bps', '
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  from_user_id BIGINT UNSIGNED NOT NULL,
-  to_user_id BIGINT UNSIGNED NOT NULL,
+  from_user_id INT NOT NULL,
+  to_user_id INT NOT NULL,
   asset VARCHAR(32) NOT NULL,
   amount_wei DECIMAL(65,0) NOT NULL,
   fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
