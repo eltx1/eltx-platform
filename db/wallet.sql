@@ -118,3 +118,17 @@ ALTER TABLE user_balances
   DROP COLUMN IF EXISTS status,
   DROP COLUMN IF EXISTS usd_balance;
 
+-- internal transfers between users
+CREATE TABLE IF NOT EXISTS wallet_transfers (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  from_user_id BIGINT UNSIGNED NOT NULL,
+  to_user_id BIGINT UNSIGNED NOT NULL,
+  asset VARCHAR(32) NOT NULL,
+  amount_wei DECIMAL(65,0) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_from_user (from_user_id),
+  INDEX idx_to_user (to_user_id),
+  CONSTRAINT fk_wallet_transfers_from FOREIGN KEY (from_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_wallet_transfers_to FOREIGN KEY (to_user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+

@@ -62,6 +62,16 @@ export const dict = {
         confirmed: 'Confirmed',
       },
     },
+    pay: {
+      title: 'Pay',
+      to: 'Recipient User ID',
+      asset: 'Asset',
+      amount: 'Amount',
+      send: 'Send',
+      balance: 'Balance',
+      insufficient: 'Insufficient balance',
+      success: 'Transfer complete',
+    },
     nav: {
       home: 'Home',
       faq: 'FAQ',
@@ -117,6 +127,7 @@ export const dict = {
       genericError: 'Something went wrong. Please try again.',
       copy: 'Copy',
       copied: 'Copied',
+      userId: 'User ID',
     },
     errors: {
       userExists: 'Email or username already exists.',
@@ -181,6 +192,16 @@ export const dict = {
         confirmed: 'مؤكد',
       },
     },
+    pay: {
+      title: 'الدفع',
+      to: 'معرّف المستخدم للمستلم',
+      asset: 'الأصل',
+      amount: 'الكمية',
+      send: 'إرسال',
+      balance: 'الرصيد',
+      insufficient: 'الرصيد غير كافٍ',
+      success: 'تم التحويل',
+    },
     nav: {
       home: 'الرئيسية',
       faq: 'الأسئلة الشائعة',
@@ -236,6 +257,7 @@ export const dict = {
       genericError: 'حدث خطأ. برجاء المحاولة مرة أخرى.',
       copy: 'نسخ',
       copied: 'تم النسخ',
+      userId: 'معرّف المستخدم',
     },
     errors: {
       userExists: 'البريد الإلكتروني أو اسم المستخدم موجود بالفعل.',

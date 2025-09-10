@@ -186,6 +186,12 @@ function formatUnitsStr(weiStr, decimals = 18) {
   }
 }
 
+const TransferSchema = z.object({
+  to_user_id: z.coerce.number().int().positive(),
+  asset: z.enum(['BNB', 'USDC', 'USDT']),
+  amount: z.string(),
+});
+
 async function requireUser(req) {
   const token = req.cookies[COOKIE_NAME];
   if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
@@ -415,6 +421,46 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
     res.json({ ok: true, assets });
   } catch (err) {
     next(err);
+  }
+});
+
+app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const fromUserId = await requireUser(req);
+    const { to_user_id, asset, amount } = TransferSchema.parse(req.body);
+    if (to_user_id === fromUserId) throw { status: 400, message: 'Cannot transfer to self' };
+    const meta = asset === 'BNB' ? { decimals: 18 } : tokenMetaBySymbol[asset];
+    if (!meta) throw { status: 400, message: 'Unsupported asset' };
+    let amtWei;
+    try {
+      amtWei = ethers.parseUnits(amount, meta.decimals);
+    } catch {
+      throw { status: 400, message: 'Invalid amount' };
+    }
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [target] = await conn.query('SELECT id FROM users WHERE id=? FOR UPDATE', [to_user_id]);
+    if (!target.length) throw { status: 404, message: 'User not found' };
+    const [balRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE',
+      [fromUserId, asset]
+    );
+    const bal = balRows.length ? BigInt(balRows[0].balance_wei) : 0n;
+    if (bal < amtWei) throw { status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' };
+    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND asset=?', [amtWei.toString(), fromUserId, asset]);
+    await conn.query(
+      'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+      [to_user_id, asset, amtWei.toString()]
+    );
+    await conn.query('INSERT INTO wallet_transfers (from_user_id, to_user_id, asset, amount_wei) VALUES (?,?,?,?)', [fromUserId, to_user_id, asset, amtWei.toString()]);
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    if (conn) await conn.rollback();
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 
