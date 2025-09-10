@@ -12,6 +12,7 @@ type Deposit = {
   symbol: string;
   decimals: number;
   amount_formatted: string;
+  amount_int: string;
   confirmations: number;
   status: string;
   created_at: string;

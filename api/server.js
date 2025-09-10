@@ -363,13 +363,16 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
     for (const row of rows) {
       row.token_address = (row.token_address || ZERO).toLowerCase();
       row.amount_wei = row.amount_wei?.toString() ?? '0';
+      row.amount_int = row.amount_wei;
       if (row.token_address === ZERO) {
         row.display_symbol = row.token_symbol || 'BNB';
         row.decimals = 18;
+        row.amount = ethers.formatEther(row.amount_wei);
       } else {
         const meta = tokenMeta[row.token_address];
         row.display_symbol = row.token_symbol || (meta ? meta.symbol : 'UNKNOWN');
         row.decimals = meta ? meta.decimals : 18;
+        row.amount = row.amount_wei;
       }
       row.amount_formatted = formatUnitsStr(row.amount_wei, row.decimals);
     }
