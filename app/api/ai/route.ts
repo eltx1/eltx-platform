@@ -1,8 +1,7 @@
 import OpenAI from 'openai';
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 export async function POST(request: Request) {
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const { messages } = await request.json();
   if (!Array.isArray(messages)) {
     return new Response(JSON.stringify({ error: 'Invalid messages' }), { status: 400 });

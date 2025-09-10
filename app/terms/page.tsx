@@ -3,11 +3,12 @@
 /* eslint-disable react/no-unescaped-entities */
 
 import { dict, useLang } from '../lib/i18n';
+import type { ReactNode } from 'react';
 
 export default function TermsPage() {
   const { lang } = useLang();
   const t = dict[lang];
-  const content: Record<'en' | 'ar', JSX.Element> = {
+  const content: Record<'en' | 'ar', ReactNode> = {
     en: (
       <>
         <p className="opacity-80 text-sm">Last updated: 10/9/2025</p>
