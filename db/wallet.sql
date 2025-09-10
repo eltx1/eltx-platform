@@ -125,7 +125,6 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('transfer_fee_bps', '0');
-
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
