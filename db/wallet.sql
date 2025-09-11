@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS wallet_addresses (
   derivation_index INT UNSIGNED NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_user_chain (user_id, chain_id),
-  UNIQUE KEY uniq_addr (address),
+  UNIQUE KEY uniq_addr (chain_id, address),
   INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -68,7 +68,7 @@ ALTER TABLE wallet_addresses
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
   ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
   ADD UNIQUE KEY uniq_user_chain (user_id, chain_id),
-  ADD UNIQUE KEY uniq_addr (address),
+  ADD UNIQUE KEY uniq_addr (chain_id, address),
   ADD INDEX idx_user (user_id);
 
 -- deposits
