@@ -15,6 +15,7 @@ ALTER TABLE wallet_index
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   ADD PRIMARY KEY (chain_id);
 INSERT IGNORE INTO wallet_index (chain_id, next_index) VALUES (56, 0);
+INSERT IGNORE INTO wallet_index (chain_id, next_index) VALUES (1, 0);
 
 -- chain settings
 DROP TABLE IF EXISTS chain_settings;
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS chain_settings (
   PRIMARY KEY (chain_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (56, 12);
+INSERT IGNORE INTO chain_settings (chain_id, min_confirmations) VALUES (1, 12);
 -- last processed block cursor
 CREATE TABLE IF NOT EXISTS chain_cursor (
   chain_id INT UNSIGNED PRIMARY KEY,
@@ -41,6 +43,7 @@ ALTER TABLE chain_cursor
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   ADD PRIMARY KEY (chain_id);
 INSERT IGNORE INTO chain_cursor (chain_id, last_block) VALUES (56, 0);
+INSERT IGNORE INTO chain_cursor (chain_id, last_block) VALUES (1, 0);
 
 -- derived address per user
 CREATE TABLE IF NOT EXISTS wallet_addresses (
