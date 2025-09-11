@@ -15,7 +15,14 @@ const OMNIBUS_ADDRESS = (process.env.OMNIBUS_ADDRESS || '').toLowerCase();
 const OMNIBUS_PK = process.env.OMNIBUS_PK;
 if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK required');
 
-const TOKEN_REGISTRY = require('../../config/registry/56.json');
+const NATIVE_SYMBOL = process.env.NATIVE_SYMBOL || 'BNB';
+
+let TOKEN_REGISTRY = {};
+try {
+  TOKEN_REGISTRY = require(`../../config/registry/${CHAIN_ID}.json`);
+} catch (e) {
+  TOKEN_REGISTRY = {};
+}
 const TOKENS = Object.keys(TOKEN_REGISTRY).map((sym) => ({
   symbol: sym,
   address: TOKEN_REGISTRY[sym].address,
@@ -431,7 +438,7 @@ async function processAddress(row, provider, pool, omnibus) {
           userId,
           chainId: CHAIN_ID,
           address: addr,
-          assetSymbol: 'BNB',
+          assetSymbol: NATIVE_SYMBOL,
           amountWei: amountWei.toString(),
         });
       } catch (e) {
@@ -439,7 +446,7 @@ async function processAddress(row, provider, pool, omnibus) {
         return;
       }
       try {
-        console.log(JSON.stringify({ tag: 'SEND:BEGIN', symbol: 'BNB', amount: amountWei.toString(), tx_hash: pre.txHash }));
+        console.log(JSON.stringify({ tag: 'SEND:BEGIN', symbol: NATIVE_SYMBOL, amount: amountWei.toString(), tx_hash: pre.txHash }));
         const tx = await withRetry(() =>
           wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: amountWei, gasPrice, gasLimit: 21000 })
         );
@@ -453,7 +460,7 @@ async function processAddress(row, provider, pool, omnibus) {
               userId,
               chainId: CHAIN_ID,
               address: addr,
-              asset: 'BNB',
+              asset: NATIVE_SYMBOL,
               tokenAddr: pre.tokenAddr,
               amountWei: amountWei.toString(),
               finalTxHash: receipt.transactionHash,
@@ -472,7 +479,7 @@ async function processAddress(row, provider, pool, omnibus) {
               userId,
               chainId: CHAIN_ID,
               address: addr,
-              asset: 'BNB',
+              asset: NATIVE_SYMBOL,
               tokenAddr: pre.tokenAddr,
               amountWei: amountWei.toString(),
               finalTxHash: `err:${pre.key}`,
@@ -491,7 +498,7 @@ async function processAddress(row, provider, pool, omnibus) {
             userId,
             chainId: CHAIN_ID,
             address: addr,
-            asset: 'BNB',
+            asset: NATIVE_SYMBOL,
             tokenAddr: pre.tokenAddr,
             amountWei: amountWei.toString(),
             finalTxHash: `err:${pre.key}`,
@@ -503,7 +510,7 @@ async function processAddress(row, provider, pool, omnibus) {
         }
         errorCount++;
       } finally {
-        console.log(`[POST-SWEEP] addr=${addr} asset=BNB`);
+        console.log(`[POST-SWEEP] addr=${addr} asset=${NATIVE_SYMBOL}`);
         releaseLock(keyBNB);
       }
     }
