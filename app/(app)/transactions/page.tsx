@@ -19,6 +19,7 @@ type Transaction = {
   type: 'deposit' | 'transfer';
   direction?: 'in' | 'out';
   counterparty?: number;
+  chain_id?: number;
 };
 
 export default function TransactionsPage() {
@@ -89,7 +90,7 @@ export default function TransactionsPage() {
             </div>
             {d.tx_hash ? (
               <a
-                href={`https://bscscan.com/tx/${d.tx_hash}`}
+                href={`${d.chain_id === 1 ? 'https://etherscan.io/tx/' : 'https://bscscan.com/tx/'}${d.tx_hash}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="break-all underline"

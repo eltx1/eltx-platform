@@ -41,6 +41,10 @@ export const dict = {
       copy: 'Copy',
       copied: 'Copied',
       qr: 'QR Code',
+      chainNames: {
+        bsc: 'BNB Smart Chain (BSC) — Mainnet (56)',
+        eth: 'Ethereum — Mainnet (1)',
+      },
       transactions: 'Transactions',
       transfer: {
         to: 'Transfer to',
@@ -177,6 +181,10 @@ export const dict = {
       copy: 'نسخ',
       copied: 'تم النسخ',
       qr: 'رمز QR',
+      chainNames: {
+        bsc: 'سلسلة بينانس الذكية (BSC) — الشبكة الرئيسية (56)',
+        eth: 'إيثيريوم — الشبكة الرئيسية (1)',
+      },
       transactions: 'المعاملات',
       transfer: {
         to: 'تحويل إلى',
