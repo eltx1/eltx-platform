@@ -154,10 +154,21 @@ const LoginSchema = z
   });
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
+const SUPPORTED_CHAINS = [56, 1];
 
-// token metadata from env
+// token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
 const tokenMetaBySymbol = {};
+for (const cid of SUPPORTED_CHAINS) {
+  try {
+    const registry = require(path.join(__dirname, `../config/registry/${cid}.json`));
+    for (const [sym, info] of Object.entries(registry)) {
+      const meta = { symbol: sym, contract: info.address, decimals: info.decimals };
+      tokenMeta[info.address.toLowerCase()] = meta;
+      tokenMetaBySymbol[sym.toUpperCase()] = meta;
+    }
+  } catch (e) {}
+}
 function addToken(symbol, envKey) {
   const addr = process.env[envKey];
   if (addr) {
@@ -220,10 +231,13 @@ app.post('/auth/signup', async (req, res, next) => {
       'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
       [token, u.insertId]
     );
-    const wallet = await provisionUserAddress(conn, u.insertId, CHAIN_ID);
+    const wallets = [];
+    for (const cid of SUPPORTED_CHAINS) {
+      wallets.push(await provisionUserAddress(conn, u.insertId, cid));
+    }
     await conn.commit();
     res.cookie(COOKIE_NAME, token, sessionCookie);
-    res.json({ ok: true, wallet });
+    res.json({ ok: true, wallet: wallets[0], wallets });
   } catch (err) {
     if (conn) await conn.rollback();
     if (err instanceof z.ZodError) {
@@ -260,9 +274,12 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
           userId,
         ]);
         await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 1)', [userId, req.ip]);
-        const wallet = await provisionUserAddress(pool, userId, CHAIN_ID);
+        const wallets = [];
+        for (const cid of SUPPORTED_CHAINS) {
+          wallets.push(await provisionUserAddress(pool, userId, cid));
+        }
         res.cookie(COOKIE_NAME, token, sessionCookie);
-        return res.json({ ok: true, wallet });
+        return res.json({ ok: true, wallet: wallets[0], wallets });
       }
     }
     await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 0)', [userId, req.ip]);
@@ -346,8 +363,11 @@ app.get('/wallet/me', walletLimiter, async (req, res, next) => {
 app.get('/wallet/address', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
-    const wallet = await provisionUserAddress(pool, userId, CHAIN_ID);
-    res.json({ ok: true, wallet });
+    const wallets = [];
+    for (const cid of SUPPORTED_CHAINS) {
+      wallets.push(await provisionUserAddress(pool, userId, cid));
+    }
+    res.json({ ok: true, wallet: wallets[0], wallets });
   } catch (err) {
     next(err);
   }
@@ -367,8 +387,8 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [depRows] = await pool.query(
-      'SELECT tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? AND chain_id=? ORDER BY created_at DESC LIMIT 50',
-      [userId, CHAIN_ID]
+      'SELECT chain_id, tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? ORDER BY created_at DESC LIMIT 50',
+      [userId]
     );
     const ZERO = '0x0000000000000000000000000000000000000000';
     for (const row of depRows) {

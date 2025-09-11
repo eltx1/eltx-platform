@@ -16,6 +16,7 @@ const CONFIRMATIONS = Number(process.env.CONFIRMATIONS || 12);
 const ADDR_REFRESH_MINUTES = Number(process.env.ADDR_REFRESH_MINUTES || 10);
 const SCAN_INTERVAL_MS = Number(process.env.SCAN_INTERVAL_MS_2 || 30000);
 const HEAD_RANGE = Number(process.env.HEAD_RANGE || 250);
+const NATIVE_SYMBOL = process.env.NATIVE_SYMBOL || 'BNB';
 
 let TOKENS = [];
 try {
@@ -192,7 +193,7 @@ async function scanNative(from, tip) {
         user_id: userId,
         chain_id: CHAIN_ID,
         address: toLc,
-        token_symbol: 'BNB',
+        token_symbol: NATIVE_SYMBOL,
         token_address: null,
         amount_wei: val.toString(),
         tx_hash: tx.hash,

@@ -7,7 +7,6 @@ import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { useAuth } from '../../lib/auth';
-import QRCode from 'qrcode.react';
 
 function formatWei(wei: string, decimals: number, precision = 6): string {
   try {
@@ -37,6 +36,7 @@ type Transaction = {
   type: 'deposit' | 'transfer';
   direction?: 'in' | 'out';
   counterparty?: number;
+  chain_id?: number;
 };
 
 type Asset = {
@@ -54,19 +54,20 @@ export default function WalletPage() {
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
-  const [wallet, setWallet] = useState<WalletInfo | null>(null);
+  const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [error, setError] = useState('');
   const [unauth, setUnauth] = useState(false);
 
   const load = useCallback(async () => {
-    const addrRes = await apiFetch<{ wallet: WalletInfo }>('/wallet/address');
+    const addrRes = await apiFetch<{ wallet: WalletInfo; wallets?: WalletInfo[] }>('/wallet/address');
     if (!addrRes.ok) {
       if (addrRes.status === 401) { setUnauth(true); return; }
       setError(addrRes.error || t.common.genericError); return;
     }
-    setWallet(addrRes.data.wallet);
+    const ws = addrRes.data.wallets || (addrRes.data.wallet ? [addrRes.data.wallet] : []);
+    setWallets(ws);
     const assetsRes = await apiFetch<{ assets: Asset[] }>('/wallet/assets');
     if (assetsRes.ok) setAssets(assetsRes.data.assets);
     const txRes = await apiFetch<{ transactions: Transaction[] }>('/wallet/transactions');
@@ -91,7 +92,7 @@ export default function WalletPage() {
 
   if (unauth) return <div className="p-4">Please sign in</div>;
   if (error) return <div className="p-4">{error}</div>;
-  if (!wallet) return <div className="p-4">Loading...</div>;
+  if (wallets.length === 0) return <div className="p-4">Loading...</div>;
 
   const statusLabel = (s: string) => {
     if (s === 'seen') return t.wallet.table.status.pending;
@@ -123,26 +124,27 @@ export default function WalletPage() {
         </div>
       )}
       <div className="space-y-2">
-        <div>{t.wallet.chainLabel}</div>
-        <div className="text-sm break-all">{wallet.address}</div>
+        {wallets.map((w) => (
+          <div key={w.chain_id} className="mb-4">
+            <div>{w.chain_id === 1 ? t.wallet.chainNames.eth : t.wallet.chainNames.bsc}</div>
+            <div className="text-sm break-all">{w.address}</div>
+            <button
+              className="px-3 py-1 bg-gray-100 rounded text-black text-sm hover:bg-gray-200"
+              onClick={() => {
+                navigator.clipboard.writeText(w.address);
+                toast(t.wallet.copied);
+              }}
+            >
+              {t.wallet.copy}
+            </button>
+          </div>
+        ))}
         <button
           className="px-3 py-1 bg-gray-100 rounded text-black text-sm hover:bg-gray-200"
-          onClick={() => {
-            navigator.clipboard.writeText(wallet.address);
-            toast(t.wallet.copied);
-          }}
-        >
-          {t.wallet.copy}
-        </button>
-        <button
-          className="px-3 py-1 bg-gray-100 rounded text-black text-sm hover:bg-gray-200 ml-2"
           onClick={handleRefresh}
         >
           Refresh
         </button>
-        <div className="p-4 flex justify-center">
-          <QRCode value={wallet.address} size={160} />
-        </div>
       </div>
       <div>
         <h2 className="font-semibold mb-2">Assets</h2>
@@ -188,7 +190,7 @@ export default function WalletPage() {
               </div>
               {d.tx_hash ? (
                 <a
-                  href={`https://bscscan.com/tx/${d.tx_hash}`}
+                  href={`${d.chain_id === 1 ? 'https://etherscan.io/tx/' : 'https://bscscan.com/tx/'}${d.tx_hash}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="break-all underline"

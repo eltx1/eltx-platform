@@ -11,7 +11,8 @@
     "start": "next start -p 3000",
     "test": "echo \"No tests specified\" && exit 0",
     "worker": "npm --prefix apps/worker run worker",
-    "start:sweeper": "node apps/sweeper/sweeper.js"
+    "start:sweeper": "node apps/sweeper/sweeper.js",
+    "start:eth-sweeper": "node apps/sweeper-eth/sweeper.js"
   },
   "dependencies": {
     "@tsparticles/react": "^3.0.0",
