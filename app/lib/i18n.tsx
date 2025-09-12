@@ -117,6 +117,16 @@ export const dict = {
       send: 'Send',
       success: 'Message sent!',
     },
+    accountDeletion: {
+      title: 'Account Deletion Request',
+      email: 'Email',
+      userId: 'User ID',
+      reason: 'Reason for deletion',
+      message: 'Message',
+      confirm: 'I confirm that I want to delete my account from the ELTX platform',
+      send: 'Submit request',
+      success: 'Request sent!',
+    },
     audience: {
       title: 'Who we serve',
       governments: {
@@ -256,6 +266,16 @@ export const dict = {
       message: 'الرسالة',
       send: 'إرسال',
       success: 'تم إرسال الرسالة!',
+    },
+    accountDeletion: {
+      title: 'طلب حذف الحساب',
+      email: 'البريد الإلكتروني',
+      userId: 'معرف المستخدم',
+      reason: 'سبب طلب الحذف',
+      message: 'الرسالة',
+      confirm: 'أؤكد أنني أريد حذف حسابي من منصة ELTX',
+      send: 'إرسال الطلب',
+      success: 'تم إرسال الطلب!',
     },
     audience: {
       title: 'الفئات المستهدفة',
