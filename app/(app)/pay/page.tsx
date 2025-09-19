@@ -39,7 +39,7 @@ export default function PayPage() {
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [toId, setToId] = useState('');
-  const [asset, setAsset] = useState('BNB');
+  const [asset, setAsset] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState('');
 
@@ -49,11 +49,23 @@ export default function PayPage() {
 
   useEffect(() => {
     apiFetch<{ assets: Asset[] }>('/wallet/assets').then((res) => {
-      if (res.ok) setAssets(res.data.assets);
+      if (res.ok) {
+        setAssets(res.data.assets);
+        const preferred =
+          res.data.assets.find((token) => token.symbol === 'BNB')?.symbol || res.data.assets[0]?.symbol || '';
+        setAsset((prev) => prev || preferred);
+      }
     });
   }, []);
 
   const selected = assets.find((a) => a.symbol === asset);
+
+  useEffect(() => {
+    if (asset && assets.some((token) => token.symbol === asset)) return;
+    if (!assets.length) return;
+    const fallback = assets.find((token) => token.symbol === 'BNB')?.symbol || assets[0].symbol;
+    setAsset(fallback);
+  }, [asset, assets]);
 
   useEffect(() => {
     if (!selected || !amount) {
@@ -70,6 +82,7 @@ export default function PayPage() {
   }, [amount, selected, t.pay.insufficient]);
 
   const handleSubmit = async () => {
+    if (!asset) return;
     const res = await apiFetch('/wallet/transfer', {
       method: 'POST',
       body: JSON.stringify({ to_user_id: Number(toId), asset, amount }),
@@ -102,9 +115,9 @@ export default function PayPage() {
             onChange={(e) => setAsset(e.target.value)}
             className="w-full p-2 rounded bg-black/20 border border-white/20"
           >
-            {['BNB', 'USDC', 'USDT'].map((sym) => (
-              <option key={sym} value={sym}>
-                {sym}
+            {assets.map((token) => (
+              <option key={token.symbol} value={token.symbol}>
+                {token.display_symbol || token.symbol}
               </option>
             ))}
           </select>
@@ -126,7 +139,7 @@ export default function PayPage() {
         </div>
         <button
           onClick={handleSubmit}
-          disabled={!toId || !amount || !!error}
+          disabled={!toId || !amount || !asset || !!error}
           className="px-3 py-2 bg-gray-100 text-black rounded disabled:opacity-50 w-full"
         >
           {t.pay.send}
