@@ -159,26 +159,37 @@ const SUPPORTED_CHAINS = [56, 1];
 // token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
 const tokenMetaBySymbol = {};
+
+function registerToken(meta, chainId) {
+  const normalized = { ...meta, chainId };
+  if (meta.contract) {
+    tokenMeta[meta.contract.toLowerCase()] = normalized;
+  }
+  const symKey = meta.symbol.toUpperCase();
+  if (!tokenMetaBySymbol[symKey] || chainId === CHAIN_ID) {
+    tokenMetaBySymbol[symKey] = normalized;
+  }
+}
+
 for (const cid of SUPPORTED_CHAINS) {
   try {
     const registry = require(path.join(__dirname, `../config/registry/${cid}.json`));
     for (const [sym, info] of Object.entries(registry)) {
-      const meta = { symbol: sym, contract: info.address, decimals: info.decimals };
-      tokenMeta[info.address.toLowerCase()] = meta;
-      tokenMetaBySymbol[sym.toUpperCase()] = meta;
+      registerToken({ symbol: sym, contract: info.address, decimals: info.decimals }, cid);
     }
   } catch (e) {}
 }
 function addToken(symbol, envKey) {
   const addr = process.env[envKey];
   if (addr) {
-    const meta = {
-      symbol,
-      contract: addr,
-      decimals: Number(process.env[`${envKey}_DECIMALS`] || 18),
-    };
-    tokenMeta[addr.toLowerCase()] = meta;
-    tokenMetaBySymbol[symbol.toUpperCase()] = meta;
+    registerToken(
+      {
+        symbol,
+        contract: addr,
+        decimals: Number(process.env[`${envKey}_DECIMALS`] || 18),
+      },
+      CHAIN_ID
+    );
   }
 }
 addToken('USDT', 'TOKEN_USDT');
@@ -199,7 +210,7 @@ function formatUnitsStr(weiStr, decimals = 18) {
 
 const TransferSchema = z.object({
   to_user_id: z.coerce.number().int().positive(),
-  asset: z.enum(['BNB', 'USDC', 'USDT']),
+  asset: z.enum(['BNB', 'ETH', 'USDC', 'USDT']),
   amount: z.string(),
 });
 
@@ -417,7 +428,7 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
     const transfers = [];
     for (const row of trRows) {
       const incoming = row.to_user_id === userId;
-      const meta = row.asset === 'BNB' ? { decimals: 18 } : tokenMetaBySymbol[row.asset];
+      const meta = row.asset === 'BNB' || row.asset === 'ETH' ? { decimals: 18 } : tokenMetaBySymbol[row.asset];
       const decimals = meta ? meta.decimals : 18;
       const amtWei = BigInt(row.amount_wei);
       const feeWei = BigInt(row.fee_wei);
@@ -484,7 +495,7 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     const fromUserId = await requireUser(req);
     const { to_user_id, asset, amount } = TransferSchema.parse(req.body);
     if (to_user_id === fromUserId) throw { status: 400, message: 'Cannot transfer to self' };
-    const meta = asset === 'BNB' ? { decimals: 18 } : tokenMetaBySymbol[asset];
+    const meta = asset === 'BNB' || asset === 'ETH' ? { decimals: 18 } : tokenMetaBySymbol[asset];
     if (!meta) throw { status: 400, message: 'Unsupported asset' };
     let amtWei;
     try {
