@@ -1,8 +1,8 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Copy } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Copy, Search } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
@@ -32,6 +32,12 @@ type Asset = {
   contract: string | null;
   decimals: number;
   balance_wei: string;
+  balance: string;
+  chain_id?: number | null;
+  change_24h?: string;
+  change_24h_percent?: string | null;
+  change_24h_wei?: string;
+  last_movement_at?: string | null;
 };
 
 type WalletInfo = { chain_id: number; address: string };
@@ -46,6 +52,72 @@ export default function WalletPage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [error, setError] = useState('');
   const [unauth, setUnauth] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [networkFilter, setNetworkFilter] = useState<'all' | 'none' | number>('all');
+
+  const valueFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }), []);
+  const percentFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }), []);
+
+  const getChainLabel = useCallback(
+    (chainId: number | null | undefined) => {
+      if (chainId === 56) return t.wallet.chainNames.bsc;
+      if (chainId === 1) return t.wallet.chainNames.eth;
+      if (chainId === null || chainId === undefined) return t.wallet.filters.unknown;
+      return `${t.wallet.filters.network} ${chainId}`;
+    },
+    [t.wallet.chainNames.bsc, t.wallet.chainNames.eth, t.wallet.filters.network, t.wallet.filters.unknown]
+  );
+
+  const networkOptions = useMemo(() => {
+    const map = new Map<string, { key: 'none' | number; label: string }>();
+    assets.forEach((asset) => {
+      const chainId = asset.chain_id ?? null;
+      const key = chainId === null ? 'none' : String(chainId);
+      if (!map.has(key)) {
+        map.set(key, { key: chainId === null ? 'none' : chainId, label: getChainLabel(chainId) });
+      }
+    });
+    const sorted = Array.from(map.values()).sort((a, b) => {
+      const aVal = typeof a.key === 'number' ? a.key : Number.MAX_SAFE_INTEGER;
+      const bVal = typeof b.key === 'number' ? b.key : Number.MAX_SAFE_INTEGER;
+      return aVal - bVal;
+    });
+    return [{ key: 'all' as const, label: t.wallet.filters.all }, ...sorted];
+  }, [assets, getChainLabel, t.wallet.filters.all]);
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+
+  const filteredAssets = useMemo(() => {
+    return assets.filter((asset) => {
+      const symbol = (asset.display_symbol || asset.symbol || '').toLowerCase();
+      const matchesSearch = !normalizedSearch || symbol.includes(normalizedSearch);
+      const chainId = asset.chain_id ?? null;
+      const matchesNetwork =
+        networkFilter === 'all'
+          ? true
+          : networkFilter === 'none'
+          ? chainId === null
+          : chainId === networkFilter;
+      return matchesSearch && matchesNetwork;
+    });
+  }, [assets, normalizedSearch, networkFilter]);
+
+  const groupedAssets = useMemo(() => {
+    const groups = new Map<string, { label: string; chainId: number | null; items: Asset[] }>();
+    filteredAssets.forEach((asset) => {
+      const chainId = asset.chain_id ?? null;
+      const key = chainId === null ? 'none' : String(chainId);
+      if (!groups.has(key)) {
+        groups.set(key, { label: getChainLabel(chainId), chainId, items: [] });
+      }
+      groups.get(key)!.items.push(asset);
+    });
+    return Array.from(groups.values()).sort((a, b) => {
+      const aVal = a.chainId ?? Number.MAX_SAFE_INTEGER;
+      const bVal = b.chainId ?? Number.MAX_SAFE_INTEGER;
+      return aVal - bVal;
+    });
+  }, [filteredAssets, getChainLabel]);
 
   const load = useCallback(async () => {
     const addrRes = await apiFetch<{ wallet: WalletInfo; wallets?: WalletInfo[] }>('/wallet/address');
@@ -82,7 +154,9 @@ export default function WalletPage() {
   if (wallets.length === 0) return <div className="p-4">Loading...</div>;
 
   const eltxAsset = assets.find((a) => (a.symbol || '').toUpperCase() === 'ELTX');
-  const eltxBalanceFormatted = eltxAsset ? formatWei(eltxAsset.balance_wei, eltxAsset.decimals) : '0';
+  const eltxBalanceFormatted = eltxAsset
+    ? eltxAsset.balance || formatWei(eltxAsset.balance_wei, eltxAsset.decimals)
+    : '0';
   const hasEltxBalance = eltxAsset ? Number(eltxBalanceFormatted) > 0 : false;
 
   const statusLabel = (s: string) => {
@@ -143,43 +217,104 @@ export default function WalletPage() {
           Refresh
         </button>
       </div>
-      <div>
-        <h2 className="font-semibold mb-2">Assets</h2>
-        <table className="text-sm w-full">
-          <thead>
-            <tr className="text-left">
-              <th>Asset</th>
-              <th>Balance</th>
-              <th>Contract</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assets.map((a) => (
-              <tr
-                key={a.symbol}
-                className={`border-t border-white/10 ${a.symbol === 'ELTX' ? 'bg-white/5' : ''}`}
-              >
-                <td className={`py-1 ${a.symbol === 'ELTX' ? 'font-semibold' : ''}`}>
-                  {a.display_symbol || a.symbol}
-                </td>
-                <td className="py-1">{formatWei(a.balance_wei, a.decimals)}</td>
-                <td className="py-1">
-                  {a.contract && (
-                    <button
-                      className="underline"
-                      onClick={() => {
-                        navigator.clipboard.writeText(a.contract!);
-                        toast('Copied');
-                      }}
-                    >
-                      {a.contract.slice(0, 6)}…{a.contract.slice(-4)}
-                    </button>
-                  )}
-                </td>
-              </tr>
+      <div className="space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <h2 className="font-semibold text-base">{t.wallet.assetsTitle}</h2>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex flex-wrap gap-2">
+              {networkOptions.map((option) => (
+                <button
+                  key={String(option.key)}
+                  onClick={() => setNetworkFilter(option.key)}
+                  className={`px-3 py-1 rounded-full text-xs transition ${
+                    networkFilter === option.key
+                      ? 'bg-white text-black shadow'
+                      : 'bg-white/10 text-white/70 hover:text-white'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="relative w-full sm:w-64">
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={t.wallet.searchPlaceholder}
+                className="w-full rounded-full bg-white/10 border border-white/10 px-4 py-2 pr-10 text-sm placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-white/40"
+              />
+              <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+            </div>
+          </div>
+        </div>
+        {groupedAssets.length === 0 ? (
+          <div className="text-sm opacity-70">{t.wallet.noFilteredAssets}</div>
+        ) : (
+          <div className="space-y-4">
+            {groupedAssets.map((group) => (
+              <div key={group.label} className="space-y-2">
+                <div className="text-xs uppercase tracking-wide text-white/60">{group.label}</div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {group.items.map((asset) => {
+                    const changeValue = Number(asset.change_24h ?? '0');
+                    const changeClass = changeValue > 0 ? 'text-green-400' : changeValue < 0 ? 'text-red-400' : 'text-white/70';
+                    const formattedChange = Number.isFinite(changeValue)
+                      ? `${changeValue > 0 ? '+' : changeValue < 0 ? '' : ''}${valueFormatter.format(changeValue)}`
+                      : asset.change_24h ?? '0';
+                    const percentValue =
+                      asset.change_24h_percent !== null && asset.change_24h_percent !== undefined
+                        ? Number(asset.change_24h_percent)
+                        : null;
+                    const formattedPercent =
+                      percentValue !== null && Number.isFinite(percentValue)
+                        ? `${percentValue > 0 ? '+' : percentValue < 0 ? '' : ''}${percentFormatter.format(percentValue)}%`
+                        : null;
+                    const lastMovement = asset.last_movement_at
+                      ? new Date(asset.last_movement_at).toLocaleString()
+                      : t.wallet.noMovement;
+                    const balanceFormatted = asset.balance || formatWei(asset.balance_wei, asset.decimals);
+                    const networkLabel = getChainLabel(asset.chain_id ?? null);
+                    return (
+                      <div
+                        key={`${group.label}-${asset.symbol}`}
+                        className={`rounded-xl border p-4 space-y-3 transition ${
+                          asset.symbol === 'ELTX'
+                            ? 'border-cyan-300/60 bg-cyan-500/10 shadow-lg shadow-cyan-500/10'
+                            : 'border-white/10 bg-white/5'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-sm font-semibold">{asset.display_symbol || asset.symbol}</div>
+                          <div className="text-xs uppercase tracking-wide text-white/60 text-right">{networkLabel}</div>
+                        </div>
+                        <div className="text-xl font-bold">{balanceFormatted}</div>
+                        <div className={`text-xs ${changeClass}`}>
+                          {t.wallet.change24h}: {formattedChange}
+                          {formattedPercent ? ` (${formattedPercent})` : ''}
+                        </div>
+                        <div className="text-xs text-white/70">
+                          {t.wallet.lastMovement}: {lastMovement}
+                        </div>
+                        {asset.contract && (
+                          <button
+                            className="text-xs underline decoration-dotted underline-offset-4 hover:text-white/80"
+                            onClick={() => {
+                              navigator.clipboard.writeText(asset.contract!);
+                              toast(t.wallet.copy);
+                            }}
+                          >
+                            {asset.contract.slice(0, 6)}…{asset.contract.slice(-4)}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
       <div>
         <h2 className="font-semibold mb-2">{t.wallet.transactions}</h2>

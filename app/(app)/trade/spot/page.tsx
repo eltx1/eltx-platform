@@ -336,11 +336,9 @@ export default function SpotTradePage() {
           </div>
           <div className="space-y-6">
             <SpotMarketChart
-              key={selectedMarket}
-              symbol={selectedMarket}
+              marketSymbol={selectedMarket}
               baseAsset={selectedMarketMeta?.base_asset}
               quoteAsset={selectedMarketMeta?.quote_asset}
-              trades={trades}
               title={t.spotTrade.chart.title}
               emptyLabel={t.spotTrade.chart.empty}
             />
