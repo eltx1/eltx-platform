@@ -23,6 +23,12 @@ type WalletAsset = {
   symbol: string;
   balance_wei: string;
   decimals: number;
+  balance: string;
+  chain_id?: number | null;
+  change_24h?: string;
+  change_24h_percent?: string | null;
+  change_24h_wei?: string;
+  last_movement_at?: string | null;
 };
 
 export default function DashboardPage() {
@@ -31,21 +37,17 @@ export default function DashboardPage() {
   const { lang } = useLang();
   const t = dict[lang];
 
-  const [eltxBalance, setEltxBalance] = useState<string | null>(null);
+  const [eltxAsset, setEltxAsset] = useState<WalletAsset | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(true);
 
   const loadBalance = useCallback(async () => {
     setLoadingBalance(true);
     const res = await apiFetch<{ assets: WalletAsset[] }>('/wallet/assets');
     if (res.ok) {
-      const asset = res.data.assets.find((a) => (a.symbol || '').toUpperCase() === 'ELTX');
-      if (asset) {
-        setEltxBalance(formatWei(asset.balance_wei, asset.decimals));
-      } else {
-        setEltxBalance(null);
-      }
+      const asset = res.data.assets.find((a) => (a.symbol || '').toUpperCase() === 'ELTX') || null;
+      setEltxAsset(asset ?? null);
     } else {
-      setEltxBalance(null);
+      setEltxAsset(null);
     }
     setLoadingBalance(false);
   }, []);
@@ -60,27 +62,80 @@ export default function DashboardPage() {
   }, [user, router, loadBalance]);
 
   const balanceDisplay = useMemo(() => {
-    if (eltxBalance === null) return '0';
-    return eltxBalance;
-  }, [eltxBalance]);
+    if (!eltxAsset) return '0';
+    if (eltxAsset.balance) return eltxAsset.balance;
+    return formatWei(eltxAsset.balance_wei, eltxAsset.decimals);
+  }, [eltxAsset]);
 
   const hasBalance = useMemo(() => {
-    if (eltxBalance === null) return false;
-    const numeric = Number(eltxBalance);
+    if (!eltxAsset) return false;
+    const numeric = Number(eltxAsset.balance || '0');
     return Number.isFinite(numeric) && numeric > 0;
-  }, [eltxBalance]);
+  }, [eltxAsset]);
+
+  const numberFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }), []);
+  const percentFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }), []);
+
+  const changeStats = useMemo(() => {
+    if (!eltxAsset) return null;
+    const rawValue = Number(eltxAsset.change_24h ?? '0');
+    const rawPercent =
+      eltxAsset.change_24h_percent !== null && eltxAsset.change_24h_percent !== undefined
+        ? Number(eltxAsset.change_24h_percent)
+        : null;
+    const formattedValue = Number.isFinite(rawValue)
+      ? `${rawValue > 0 ? '+' : rawValue < 0 ? '' : ''}${numberFormatter.format(rawValue)}`
+      : eltxAsset.change_24h ?? '0';
+    const formattedPercent =
+      rawPercent !== null && Number.isFinite(rawPercent)
+        ? `${rawPercent > 0 ? '+' : rawPercent < 0 ? '' : ''}${percentFormatter.format(rawPercent)}%`
+        : null;
+    const direction = rawValue > 0 ? 'up' : rawValue < 0 ? 'down' : 'flat';
+    return { formattedValue, formattedPercent, direction, rawValue };
+  }, [eltxAsset, numberFormatter, percentFormatter]);
+
+  const lastMovementLabel = useMemo(() => {
+    if (!eltxAsset?.last_movement_at) return t.dashboard.balanceCard.noMovement;
+    try {
+      return new Date(eltxAsset.last_movement_at).toLocaleString();
+    } catch {
+      return t.dashboard.balanceCard.noMovement;
+    }
+  }, [eltxAsset?.last_movement_at, t.dashboard.balanceCard.noMovement]);
+
+  const changeColor = useMemo(() => {
+    if (!changeStats) return 'text-white/70';
+    if (changeStats.direction === 'up') return 'text-green-400';
+    if (changeStats.direction === 'down') return 'text-red-400';
+    return 'text-white/70';
+  }, [changeStats]);
 
   return (
     <div className="p-4 space-y-4 overflow-x-hidden">
       <h1 className="text-xl font-semibold">{t.dashboard.title}</h1>
-      <div className="p-4 rounded-2xl bg-white/5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+      <div className="p-5 rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-2">
           <div className="text-sm opacity-80">{t.dashboard.balanceCard.title}</div>
           <div className="text-2xl font-bold">
             {loadingBalance ? t.trade.loading : balanceDisplay}
           </div>
           {!loadingBalance && !hasBalance && (
             <div className="text-xs opacity-70">{t.dashboard.balanceCard.empty}</div>
+          )}
+          {eltxAsset && (
+            <div className="pt-2 space-y-2 text-xs">
+              <div className={`flex flex-wrap items-center justify-between gap-2 ${changeColor}`}>
+                <span>{t.dashboard.balanceCard.change24h}</span>
+                <span>
+                  {changeStats ? changeStats.formattedValue : t.dashboard.balanceCard.noChange}
+                  {changeStats?.formattedPercent ? ` (${changeStats.formattedPercent})` : ''}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-white/70">
+                <span>{t.dashboard.balanceCard.lastMovement}</span>
+                <span className="text-right">{lastMovementLabel}</span>
+              </div>
+            </div>
           )}
         </div>
         <a href="/wallet" className="btn btn-primary self-start sm:self-auto">

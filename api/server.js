@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
 const { ethers } = require('ethers');
+const Decimal = require('decimal.js');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 require('dotenv').config();
 
@@ -155,6 +156,7 @@ const LoginSchema = z
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const SUPPORTED_CHAINS = [56, 1];
+const DEFAULT_CHAIN_BY_SYMBOL = { BNB: 56, ETH: 1, ELTX: CHAIN_ID };
 
 // token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
@@ -235,6 +237,39 @@ function getSymbolDecimals(symbol) {
 
 const QUOTE_TTL_MS = Number(process.env.TRADE_QUOTE_TTL_MS || 60_000);
 const PRICE_SCALE = 10n ** 18n;
+Decimal.set({ precision: 60, toExpNeg: -40, toExpPos: 40 });
+const DECIMAL_TEN = new Decimal(10);
+
+function decimalFromWei(value, decimals) {
+  if (value === null || value === undefined) return new Decimal(0);
+  const normalized = value.toString();
+  if (!normalized || normalized === '0') return new Decimal(0);
+  try {
+    return new Decimal(normalized).div(DECIMAL_TEN.pow(decimals));
+  } catch {
+    return new Decimal(0);
+  }
+}
+
+function formatDecimalValue(decimalValue, places = 8) {
+  let decimalInstance;
+  if (decimalValue instanceof Decimal) {
+    decimalInstance = decimalValue;
+  } else {
+    try {
+      decimalInstance = new Decimal(decimalValue);
+    } catch {
+      return '0';
+    }
+  }
+  try {
+    const fixed = decimalInstance.toFixed(places, Decimal.ROUND_DOWN);
+    const trimmed = trimDecimal(fixed);
+    return trimmed === '-0' ? '0' : trimmed;
+  } catch {
+    return '0';
+  }
+}
 
 function bigIntFromValue(val) {
   const str = val?.toString() || '0';
@@ -516,6 +551,18 @@ const SpotOrdersQuerySchema = z.object({
   market: z.string().min(3).max(32).optional(),
 });
 
+const SpotCandlesQuerySchema = z.object({
+  market: z.string().min(3).max(32),
+  interval: z.enum(['5m', '1h', '1d']).default('5m'),
+  limit: z.coerce.number().int().min(10).max(500).default(200),
+});
+
+const CANDLE_INTERVALS = {
+  '5m': { seconds: 300 },
+  '1h': { seconds: 3600 },
+  '1d': { seconds: 86400 },
+};
+
 async function requireUser(req) {
   const token = req.cookies[COOKIE_NAME];
   if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
@@ -769,11 +816,14 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       [userId]
     );
     const assets = [];
+    const symbolSet = new Set();
     for (const row of rows) {
       const sym = (row.asset || '').toUpperCase();
+      if (!sym) continue;
       const meta = tokenMetaBySymbol[sym];
       const decimals = meta ? meta.decimals : 18;
       const contract = meta ? meta.contract : null;
+      const chainId = meta?.chainId ?? DEFAULT_CHAIN_BY_SYMBOL[sym] ?? null;
       const rawWei = row.balance_wei?.toString() || '0';
       const wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
       assets.push({
@@ -781,10 +831,111 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
         display_symbol: sym,
         contract,
         decimals,
+        chain_id: chainId,
         balance_wei: wei,
         balance: formatUnitsStr(wei, decimals),
+        last_movement_at: null,
+        change_24h: '0',
+        change_24h_percent: null,
+        change_24h_wei: '0',
       });
+      symbolSet.add(sym);
     }
+
+    if (assets.length) {
+      const symbols = Array.from(symbolSet);
+      const placeholders = symbols.map(() => '?').join(',');
+
+      let movementRows = [];
+      if (placeholders.length) {
+        const params = [userId, userId, userId, ...symbols];
+        [movementRows] = await pool.query(
+          `SELECT asset, MAX(created_at) AS last_movement
+           FROM (
+             SELECT UPPER(token_symbol) AS asset, created_at
+             FROM wallet_deposits
+             WHERE user_id = ? AND token_symbol IS NOT NULL AND token_symbol <> ''
+             UNION ALL
+             SELECT UPPER(asset) AS asset, created_at
+             FROM wallet_transfers
+             WHERE from_user_id = ? OR to_user_id = ?
+           ) AS movements
+           WHERE asset IN (${placeholders})
+           GROUP BY asset`,
+          params
+        );
+      }
+
+      const movementMap = new Map();
+      for (const row of movementRows) {
+        const sym = (row.asset || '').toUpperCase();
+        if (!sym || !row.last_movement) continue;
+        movementMap.set(sym, new Date(row.last_movement).toISOString());
+      }
+
+      const changeMap = new Map();
+      const recordChange = (asset, amount, sign = 1) => {
+        const sym = (asset || '').toUpperCase();
+        if (!sym || !symbolSet.has(sym)) return;
+        const delta = bigIntFromValue(amount) * BigInt(sign);
+        const current = changeMap.get(sym) || 0n;
+        changeMap.set(sym, current + delta);
+      };
+
+      const sinceCondition = 'created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)';
+
+      if (placeholders.length) {
+        const [depositRows] = await pool.query(
+          `SELECT UPPER(token_symbol) AS asset, SUM(amount_wei) AS total
+           FROM wallet_deposits
+           WHERE user_id=? AND token_symbol IS NOT NULL AND token_symbol <> '' AND ${sinceCondition}
+           GROUP BY token_symbol`,
+          [userId]
+        );
+        for (const row of depositRows) recordChange(row.asset, row.total, 1);
+
+        const [transferInRows] = await pool.query(
+          `SELECT UPPER(asset) AS asset, SUM(amount_wei - fee_wei) AS total
+           FROM wallet_transfers
+           WHERE to_user_id=? AND ${sinceCondition}
+           GROUP BY asset`,
+          [userId]
+        );
+        for (const row of transferInRows) recordChange(row.asset, row.total, 1);
+
+        const [transferOutRows] = await pool.query(
+          `SELECT UPPER(asset) AS asset, SUM(amount_wei) AS total
+           FROM wallet_transfers
+           WHERE from_user_id=? AND ${sinceCondition}
+           GROUP BY asset`,
+          [userId]
+        );
+        for (const row of transferOutRows) recordChange(row.asset, row.total, -1);
+      }
+
+      for (const asset of assets) {
+        const sym = asset.symbol;
+        asset.last_movement_at = movementMap.get(sym) || null;
+        const changeWei = changeMap.get(sym) || 0n;
+        asset.change_24h_wei = changeWei.toString();
+        const changeDecimal = decimalFromWei(changeWei, asset.decimals);
+        asset.change_24h = formatDecimalValue(changeDecimal, Math.min(6, asset.decimals));
+        const balanceWei = bigIntFromValue(asset.balance_wei);
+        const previousBalanceWei = balanceWei - changeWei;
+        if (previousBalanceWei > 0n) {
+          const previousDecimal = decimalFromWei(previousBalanceWei, asset.decimals);
+          if (!previousDecimal.isZero()) {
+            const percent = changeDecimal.div(previousDecimal).mul(100);
+            asset.change_24h_percent = formatDecimalValue(percent, 2);
+          } else {
+            asset.change_24h_percent = null;
+          }
+        } else {
+          asset.change_24h_percent = null;
+        }
+      }
+    }
+
     res.json({ ok: true, assets });
   } catch (err) {
     next(err);
@@ -1263,6 +1414,100 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
         asks: askRows.map(formatLevel),
       },
       trades,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/spot/candles', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const query = {
+      market: req.query.market,
+      interval: req.query.interval,
+      limit: req.query.limit,
+    };
+    const { market, interval, limit } = SpotCandlesQuerySchema.parse(query);
+    const marketRow = await getSpotMarket(pool, market);
+    if (!marketRow || !marketRow.active)
+      return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
+
+    const intervalInfo = CANDLE_INTERVALS[interval];
+    if (!intervalInfo)
+      return next({ status: 400, code: 'UNSUPPORTED_INTERVAL', message: 'Unsupported interval' });
+
+    const intervalSeconds = intervalInfo.seconds;
+    const maxPoints = limit;
+    const sinceDate = new Date(Date.now() - intervalSeconds * maxPoints * 1000);
+    const fetchLimit = Math.min(maxPoints * 3, 1500);
+
+    const [tradeRows] = await pool.query(
+      `SELECT price_wei, base_amount_wei, created_at
+       FROM spot_trades
+       WHERE market_id=? AND created_at >= ?
+       ORDER BY created_at ASC
+       LIMIT ?`,
+      [marketRow.id, sinceDate, fetchLimit]
+    );
+
+    if (!tradeRows.length)
+      return res.json({
+        ok: true,
+        market: { symbol: marketRow.symbol, base_asset: marketRow.base_asset, quote_asset: marketRow.quote_asset },
+        interval,
+        candles: [],
+      });
+
+    const pricePlaces = Math.min(8, Number(marketRow.price_precision || 8));
+    const amountPlaces = Math.min(8, Number(marketRow.amount_precision || 8));
+    const bucketMap = new Map();
+
+    for (const row of tradeRows) {
+      const createdAt = new Date(row.created_at);
+      const timestamp = Math.floor(createdAt.getTime() / 1000);
+      if (!Number.isFinite(timestamp)) continue;
+      const bucketStart = Math.floor(timestamp / intervalSeconds) * intervalSeconds;
+
+      const priceDecimal = decimalFromWei(row.price_wei?.toString() || '0', 18);
+      if (!priceDecimal.isFinite() || priceDecimal.isZero()) continue;
+      const volumeDecimal = decimalFromWei(row.base_amount_wei?.toString() || '0', marketRow.base_decimals);
+
+      if (!bucketMap.has(bucketStart)) {
+        bucketMap.set(bucketStart, {
+          time: bucketStart,
+          open: priceDecimal,
+          high: priceDecimal,
+          low: priceDecimal,
+          close: priceDecimal,
+          volume: volumeDecimal,
+        });
+      } else {
+        const bucket = bucketMap.get(bucketStart);
+        bucket.close = priceDecimal;
+        if (priceDecimal.gt(bucket.high)) bucket.high = priceDecimal;
+        if (priceDecimal.lt(bucket.low)) bucket.low = priceDecimal;
+        bucket.volume = bucket.volume.add(volumeDecimal);
+      }
+    }
+
+    const candles = Array.from(bucketMap.values())
+      .sort((a, b) => a.time - b.time)
+      .slice(-maxPoints)
+      .map((bucket) => ({
+        time: bucket.time,
+        open: formatDecimalValue(bucket.open, pricePlaces),
+        high: formatDecimalValue(bucket.high, pricePlaces),
+        low: formatDecimalValue(bucket.low, pricePlaces),
+        close: formatDecimalValue(bucket.close, pricePlaces),
+        volume: formatDecimalValue(bucket.volume, amountPlaces),
+      }));
+
+    res.json({
+      ok: true,
+      market: { symbol: marketRow.symbol, base_asset: marketRow.base_asset, quote_asset: marketRow.quote_asset },
+      interval,
+      candles,
     });
   } catch (err) {
     next(err);

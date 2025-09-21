@@ -1,47 +1,128 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
-import type { IChartApi, ISeriesApi, LineData, UTCTimestamp } from 'lightweight-charts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CandlestickData, IChartApi, ISeriesApi, LineData, UTCTimestamp } from 'lightweight-charts';
 import { ColorType, createChart } from 'lightweight-charts';
+import { apiFetch } from '../../app/lib/api';
+import { dict, useLang } from '../../app/lib/i18n';
 
-type TradePoint = {
-  price: string;
-  created_at: string;
+type CandlePoint = {
+  time: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
 };
 
+type Timeframe = '5m' | '1h' | '1d';
+type ChartMode = 'candles' | 'line';
+
+const DEFAULT_MODE: ChartMode = 'candles';
+
 type SpotMarketChartProps = {
-  symbol?: string;
+  marketSymbol?: string;
   baseAsset?: string | null;
   quoteAsset?: string | null;
-  trades: TradePoint[];
   title: string;
   emptyLabel: string;
 };
 
-export default function SpotMarketChart({
-  symbol,
-  baseAsset,
-  quoteAsset,
-  trades,
-  title,
-  emptyLabel,
-}: SpotMarketChartProps) {
+const CACHE_TTL_MS = 60 * 1000;
+
+export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, title, emptyLabel }: SpotMarketChartProps) {
+  const { lang } = useLang();
+  const t = dict[lang];
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<'Area'> | null>(null);
+  const areaSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const cacheRef = useRef<Record<string, { data: CandlePoint[]; fetchedAt: number }>>({});
+  const latestRequestRef = useRef<string>('');
 
-  const data = useMemo<LineData[]>(() => {
-    return trades
-      .map((trade) => {
-        const value = Number(trade.price);
-        if (!Number.isFinite(value)) return null;
-        const timestamp = Math.floor(new Date(trade.created_at).getTime() / 1000);
-        if (!Number.isFinite(timestamp)) return null;
-        return { time: timestamp as UTCTimestamp, value };
+  const [mode, setMode] = useState<ChartMode>(DEFAULT_MODE);
+  const initialModeRef = useRef<ChartMode>(DEFAULT_MODE);
+  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [candles, setCandles] = useState<CandlePoint[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+
+  const fetchCandles = useCallback(
+    async (symbol: string, frame: Timeframe) => {
+      const key = `${symbol}-${frame}`;
+      const cached = cacheRef.current[key];
+      const now = Date.now();
+      if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
+        setCandles(cached.data);
+        setLastUpdated(cached.fetchedAt);
+        return;
+      }
+      latestRequestRef.current = key;
+      setLoading(true);
+      setError(null);
+      const params = new URLSearchParams({ market: symbol, interval: frame });
+      const res = await apiFetch<{ candles: CandlePoint[] }>(`/spot/candles?${params.toString()}`);
+      if (latestRequestRef.current !== key) {
+        setLoading(false);
+        return;
+      }
+      setLoading(false);
+      if (!res.ok) {
+        setError(res.error || t.common.genericError);
+        return;
+      }
+      cacheRef.current[key] = { data: res.data.candles, fetchedAt: now };
+      setCandles(res.data.candles);
+      setLastUpdated(now);
+    },
+    [t.common.genericError]
+  );
+
+  useEffect(() => {
+    if (!marketSymbol) {
+      setCandles([]);
+      setError(null);
+      latestRequestRef.current = '';
+      return;
+    }
+    const key = `${marketSymbol}-${timeframe}`;
+    const cached = cacheRef.current[key];
+    const now = Date.now();
+    if (cached) {
+      setCandles(cached.data);
+      setLastUpdated(cached.fetchedAt);
+      if (now - cached.fetchedAt > CACHE_TTL_MS) {
+        fetchCandles(marketSymbol, timeframe);
+      }
+      return;
+    }
+    fetchCandles(marketSymbol, timeframe);
+  }, [marketSymbol, timeframe, fetchCandles]);
+
+  const candlestickData = useMemo<CandlestickData[]>(() => {
+    return candles
+      .map((candle) => {
+        const open = Number(candle.open);
+        const high = Number(candle.high);
+        const low = Number(candle.low);
+        const close = Number(candle.close);
+        if (!Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) return null;
+        return {
+          time: candle.time as UTCTimestamp,
+          open,
+          high,
+          low,
+          close,
+        };
       })
-      .filter((point): point is LineData => point !== null)
-      .sort((a, b) => Number(a.time) - Number(b.time));
-  }, [trades]);
+      .filter((candle): candle is CandlestickData => candle !== null);
+  }, [candles]);
+
+  const lineData = useMemo<LineData[]>(() => {
+    return candlestickData.map((candle) => ({ time: candle.time, value: candle.close }));
+  }, [candlestickData]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -49,7 +130,7 @@ export default function SpotMarketChart({
 
     const chart = createChart(container, {
       width: container.clientWidth || 0,
-      height: container.clientHeight || 260,
+      height: container.clientHeight || 280,
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: '#e2e8f0',
@@ -58,21 +139,35 @@ export default function SpotMarketChart({
         vertLines: { color: 'rgba(148, 163, 184, 0.12)' },
         horzLines: { color: 'rgba(148, 163, 184, 0.12)' },
       },
-      timeScale: { borderColor: 'rgba(148, 163, 184, 0.2)' },
+      timeScale: { borderColor: 'rgba(148, 163, 184, 0.2)', timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderColor: 'rgba(148, 163, 184, 0.2)' },
       crosshair: {
-        vertLine: { color: 'rgba(226, 232, 240, 0.2)', width: 1, style: 0 },
-        horzLine: { color: 'rgba(226, 232, 240, 0.2)', width: 1, style: 0 },
+        vertLine: { color: 'rgba(226, 232, 240, 0.35)', width: 1, style: 0 },
+        horzLine: { color: 'rgba(226, 232, 240, 0.35)', width: 1, style: 0 },
       },
     });
-    const series = chart.addAreaSeries({
+
+    const areaSeries = chart.addAreaSeries({
       lineColor: '#38bdf8',
       topColor: 'rgba(56, 189, 248, 0.25)',
       bottomColor: 'rgba(56, 189, 248, 0.05)',
       lineWidth: 2,
+      visible: initialModeRef.current === 'line',
     });
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+      borderVisible: false,
+      priceLineVisible: false,
+      visible: initialModeRef.current === 'candles',
+    });
+
     chartRef.current = chart;
-    seriesRef.current = series;
+    areaSeriesRef.current = areaSeries;
+    candleSeriesRef.current = candleSeries;
 
     const handleResize = () => {
       if (!containerRef.current) return;
@@ -99,39 +194,100 @@ export default function SpotMarketChart({
       if (resizeListenerAttached) window.removeEventListener('resize', handleResize);
       chart.remove();
       chartRef.current = null;
-      seriesRef.current = null;
+      areaSeriesRef.current = null;
+      candleSeriesRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    if (!seriesRef.current) return;
-    if (data.length > 0) {
-      seriesRef.current.setData(data);
-      chartRef.current?.timeScale().fitContent();
-    } else {
-      seriesRef.current.setData([]);
+    if (!areaSeriesRef.current || !candleSeriesRef.current) return;
+    areaSeriesRef.current.applyOptions({ visible: mode === 'line' });
+    candleSeriesRef.current.applyOptions({ visible: mode === 'candles' });
+  }, [mode]);
+
+  useEffect(() => {
+    if (!areaSeriesRef.current || !candleSeriesRef.current) return;
+    if (candlestickData.length === 0) {
+      areaSeriesRef.current.setData([]);
+      candleSeriesRef.current.setData([]);
+      return;
     }
-  }, [data]);
+    areaSeriesRef.current.setData(lineData);
+    candleSeriesRef.current.setData(candlestickData);
+    chartRef.current?.timeScale().fitContent();
+  }, [candlestickData, lineData]);
 
   const pairLabel = useMemo(() => {
     if (baseAsset && quoteAsset) return `${baseAsset}/${quoteAsset}`;
-    if (symbol) return symbol;
+    if (marketSymbol) return marketSymbol;
     return null;
-  }, [baseAsset, quoteAsset, symbol]);
+  }, [baseAsset, quoteAsset, marketSymbol]);
 
-  const hasData = data.length > 0;
+  const hasData = candlestickData.length > 0;
+  const timeframeButtons: { value: Timeframe; label: string }[] = [
+    { value: '5m', label: t.spotTrade.chart.timeframes['5m'] },
+    { value: '1h', label: t.spotTrade.chart.timeframes['1h'] },
+    { value: '1d', label: t.spotTrade.chart.timeframes['1d'] },
+  ];
+
+  const lastUpdatedLabel = useMemo(() => {
+    if (!lastUpdated) return t.spotTrade.chart.updatedNever;
+    const date = new Date(lastUpdated);
+    return `${t.spotTrade.chart.updated}: ${date.toLocaleTimeString()}`;
+  }, [lastUpdated, t.spotTrade.chart.updated, t.spotTrade.chart.updatedNever]);
 
   return (
-    <div className="bg-white/5 rounded p-3 space-y-2">
-      <div className="flex items-center justify-between text-sm font-semibold opacity-80">
-        <span>{title}</span>
-        {pairLabel && <span className="text-xs opacity-70">{pairLabel}</span>}
+    <div className="bg-white/5 rounded-xl p-4 space-y-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <div className="text-sm font-semibold opacity-80">{title}</div>
+          {pairLabel && <div className="text-xs opacity-70">{pairLabel}</div>}
+          <div className="text-xs opacity-60">{lastUpdatedLabel}</div>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <div className="flex rounded-full bg-white/10 p-1 shadow-inner">
+            {timeframeButtons.map((btn) => (
+              <button
+                key={btn.value}
+                className={`px-3 py-1 rounded-full transition ${
+                  timeframe === btn.value ? 'bg-white text-black shadow' : 'text-white/70 hover:text-white'
+                }`}
+                onClick={() => setTimeframe(btn.value)}
+              >
+                {btn.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex rounded-full bg-white/10 p-1 shadow-inner">
+            {(['line', 'candles'] as ChartMode[]).map((option) => (
+              <button
+                key={option}
+                className={`px-3 py-1 rounded-full transition ${
+                  mode === option ? 'bg-white text-black shadow' : 'text-white/70 hover:text-white'
+                }`}
+                onClick={() => setMode(option)}
+              >
+                {t.spotTrade.chart.modes[option]}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
-      <div className="relative h-64">
+      <div className="relative h-72">
         <div ref={containerRef} className="absolute inset-0" />
-        {!hasData && (
+        {!hasData && !loading && !error && (
           <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">
             {emptyLabel}
+          </div>
+        )}
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-white/80 bg-black/40 backdrop-blur-sm">
+            {t.trade.loading}
+          </div>
+        )}
+        {error && !loading && (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-red-300 bg-black/40 backdrop-blur-sm">
+            {error}
           </div>
         )}
       </div>

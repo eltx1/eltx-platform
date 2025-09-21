@@ -26,7 +26,14 @@ export const dict = {
     },
     dashboard: {
       title: 'Dashboard',
-      balanceCard: { title: 'ELTX Balance', empty: 'No ELTX balance yet.' },
+      balanceCard: {
+        title: 'ELTX Balance',
+        empty: 'No ELTX balance yet.',
+        change24h: '24h change',
+        lastMovement: 'Last activity',
+        noChange: 'No change',
+        noMovement: 'No recent activity',
+      },
       cards: {
         wallet: { title: 'Wallet', subtitle: 'Deposit BNB, view address' },
         transactions: { title: 'Transactions', subtitle: 'Recent deposits' },
@@ -48,6 +55,17 @@ export const dict = {
         bsc: 'BNB Smart Chain (BSC) — Mainnet (56)',
         eth: 'Ethereum — Mainnet (1)',
       },
+      filters: {
+        all: 'All networks',
+        network: 'Network',
+        unknown: 'Off-chain',
+      },
+      assetsTitle: 'Assets',
+      searchPlaceholder: 'Search assets…',
+      noFilteredAssets: 'No assets match your filters.',
+      change24h: '24h change',
+      lastMovement: 'Last movement',
+      noMovement: 'No activity yet',
       transactions: 'Transactions',
       transfer: {
         to: 'Transfer to',
@@ -142,7 +160,14 @@ export const dict = {
       placing: 'Placing…',
       cancel: 'Cancel order',
       orderbook: { title: 'Order book', bids: 'Bids', asks: 'Asks' },
-      chart: { title: 'Price chart', empty: 'No trades yet to chart.' },
+      chart: {
+        title: 'Price chart',
+        empty: 'No trades yet to chart.',
+        timeframes: { '5m': '5m', '1h': '1H', '1d': '1D' },
+        modes: { line: 'Line', candles: 'Candles' },
+        updated: 'Updated',
+        updatedNever: 'Waiting for first trade…',
+      },
       trades: { title: 'Recent trades', empty: 'No trades yet.' },
       orders: {
         title: 'Your orders',
@@ -256,7 +281,14 @@ export const dict = {
     },
     dashboard: {
       title: 'لوحة التحكم',
-      balanceCard: { title: 'رصيد ELTX', empty: 'لا يوجد رصيد ELTX بعد.' },
+      balanceCard: {
+        title: 'رصيد ELTX',
+        empty: 'لا يوجد رصيد ELTX بعد.',
+        change24h: 'تغير ٢٤ ساعة',
+        lastMovement: 'آخر حركة',
+        noChange: 'لا تغير',
+        noMovement: 'لا نشاط حديث',
+      },
       cards: {
         wallet: { title: 'المحفظة', subtitle: 'إيداع BNB، عرض العنوان' },
         transactions: { title: 'الإيداعات', subtitle: 'آخر الإيداعات' },
@@ -278,6 +310,17 @@ export const dict = {
         bsc: 'سلسلة بينانس الذكية (BSC) — الشبكة الرئيسية (56)',
         eth: 'إيثيريوم — الشبكة الرئيسية (1)',
       },
+      filters: {
+        all: 'كل الشبكات',
+        network: 'شبكة',
+        unknown: 'خارج السلسلة',
+      },
+      assetsTitle: 'الأصول',
+      searchPlaceholder: 'ابحث عن الأصول…',
+      noFilteredAssets: 'لا توجد أصول مطابقة للمرشحات.',
+      change24h: 'تغير ٢٤ ساعة',
+      lastMovement: 'آخر حركة',
+      noMovement: 'لا يوجد نشاط بعد',
       transactions: 'المعاملات',
       transfer: {
         to: 'تحويل إلى',
@@ -372,7 +415,14 @@ export const dict = {
       placing: 'جاري التنفيذ…',
       cancel: 'إلغاء الأمر',
       orderbook: { title: 'دفتر الأوامر', bids: 'طلبات الشراء', asks: 'طلبات البيع' },
-      chart: { title: 'الرسم البياني للسعر', empty: 'لا توجد تداولات بعد لعرض الرسم.' },
+      chart: {
+        title: 'الرسم البياني للسعر',
+        empty: 'لا توجد تداولات بعد لعرض الرسم.',
+        timeframes: { '5m': '٥ د', '1h': '١ س', '1d': '١ يوم' },
+        modes: { line: 'خط', candles: 'شموع' },
+        updated: 'آخر تحديث',
+        updatedNever: 'بانتظار أول صفقة…',
+      },
       trades: { title: 'آخر الصفقات', empty: 'لا توجد تداولات بعد.' },
       orders: {
         title: 'أوامرك',
