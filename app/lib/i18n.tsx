@@ -26,6 +26,7 @@ export const dict = {
     },
     dashboard: {
       title: 'Dashboard',
+      balanceCard: { title: 'ELTX Balance', empty: 'No ELTX balance yet.' },
       cards: {
         wallet: { title: 'Wallet', subtitle: 'Deposit BNB, view address' },
         transactions: { title: 'Transactions', subtitle: 'Recent deposits' },
@@ -141,7 +142,8 @@ export const dict = {
       placing: 'Placing…',
       cancel: 'Cancel order',
       orderbook: { title: 'Order book', bids: 'Bids', asks: 'Asks' },
-      trades: { title: 'Recent trades' },
+      chart: { title: 'Price chart', empty: 'No trades yet to chart.' },
+      trades: { title: 'Recent trades', empty: 'No trades yet.' },
       orders: {
         title: 'Your orders',
         empty: 'No orders yet.',
@@ -225,6 +227,7 @@ export const dict = {
       copy: 'Copy',
       copied: 'Copied',
       userId: 'User ID',
+      deposit: 'Deposit',
     },
     errors: {
       userExists: 'Email or username already exists.',
@@ -253,6 +256,7 @@ export const dict = {
     },
     dashboard: {
       title: 'لوحة التحكم',
+      balanceCard: { title: 'رصيد ELTX', empty: 'لا يوجد رصيد ELTX بعد.' },
       cards: {
         wallet: { title: 'المحفظة', subtitle: 'إيداع BNB، عرض العنوان' },
         transactions: { title: 'الإيداعات', subtitle: 'آخر الإيداعات' },
@@ -368,7 +372,8 @@ export const dict = {
       placing: 'جاري التنفيذ…',
       cancel: 'إلغاء الأمر',
       orderbook: { title: 'دفتر الأوامر', bids: 'طلبات الشراء', asks: 'طلبات البيع' },
-      trades: { title: 'آخر الصفقات' },
+      chart: { title: 'الرسم البياني للسعر', empty: 'لا توجد تداولات بعد لعرض الرسم.' },
+      trades: { title: 'آخر الصفقات', empty: 'لا توجد تداولات بعد.' },
       orders: {
         title: 'أوامرك',
         empty: 'لا توجد أوامر بعد.',
@@ -452,6 +457,7 @@ export const dict = {
       copy: 'نسخ',
       copied: 'تم النسخ',
       userId: 'معرّف المستخدم',
+      deposit: 'إيداع',
     },
     errors: {
       userExists: 'البريد الإلكتروني أو اسم المستخدم موجود بالفعل.',
