@@ -38,6 +38,10 @@ type Quote = {
   price_eltx: string;
   rate: string;
   spread_bps: number;
+  fee_bps: number;
+  fee_asset: string;
+  fee_amount: string;
+  fee_amount_wei: string;
   expires_at: string;
 };
 
@@ -50,6 +54,10 @@ type SwapResponse = {
   eltx_amount_wei: string;
   rate: string;
   spread_bps: number;
+  fee_bps: number;
+  fee_asset: string;
+  fee_amount: string;
+  fee_amount_wei: string;
 };
 
 function formatWei(wei: string, decimals: number, precision = 6): string {

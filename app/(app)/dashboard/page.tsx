@@ -11,6 +11,7 @@ import {
   Settings,
   Coins,
   ArrowLeftRight,
+  CandlestickChart,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import AICard from '../../../components/dashboard/AICard';
@@ -47,6 +48,7 @@ export default function DashboardPage() {
           <h2 className="mb-4 text-sm font-semibold opacity-80">Trade</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <SectionCard title="ELTX Swap" subtitle="Convert to ELTX" href="/trade" icon={ArrowLeftRight} />
+            <SectionCard title="Spot Trade" subtitle="Order book trading" href="/trade/spot" icon={CandlestickChart} />
           </div>
         </div>
         <div className="pt-8 border-t border-white/10">
