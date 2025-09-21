@@ -18,6 +18,8 @@ type CandlePoint = {
 type Timeframe = '5m' | '1h' | '1d';
 type ChartMode = 'candles' | 'line';
 
+const DEFAULT_CHART_MODE: ChartMode = 'candles';
+
 type SpotMarketChartProps = {
   marketSymbol?: string;
   baseAsset?: string | null;
@@ -37,10 +39,10 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
   const areaSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const cacheRef = useRef<Record<string, { data: CandlePoint[]; fetchedAt: number }>>({});
-  const initialModeRef = useRef<ChartMode>(mode);
+  const initialModeRef = useRef<ChartMode>(DEFAULT_CHART_MODE);
   const latestRequestRef = useRef<string>('');
 
-  const [mode, setMode] = useState<ChartMode>('candles');
+  const [mode, setMode] = useState<ChartMode>(initialModeRef.current);
   const [timeframe, setTimeframe] = useState<Timeframe>('5m');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
