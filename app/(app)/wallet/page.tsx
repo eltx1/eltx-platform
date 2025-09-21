@@ -7,20 +7,7 @@ import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { useAuth } from '../../lib/auth';
-
-function formatWei(wei: string, decimals: number, precision = 6): string {
-  try {
-    const bn = BigInt(wei);
-    const base = 10n ** BigInt(decimals);
-    const integer = bn / base;
-    let frac = (bn % base).toString().padStart(decimals, '0');
-    if (precision >= 0) frac = frac.slice(0, precision).replace(/0+$/, '');
-    else frac = frac.replace(/0+$/, '');
-    return frac ? `${integer}.${frac}` : integer.toString();
-  } catch {
-    return '0';
-  }
-}
+import { formatWei } from '../../lib/format';
 
 type Transaction = {
   tx_hash: string | null;
@@ -94,6 +81,10 @@ export default function WalletPage() {
   if (error) return <div className="p-4">{error}</div>;
   if (wallets.length === 0) return <div className="p-4">Loading...</div>;
 
+  const eltxAsset = assets.find((a) => (a.symbol || '').toUpperCase() === 'ELTX');
+  const eltxBalanceFormatted = eltxAsset ? formatWei(eltxAsset.balance_wei, eltxAsset.decimals) : '0';
+  const hasEltxBalance = eltxAsset ? Number(eltxBalanceFormatted) > 0 : false;
+
   const statusLabel = (s: string) => {
     if (s === 'seen') return t.wallet.table.status.pending;
     if (s === 'confirmed' || s === 'swept') return t.wallet.table.status.confirmed;
@@ -106,6 +97,12 @@ export default function WalletPage() {
   return (
     <div className="p-4 space-y-6 overflow-x-hidden">
       <h1 className="text-xl font-semibold">{t.wallet.title}</h1>
+      {hasEltxBalance && (
+        <div className="p-4 rounded-2xl bg-white/5">
+          <div className="text-sm opacity-80">{t.dashboard.balanceCard.title}</div>
+          <div className="text-2xl font-bold">{eltxBalanceFormatted}</div>
+        </div>
+      )}
       {user && (
         <div className="space-y-1">
           <div className="text-sm opacity-80">{t.common.userId}</div>
@@ -158,8 +155,13 @@ export default function WalletPage() {
           </thead>
           <tbody>
             {assets.map((a) => (
-              <tr key={a.symbol} className="border-t border-white/10">
-                <td className="py-1">{a.display_symbol || a.symbol}</td>
+              <tr
+                key={a.symbol}
+                className={`border-t border-white/10 ${a.symbol === 'ELTX' ? 'bg-white/5' : ''}`}
+              >
+                <td className={`py-1 ${a.symbol === 'ELTX' ? 'font-semibold' : ''}`}>
+                  {a.display_symbol || a.symbol}
+                </td>
                 <td className="py-1">{formatWei(a.balance_wei, a.decimals)}</td>
                 <td className="py-1">
                   {a.contract && (

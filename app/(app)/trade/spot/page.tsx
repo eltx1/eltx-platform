@@ -7,6 +7,7 @@ import { useAuth } from '../../../lib/auth';
 import { apiFetch } from '../../../lib/api';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
+import SpotMarketChart from '../../../../components/trade/SpotMarketChart';
 
 type SpotMarket = {
   id: number;
@@ -334,6 +335,15 @@ export default function SpotTradePage() {
             )}
           </div>
           <div className="space-y-6">
+            <SpotMarketChart
+              key={selectedMarket}
+              symbol={selectedMarket}
+              baseAsset={selectedMarketMeta?.base_asset}
+              quoteAsset={selectedMarketMeta?.quote_asset}
+              trades={trades}
+              title={t.spotTrade.chart.title}
+              emptyLabel={t.spotTrade.chart.empty}
+            />
             <div>
               <h2 className="text-sm font-semibold opacity-80 mb-2">{t.spotTrade.orderbook.title}</h2>
               <div className="grid gap-4 md:grid-cols-2">
@@ -377,7 +387,7 @@ export default function SpotTradePage() {
               <h2 className="text-sm font-semibold opacity-80 mb-2">{t.spotTrade.trades.title}</h2>
               <div className="bg-white/5 rounded p-3 max-h-48 overflow-y-auto text-xs space-y-1">
                 {trades.length === 0 ? (
-                  <div className="opacity-70">—</div>
+                  <div className="opacity-70">{t.spotTrade.trades.empty}</div>
                 ) : (
                   trades.map((trade) => (
                     <div key={trade.id} className="flex justify-between">
