@@ -121,6 +121,91 @@ ALTER TABLE user_balances
   DROP COLUMN IF EXISTS status,
   DROP COLUMN IF EXISTS usd_balance;
 
+-- centrally managed asset prices for ELTX swaps
+CREATE TABLE IF NOT EXISTS asset_prices (
+  asset VARCHAR(32) NOT NULL,
+  price_eltx DECIMAL(36,18) NOT NULL,
+  min_amount DECIMAL(36,18) NOT NULL DEFAULT 0,
+  max_amount DECIMAL(36,18) DEFAULT NULL,
+  spread_bps INT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (asset)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE asset_prices
+  ADD COLUMN IF NOT EXISTS price_eltx DECIMAL(36,18) NOT NULL AFTER asset,
+  ADD COLUMN IF NOT EXISTS min_amount DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER price_eltx,
+  ADD COLUMN IF NOT EXISTS max_amount DECIMAL(36,18) NULL DEFAULT NULL AFTER min_amount,
+  ADD COLUMN IF NOT EXISTS spread_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER max_amount,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER spread_bps;
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('ELTX', 1, 0, 0);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('USDT', 1, 1, 0);
+
+-- stored swap quotes
+CREATE TABLE IF NOT EXISTS trade_quotes (
+  id CHAR(36) NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  asset VARCHAR(32) NOT NULL,
+  asset_decimals INT UNSIGNED NOT NULL,
+  target_decimals INT UNSIGNED NOT NULL,
+  asset_amount_wei DECIMAL(65,0) NOT NULL,
+  eltx_amount_wei DECIMAL(65,0) NOT NULL,
+  price_eltx DECIMAL(36,18) NOT NULL,
+  price_wei DECIMAL(65,0) NOT NULL,
+  spread_bps INT UNSIGNED NOT NULL DEFAULT 0,
+  status ENUM('pending','completed','expired','cancelled','failed') NOT NULL DEFAULT 'pending',
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  executed_at DATETIME NULL,
+  PRIMARY KEY (id),
+  INDEX idx_trade_quotes_user (user_id),
+  INDEX idx_trade_quotes_status (status),
+  CONSTRAINT fk_trade_quotes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE trade_quotes
+  ADD COLUMN IF NOT EXISTS asset_decimals INT UNSIGNED NOT NULL AFTER asset,
+  ADD COLUMN IF NOT EXISTS target_decimals INT UNSIGNED NOT NULL AFTER asset_decimals,
+  ADD COLUMN IF NOT EXISTS asset_amount_wei DECIMAL(65,0) NOT NULL AFTER target_decimals,
+  ADD COLUMN IF NOT EXISTS eltx_amount_wei DECIMAL(65,0) NOT NULL AFTER asset_amount_wei,
+  ADD COLUMN IF NOT EXISTS price_eltx DECIMAL(36,18) NOT NULL AFTER eltx_amount_wei,
+  ADD COLUMN IF NOT EXISTS price_wei DECIMAL(65,0) NOT NULL AFTER price_eltx,
+  ADD COLUMN IF NOT EXISTS spread_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER price_wei,
+  ADD COLUMN IF NOT EXISTS status ENUM('pending','completed','expired','cancelled','failed') NOT NULL DEFAULT 'pending' AFTER spread_bps,
+  ADD COLUMN IF NOT EXISTS expires_at DATETIME NOT NULL AFTER status,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER expires_at,
+  ADD COLUMN IF NOT EXISTS executed_at DATETIME NULL AFTER created_at,
+  ADD INDEX IF NOT EXISTS idx_trade_quotes_user (user_id),
+  ADD INDEX IF NOT EXISTS idx_trade_quotes_status (status);
+
+-- executed swaps
+CREATE TABLE IF NOT EXISTS trade_swaps (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  quote_id CHAR(36) NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  asset VARCHAR(32) NOT NULL,
+  asset_decimals INT UNSIGNED NOT NULL,
+  target_decimals INT UNSIGNED NOT NULL,
+  asset_amount_wei DECIMAL(65,0) NOT NULL,
+  eltx_amount_wei DECIMAL(65,0) NOT NULL,
+  price_wei DECIMAL(65,0) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_trade_swaps_user (user_id),
+  INDEX idx_trade_swaps_quote (quote_id),
+  CONSTRAINT fk_trade_swaps_quote FOREIGN KEY (quote_id) REFERENCES trade_quotes(id) ON DELETE CASCADE,
+  CONSTRAINT fk_trade_swaps_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE trade_swaps
+  ADD COLUMN IF NOT EXISTS quote_id CHAR(36) NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS user_id BIGINT UNSIGNED NOT NULL AFTER quote_id,
+  ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS asset_decimals INT UNSIGNED NOT NULL AFTER asset,
+  ADD COLUMN IF NOT EXISTS target_decimals INT UNSIGNED NOT NULL AFTER asset_decimals,
+  ADD COLUMN IF NOT EXISTS asset_amount_wei DECIMAL(65,0) NOT NULL AFTER target_decimals,
+  ADD COLUMN IF NOT EXISTS eltx_amount_wei DECIMAL(65,0) NOT NULL AFTER asset_amount_wei,
+  ADD COLUMN IF NOT EXISTS price_wei DECIMAL(65,0) NOT NULL AFTER eltx_amount_wei,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER price_wei,
+  ADD INDEX IF NOT EXISTS idx_trade_swaps_user (user_id),
+  ADD INDEX IF NOT EXISTS idx_trade_swaps_quote (quote_id);
+
 -- platform settings
 CREATE TABLE IF NOT EXISTS platform_settings (
   name VARCHAR(64) PRIMARY KEY,

@@ -208,10 +208,46 @@ function formatUnitsStr(weiStr, decimals = 18) {
   }
 }
 
+function trimDecimal(value) {
+  if (value === null || value === undefined) return '0';
+  const str = value.toString();
+  if (!str.includes('.')) return str;
+  const trimmed = str.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  const normalized = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
+  return normalized.length ? normalized : '0';
+}
+
+const ZERO_DECIMAL_REGEX = /^0(?:\.0+)?$/;
+function isZeroDecimal(value) {
+  if (value === null || value === undefined) return true;
+  return ZERO_DECIMAL_REGEX.test(value.toString());
+}
+
+const ELTX_SYMBOL = 'ELTX';
+
+function getSymbolDecimals(symbol) {
+  const meta = tokenMetaBySymbol[symbol];
+  if (meta && meta.decimals !== undefined && meta.decimals !== null)
+    return Number(meta.decimals);
+  if (symbol === ELTX_SYMBOL) return Number(process.env.TOKEN_ELTX_DECIMALS || 18);
+  return 18;
+}
+
+const QUOTE_TTL_MS = Number(process.env.TRADE_QUOTE_TTL_MS || 60_000);
+
 const TransferSchema = z.object({
   to_user_id: z.coerce.number().int().positive(),
   asset: z.enum(['BNB', 'ETH', 'USDC', 'USDT']),
   amount: z.string(),
+});
+
+const TradeQuoteSchema = z.object({
+  asset: z.string().min(2).max(32),
+  amount: z.string().min(1),
+});
+
+const TradeExecuteSchema = z.object({
+  quote_id: z.string().uuid(),
 });
 
 async function requireUser(req) {
@@ -489,6 +525,50 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
   }
 });
 
+app.get('/trade/markets', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT ap.asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps, ap.updated_at, ub.balance_wei
+       FROM asset_prices ap
+       LEFT JOIN user_balances ub ON ub.user_id = ? AND ub.asset = ap.asset
+       WHERE ap.asset <> ?
+       ORDER BY ap.asset`,
+      [userId, ELTX_SYMBOL]
+    );
+    const markets = rows.map((row) => {
+      const symbol = (row.asset || '').toUpperCase();
+      const decimals = getSymbolDecimals(symbol);
+      const balanceRaw = row.balance_wei ? row.balance_wei.toString() : '0';
+      const balanceWei = balanceRaw.includes('.') ? balanceRaw.split('.')[0] : balanceRaw;
+      const priceStr = row.price_eltx?.toString() || '0';
+      const minStr = row.min_amount?.toString() || '0';
+      const maxStr = row.max_amount?.toString() || null;
+      const spread = row.spread_bps !== undefined && row.spread_bps !== null ? Number(row.spread_bps) : 0;
+      return {
+        asset: symbol,
+        decimals,
+        price_eltx: trimDecimal(priceStr),
+        min_amount: trimDecimal(minStr),
+        max_amount: maxStr ? trimDecimal(maxStr) : null,
+        spread_bps: spread,
+        updated_at: row.updated_at,
+        balance_wei: balanceWei,
+        balance: trimDecimal(formatUnitsStr(balanceWei, decimals)),
+      };
+    });
+    const baseDecimals = getSymbolDecimals(ELTX_SYMBOL);
+    res.json({
+      ok: true,
+      markets,
+      baseAsset: { symbol: ELTX_SYMBOL, decimals: baseDecimals },
+      pricing: { mode: 'internal' },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
   let conn;
   try {
@@ -525,6 +605,202 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     await conn.query('INSERT INTO wallet_transfers (from_user_id, to_user_id, asset, amount_wei, fee_wei) VALUES (?,?,?,?,?)', [fromUserId, to_user_id, asset, amtWei.toString(), feeWei.toString()]);
     await conn.commit();
     res.json({ ok: true });
+  } catch (err) {
+    if (conn) await conn.rollback();
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/trade/quote', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const { asset: rawAsset, amount } = TradeQuoteSchema.parse(req.body);
+    const asset = rawAsset.trim().toUpperCase();
+    if (asset === ELTX_SYMBOL)
+      return next({ status: 400, code: 'INVALID_ASSET', message: 'Cannot swap ELTX to itself' });
+
+    const [[priceRow]] = await pool.query(
+      'SELECT asset, price_eltx, min_amount, max_amount, spread_bps FROM asset_prices WHERE asset=?',
+      [asset]
+    );
+    if (!priceRow)
+      return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Asset not supported for swap' });
+
+    const assetDecimals = getSymbolDecimals(asset);
+    const targetDecimals = getSymbolDecimals(ELTX_SYMBOL);
+    let amountWei;
+    try {
+      amountWei = ethers.parseUnits(amount, assetDecimals);
+    } catch {
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    }
+    if (amountWei <= 0n)
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Amount must be greater than zero' });
+
+    const minAmountStr = priceRow.min_amount?.toString() || '0';
+    if (!isZeroDecimal(minAmountStr)) {
+      const minWei = ethers.parseUnits(minAmountStr, assetDecimals);
+      if (amountWei < minWei)
+        return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount below minimum' });
+    }
+
+    const maxAmountStr = priceRow.max_amount?.toString() || null;
+    if (maxAmountStr && !isZeroDecimal(maxAmountStr)) {
+      const maxWei = ethers.parseUnits(maxAmountStr, assetDecimals);
+      if (amountWei > maxWei)
+        return next({ status: 400, code: 'AMOUNT_TOO_LARGE', message: 'Amount exceeds maximum' });
+    }
+
+    const priceStr = priceRow.price_eltx?.toString() || '0';
+    let basePriceWei;
+    try {
+      basePriceWei = ethers.parseUnits(priceStr, 18);
+    } catch {
+      return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing configuration invalid' });
+    }
+    if (basePriceWei <= 0n)
+      return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing configuration invalid' });
+
+    const spreadBps = priceRow.spread_bps !== undefined && priceRow.spread_bps !== null ? Number(priceRow.spread_bps) : 0;
+    if (spreadBps >= 10000)
+      return next({ status: 500, code: 'INVALID_SPREAD', message: 'Pricing configuration invalid' });
+    const effectivePriceWei =
+      spreadBps > 0 ? (basePriceWei * (10000n - BigInt(spreadBps))) / 10000n : basePriceWei;
+    if (effectivePriceWei <= 0n)
+      return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing configuration invalid' });
+
+    const eltxWei = (amountWei * effectivePriceWei) / 10n ** BigInt(assetDecimals);
+    if (eltxWei <= 0n)
+      return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small to convert' });
+
+    const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
+    const quoteId = crypto.randomUUID();
+    await pool.query(
+      'INSERT INTO trade_quotes (id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_eltx, price_wei, spread_bps, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [
+        quoteId,
+        userId,
+        asset,
+        assetDecimals,
+        targetDecimals,
+        amountWei.toString(),
+        eltxWei.toString(),
+        priceStr,
+        effectivePriceWei.toString(),
+        spreadBps,
+        expiresAt,
+      ]
+    );
+
+    res.json({
+      ok: true,
+      quote: {
+        id: quoteId,
+        asset,
+        asset_decimals: assetDecimals,
+        target_decimals: targetDecimals,
+        amount: trimDecimal(formatUnitsStr(amountWei.toString(), assetDecimals)),
+        amount_wei: amountWei.toString(),
+        eltx_amount: trimDecimal(formatUnitsStr(eltxWei.toString(), targetDecimals)),
+        eltx_amount_wei: eltxWei.toString(),
+        price_eltx: trimDecimal(priceStr),
+        rate: trimDecimal(formatUnitsStr(effectivePriceWei.toString(), 18)),
+        spread_bps: spreadBps,
+        expires_at: expiresAt.toISOString(),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/trade/execute', walletLimiter, async (req, res, next) => {
+  let conn;
+  let quoteRow;
+  try {
+    const userId = await requireUser(req);
+    const { quote_id } = TradeExecuteSchema.parse(req.body);
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      'SELECT id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei, spread_bps, status, expires_at FROM trade_quotes WHERE id=? FOR UPDATE',
+      [quote_id]
+    );
+    if (!rows.length) {
+      await conn.rollback();
+      return next({ status: 404, code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
+    }
+    quoteRow = rows[0];
+    if (quoteRow.user_id !== userId) {
+      await conn.rollback();
+      return next({ status: 404, code: 'QUOTE_NOT_FOUND', message: 'Quote not found' });
+    }
+    if (quoteRow.status !== 'pending') {
+      await conn.rollback();
+      return next({ status: 400, code: 'QUOTE_INACTIVE', message: 'Quote no longer available' });
+    }
+
+    const expiresAt = quoteRow.expires_at instanceof Date ? quoteRow.expires_at : new Date(quoteRow.expires_at);
+    if (expiresAt.getTime() <= Date.now()) {
+      await conn.query('UPDATE trade_quotes SET status="expired", executed_at=NOW() WHERE id=?', [quote_id]);
+      await conn.commit();
+      return next({ status: 400, code: 'QUOTE_EXPIRED', message: 'Quote expired' });
+    }
+
+    const asset = (quoteRow.asset || '').toUpperCase();
+    const assetDecimals = quoteRow.asset_decimals || getSymbolDecimals(asset);
+    const targetDecimals = quoteRow.target_decimals || getSymbolDecimals(ELTX_SYMBOL);
+    const amountWei = BigInt(quoteRow.asset_amount_wei);
+    const eltxWei = BigInt(quoteRow.eltx_amount_wei);
+    const priceWei = BigInt(quoteRow.price_wei);
+
+    const [balRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE',
+      [userId, asset]
+    );
+    const balanceWei = balRows.length ? BigInt(balRows[0].balance_wei) : 0n;
+    if (balanceWei < amountWei) {
+      await conn.rollback();
+      await pool.query('UPDATE trade_quotes SET status="failed", executed_at=NOW() WHERE id=?', [quote_id]);
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+    }
+
+    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND asset=?', [amountWei.toString(), userId, asset]);
+    await conn.query(
+      'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+      [userId, ELTX_SYMBOL, eltxWei.toString()]
+    );
+    await conn.query(
+      'INSERT INTO trade_swaps (quote_id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei) VALUES (?,?,?,?,?,?,?,?)',
+      [
+        quote_id,
+        userId,
+        asset,
+        assetDecimals,
+        targetDecimals,
+        amountWei.toString(),
+        eltxWei.toString(),
+        priceWei.toString(),
+      ]
+    );
+    await conn.query('UPDATE trade_quotes SET status="completed", executed_at=NOW() WHERE id=?', [quote_id]);
+    await conn.commit();
+
+    res.json({
+      ok: true,
+      swap: {
+        quote_id,
+        asset,
+        amount: trimDecimal(formatUnitsStr(amountWei.toString(), assetDecimals)),
+        amount_wei: amountWei.toString(),
+        eltx_amount: trimDecimal(formatUnitsStr(eltxWei.toString(), targetDecimals)),
+        eltx_amount_wei: eltxWei.toString(),
+        rate: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
+        spread_bps: quoteRow.spread_bps !== undefined && quoteRow.spread_bps !== null ? Number(quoteRow.spread_bps) : 0,
+      },
+    });
   } catch (err) {
     if (conn) await conn.rollback();
     next(err);
