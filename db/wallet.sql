@@ -48,7 +48,7 @@ INSERT IGNORE INTO chain_cursor (chain_id, last_block) VALUES (1, 0);
 -- derived address per user
 CREATE TABLE IF NOT EXISTS wallet_addresses (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id INT NOT NULL,
   chain_id INT UNSIGNED NOT NULL,
   address VARCHAR(64) NOT NULL,
   derivation_index INT UNSIGNED NOT NULL,
@@ -69,12 +69,13 @@ ALTER TABLE wallet_addresses
   ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
   ADD UNIQUE KEY uniq_user_chain (user_id, chain_id),
   ADD UNIQUE KEY uniq_addr (chain_id, address),
-  ADD INDEX idx_user (user_id);
+  ADD INDEX idx_user (user_id),
+  MODIFY COLUMN user_id INT NOT NULL;
 
 -- deposits
 CREATE TABLE IF NOT EXISTS wallet_deposits (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id INT NOT NULL,
   chain_id INT UNSIGNED NOT NULL,
   address VARCHAR(64) NOT NULL,
   token_symbol VARCHAR(32) NOT NULL DEFAULT 'BNB',
@@ -100,12 +101,13 @@ ALTER TABLE wallet_deposits
   ADD COLUMN IF NOT EXISTS token_symbol VARCHAR(32) NOT NULL DEFAULT 'BNB' AFTER address,
   ADD COLUMN IF NOT EXISTS confirmations INT UNSIGNED NOT NULL DEFAULT 0 AFTER amount_wei,
   ADD INDEX IF NOT EXISTS idx_user_chain (user_id, chain_id),
-  ADD INDEX IF NOT EXISTS idx_addr (address);
+  ADD INDEX IF NOT EXISTS idx_addr (address),
+  MODIFY COLUMN user_id INT NOT NULL;
 
 
 -- user balances per asset
 CREATE TABLE IF NOT EXISTS user_balances (
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id INT NOT NULL,
   asset VARCHAR(32) NOT NULL,
   balance_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -119,7 +121,8 @@ ALTER TABLE user_balances DROP COLUMN IF EXISTS usd_balance;
 ALTER TABLE user_balances
   DROP COLUMN IF EXISTS chain,
   DROP COLUMN IF EXISTS status,
-  DROP COLUMN IF EXISTS usd_balance;
+  DROP COLUMN IF EXISTS usd_balance,
+  MODIFY COLUMN user_id INT NOT NULL;
 
 -- centrally managed asset prices for ELTX swaps
 CREATE TABLE IF NOT EXISTS asset_prices (
@@ -143,7 +146,7 @@ INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALU
 -- stored swap quotes
 CREATE TABLE IF NOT EXISTS trade_quotes (
   id CHAR(36) NOT NULL,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id INT NOT NULL,
   asset VARCHAR(32) NOT NULL,
   asset_decimals INT UNSIGNED NOT NULL,
   target_decimals INT UNSIGNED NOT NULL,
@@ -152,6 +155,9 @@ CREATE TABLE IF NOT EXISTS trade_quotes (
   price_eltx DECIMAL(36,18) NOT NULL,
   price_wei DECIMAL(65,0) NOT NULL,
   spread_bps INT UNSIGNED NOT NULL DEFAULT 0,
+  fee_bps INT UNSIGNED NOT NULL DEFAULT 0,
+  fee_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX',
+  fee_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   status ENUM('pending','completed','expired','cancelled','failed') NOT NULL DEFAULT 'pending',
   expires_at DATETIME NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -169,24 +175,31 @@ ALTER TABLE trade_quotes
   ADD COLUMN IF NOT EXISTS price_eltx DECIMAL(36,18) NOT NULL AFTER eltx_amount_wei,
   ADD COLUMN IF NOT EXISTS price_wei DECIMAL(65,0) NOT NULL AFTER price_eltx,
   ADD COLUMN IF NOT EXISTS spread_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER price_wei,
-  ADD COLUMN IF NOT EXISTS status ENUM('pending','completed','expired','cancelled','failed') NOT NULL DEFAULT 'pending' AFTER spread_bps,
+  ADD COLUMN IF NOT EXISTS fee_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER spread_bps,
+  ADD COLUMN IF NOT EXISTS fee_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER fee_bps,
+  ADD COLUMN IF NOT EXISTS fee_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER fee_asset,
+  ADD COLUMN IF NOT EXISTS status ENUM('pending','completed','expired','cancelled','failed') NOT NULL DEFAULT 'pending' AFTER fee_amount_wei,
   ADD COLUMN IF NOT EXISTS expires_at DATETIME NOT NULL AFTER status,
   ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER expires_at,
   ADD COLUMN IF NOT EXISTS executed_at DATETIME NULL AFTER created_at,
   ADD INDEX IF NOT EXISTS idx_trade_quotes_user (user_id),
-  ADD INDEX IF NOT EXISTS idx_trade_quotes_status (status);
+  ADD INDEX IF NOT EXISTS idx_trade_quotes_status (status),
+  MODIFY COLUMN user_id INT NOT NULL;
 
 -- executed swaps
 CREATE TABLE IF NOT EXISTS trade_swaps (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   quote_id CHAR(36) NOT NULL,
-  user_id BIGINT UNSIGNED NOT NULL,
+  user_id INT NOT NULL,
   asset VARCHAR(32) NOT NULL,
   asset_decimals INT UNSIGNED NOT NULL,
   target_decimals INT UNSIGNED NOT NULL,
   asset_amount_wei DECIMAL(65,0) NOT NULL,
   eltx_amount_wei DECIMAL(65,0) NOT NULL,
   price_wei DECIMAL(65,0) NOT NULL,
+  gross_eltx_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  fee_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX',
+  fee_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_trade_swaps_user (user_id),
   INDEX idx_trade_swaps_quote (quote_id),
@@ -195,16 +208,160 @@ CREATE TABLE IF NOT EXISTS trade_swaps (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE trade_swaps
   ADD COLUMN IF NOT EXISTS quote_id CHAR(36) NOT NULL AFTER id,
-  ADD COLUMN IF NOT EXISTS user_id BIGINT UNSIGNED NOT NULL AFTER quote_id,
+  ADD COLUMN IF NOT EXISTS user_id INT NOT NULL AFTER quote_id,
   ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL AFTER user_id,
   ADD COLUMN IF NOT EXISTS asset_decimals INT UNSIGNED NOT NULL AFTER asset,
   ADD COLUMN IF NOT EXISTS target_decimals INT UNSIGNED NOT NULL AFTER asset_decimals,
   ADD COLUMN IF NOT EXISTS asset_amount_wei DECIMAL(65,0) NOT NULL AFTER target_decimals,
   ADD COLUMN IF NOT EXISTS eltx_amount_wei DECIMAL(65,0) NOT NULL AFTER asset_amount_wei,
   ADD COLUMN IF NOT EXISTS price_wei DECIMAL(65,0) NOT NULL AFTER eltx_amount_wei,
-  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER price_wei,
+  ADD COLUMN IF NOT EXISTS gross_eltx_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER price_wei,
+  ADD COLUMN IF NOT EXISTS fee_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER gross_eltx_amount_wei,
+  ADD COLUMN IF NOT EXISTS fee_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER fee_asset,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER fee_amount_wei,
   ADD INDEX IF NOT EXISTS idx_trade_swaps_user (user_id),
-  ADD INDEX IF NOT EXISTS idx_trade_swaps_quote (quote_id);
+  ADD INDEX IF NOT EXISTS idx_trade_swaps_quote (quote_id),
+  MODIFY COLUMN user_id INT NOT NULL;
+
+-- centralized liquidity pools for swaps
+CREATE TABLE IF NOT EXISTS swap_liquidity_pools (
+  asset VARCHAR(32) NOT NULL,
+  asset_decimals INT UNSIGNED NOT NULL,
+  asset_reserve_wei DECIMAL(65,0) NOT NULL,
+  eltx_reserve_wei DECIMAL(65,0) NOT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (asset)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE swap_liquidity_pools
+  ADD COLUMN IF NOT EXISTS asset_decimals INT UNSIGNED NOT NULL AFTER asset,
+  ADD COLUMN IF NOT EXISTS asset_reserve_wei DECIMAL(65,0) NOT NULL AFTER asset_decimals,
+  ADD COLUMN IF NOT EXISTS eltx_reserve_wei DECIMAL(65,0) NOT NULL AFTER asset_reserve_wei,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER eltx_reserve_wei;
+INSERT IGNORE INTO swap_liquidity_pools (asset, asset_decimals, asset_reserve_wei, eltx_reserve_wei)
+VALUES
+  ('USDT', 18, 1000000000000000000000000, 1000000000000000000000000),
+  ('USDC', 18, 1000000000000000000000000, 1000000000000000000000000);
+
+-- spot trading markets
+CREATE TABLE IF NOT EXISTS spot_markets (
+  id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  symbol VARCHAR(32) NOT NULL,
+  base_asset VARCHAR(32) NOT NULL,
+  base_decimals INT UNSIGNED NOT NULL,
+  quote_asset VARCHAR(32) NOT NULL,
+  quote_decimals INT UNSIGNED NOT NULL,
+  min_base_amount DECIMAL(36,18) NOT NULL DEFAULT 0,
+  min_quote_amount DECIMAL(36,18) NOT NULL DEFAULT 0,
+  price_precision INT UNSIGNED NOT NULL DEFAULT 18,
+  amount_precision INT UNSIGNED NOT NULL DEFAULT 18,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_symbol (symbol)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE spot_markets
+  ADD COLUMN IF NOT EXISTS base_asset VARCHAR(32) NOT NULL AFTER symbol,
+  ADD COLUMN IF NOT EXISTS base_decimals INT UNSIGNED NOT NULL DEFAULT 18 AFTER base_asset,
+  ADD COLUMN IF NOT EXISTS quote_asset VARCHAR(32) NOT NULL AFTER base_decimals,
+  ADD COLUMN IF NOT EXISTS quote_decimals INT UNSIGNED NOT NULL DEFAULT 18 AFTER quote_asset,
+  ADD COLUMN IF NOT EXISTS min_base_amount DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER quote_decimals,
+  ADD COLUMN IF NOT EXISTS min_quote_amount DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER min_base_amount,
+  ADD COLUMN IF NOT EXISTS price_precision INT UNSIGNED NOT NULL DEFAULT 18 AFTER min_quote_amount,
+  ADD COLUMN IF NOT EXISTS amount_precision INT UNSIGNED NOT NULL DEFAULT 18 AFTER price_precision,
+  ADD COLUMN IF NOT EXISTS active TINYINT(1) NOT NULL DEFAULT 1 AFTER amount_precision,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER active;
+INSERT IGNORE INTO spot_markets (symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount)
+VALUES
+  ('ELTX/USDT', 'ELTX', 18, 'USDT', 18, 0.0001, 0.1),
+  ('ELTX/USDC', 'ELTX', 18, 'USDC', 18, 0.0001, 0.1);
+
+-- spot order book
+CREATE TABLE IF NOT EXISTS spot_orders (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  market_id INT UNSIGNED NOT NULL,
+  user_id INT NOT NULL,
+  side ENUM('buy','sell') NOT NULL,
+  type ENUM('limit','market') NOT NULL,
+  price_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  base_amount_wei DECIMAL(65,0) NOT NULL,
+  quote_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  remaining_base_wei DECIMAL(65,0) NOT NULL,
+  remaining_quote_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  fee_bps INT UNSIGNED NOT NULL DEFAULT 0,
+  status ENUM('open','filled','cancelled') NOT NULL DEFAULT 'open',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_spot_orders_market (market_id),
+  INDEX idx_spot_orders_user (user_id),
+  INDEX idx_spot_orders_status (status),
+  INDEX idx_spot_orders_side (side),
+  CONSTRAINT fk_spot_orders_market FOREIGN KEY (market_id) REFERENCES spot_markets(id) ON DELETE CASCADE,
+  CONSTRAINT fk_spot_orders_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE spot_orders
+  ADD COLUMN IF NOT EXISTS market_id INT UNSIGNED NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS user_id INT NOT NULL AFTER market_id,
+  ADD COLUMN IF NOT EXISTS side ENUM('buy','sell') NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS type ENUM('limit','market') NOT NULL AFTER side,
+  ADD COLUMN IF NOT EXISTS price_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER type,
+  ADD COLUMN IF NOT EXISTS base_amount_wei DECIMAL(65,0) NOT NULL AFTER price_wei,
+  ADD COLUMN IF NOT EXISTS quote_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER base_amount_wei,
+  ADD COLUMN IF NOT EXISTS remaining_base_wei DECIMAL(65,0) NOT NULL AFTER quote_amount_wei,
+  ADD COLUMN IF NOT EXISTS remaining_quote_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER remaining_base_wei,
+  ADD COLUMN IF NOT EXISTS fee_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER remaining_quote_wei,
+  ADD COLUMN IF NOT EXISTS status ENUM('open','filled','cancelled') NOT NULL DEFAULT 'open' AFTER fee_bps,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER status,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
+
+CREATE TABLE IF NOT EXISTS spot_trades (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  market_id INT UNSIGNED NOT NULL,
+  buy_order_id BIGINT UNSIGNED NOT NULL,
+  sell_order_id BIGINT UNSIGNED NOT NULL,
+  price_wei DECIMAL(65,0) NOT NULL,
+  base_amount_wei DECIMAL(65,0) NOT NULL,
+  quote_amount_wei DECIMAL(65,0) NOT NULL,
+  buy_fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  sell_fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  fee_asset VARCHAR(32) NOT NULL,
+  taker_side ENUM('buy','sell') NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_spot_trades_market (market_id),
+  INDEX idx_spot_trades_buy (buy_order_id),
+  INDEX idx_spot_trades_sell (sell_order_id),
+  CONSTRAINT fk_spot_trades_market FOREIGN KEY (market_id) REFERENCES spot_markets(id) ON DELETE CASCADE,
+  CONSTRAINT fk_spot_trades_buy FOREIGN KEY (buy_order_id) REFERENCES spot_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_spot_trades_sell FOREIGN KEY (sell_order_id) REFERENCES spot_orders(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE spot_trades
+  ADD COLUMN IF NOT EXISTS market_id INT UNSIGNED NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS buy_order_id BIGINT UNSIGNED NOT NULL AFTER market_id,
+  ADD COLUMN IF NOT EXISTS sell_order_id BIGINT UNSIGNED NOT NULL AFTER buy_order_id,
+  ADD COLUMN IF NOT EXISTS price_wei DECIMAL(65,0) NOT NULL AFTER sell_order_id,
+  ADD COLUMN IF NOT EXISTS base_amount_wei DECIMAL(65,0) NOT NULL AFTER price_wei,
+  ADD COLUMN IF NOT EXISTS quote_amount_wei DECIMAL(65,0) NOT NULL AFTER base_amount_wei,
+  ADD COLUMN IF NOT EXISTS buy_fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER quote_amount_wei,
+  ADD COLUMN IF NOT EXISTS sell_fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER buy_fee_wei,
+  ADD COLUMN IF NOT EXISTS fee_asset VARCHAR(32) NOT NULL AFTER sell_fee_wei,
+  ADD COLUMN IF NOT EXISTS taker_side ENUM('buy','sell') NOT NULL AFTER fee_asset,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER taker_side;
+
+-- platform fee ledger
+CREATE TABLE IF NOT EXISTS platform_fees (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  fee_type ENUM('swap','spot') NOT NULL,
+  reference VARCHAR(64) NOT NULL,
+  asset VARCHAR(32) NOT NULL,
+  amount_wei DECIMAL(65,0) NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_platform_fees_type (fee_type),
+  INDEX idx_platform_fees_asset (asset)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE platform_fees
+  ADD COLUMN IF NOT EXISTS fee_type ENUM('swap','spot') NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS reference VARCHAR(64) NOT NULL AFTER fee_type,
+  ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL AFTER reference,
+  ADD COLUMN IF NOT EXISTS amount_wei DECIMAL(65,0) NOT NULL AFTER asset,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER amount_wei;
 
 -- platform settings
 CREATE TABLE IF NOT EXISTS platform_settings (
@@ -213,6 +370,8 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('transfer_fee_bps', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('swap_fee_bps', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_trade_fee_bps', '0');
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

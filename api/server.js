@@ -234,6 +234,256 @@ function getSymbolDecimals(symbol) {
 }
 
 const QUOTE_TTL_MS = Number(process.env.TRADE_QUOTE_TTL_MS || 60_000);
+const PRICE_SCALE = 10n ** 18n;
+
+function bigIntFromValue(val) {
+  const str = val?.toString() || '0';
+  const normalized = str.includes('.') ? str.split('.')[0] : str;
+  try {
+    return BigInt(normalized);
+  } catch {
+    return 0n;
+  }
+}
+
+async function getPlatformSettingValue(name, defaultValue = '0', conn = pool) {
+  const executor = conn.query ? conn : pool;
+  const [rows] = await executor.query('SELECT value FROM platform_settings WHERE name=?', [name]);
+  if (!rows.length || rows[0].value === undefined || rows[0].value === null) return defaultValue;
+  return rows[0].value.toString();
+}
+
+async function getSwapPoolRow(conn, asset, { forUpdate = false } = {}) {
+  const executor = conn.query ? conn : pool;
+  const sql = `SELECT asset, asset_decimals, asset_reserve_wei, eltx_reserve_wei FROM swap_liquidity_pools WHERE UPPER(asset)=?${
+    forUpdate ? ' FOR UPDATE' : ''
+  }`;
+  const [rows] = await executor.query(sql, [asset]);
+  if (!rows.length) return null;
+  return rows[0];
+}
+
+async function updateSwapPool(conn, asset, assetReserveWei, eltxReserveWei) {
+  await conn.query(
+    'UPDATE swap_liquidity_pools SET asset_reserve_wei=?, eltx_reserve_wei=? WHERE UPPER(asset)=?',
+    [assetReserveWei.toString(), eltxReserveWei.toString(), asset]
+  );
+}
+
+function mulDiv(a, b, denom) {
+  if (denom === 0n) throw new Error('Division by zero');
+  return (a * b) / denom;
+}
+
+function normalizeMarketSymbol(symbol) {
+  return symbol.replace(/\s+/g, '').toUpperCase().replace('-', '/');
+}
+
+async function getSpotMarket(conn, symbol, { forUpdate = false } = {}) {
+  const normalized = normalizeMarketSymbol(symbol);
+  const executor = conn.query ? conn : pool;
+  const sql = `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount, price_precision, amount_precision, active FROM spot_markets WHERE symbol=?${
+    forUpdate ? ' FOR UPDATE' : ''
+  }`;
+  const [rows] = await executor.query(sql, [normalized]);
+  return rows.length ? rows[0] : null;
+}
+
+function computeQuoteAmount(baseWei, priceWei) {
+  return mulDiv(baseWei, priceWei, PRICE_SCALE);
+}
+
+function clampBps(value) {
+  if (value < 0n) return 0n;
+  if (value > 10000n) return 10000n;
+  return value;
+}
+
+async function matchSpotOrder(conn, market, taker) {
+  const result = {
+    filledBase: 0n,
+    spentQuote: 0n,
+    receivedQuote: 0n,
+    receivedBase: 0n,
+    takerFee: 0n,
+    trades: [],
+    averagePriceWei: 0n,
+  };
+  const oppositeSide = taker.side === 'buy' ? 'sell' : 'buy';
+  const priceClause = taker.type === 'limit'
+    ? taker.side === 'buy'
+      ? 'AND price_wei <= ?'
+      : 'AND price_wei >= ?'
+    : '';
+  const orderBy = taker.side === 'buy' ? 'price_wei ASC, id ASC' : 'price_wei DESC, id ASC';
+  const baseParams = [market.id, oppositeSide];
+  if (taker.type === 'limit') baseParams.push(taker.priceWei.toString());
+
+  while (taker.remainingBase > 0n) {
+    const params = [...baseParams];
+    const [matchRows] = await conn.query(
+      `SELECT id, user_id, price_wei, remaining_base_wei, remaining_quote_wei, fee_bps
+       FROM spot_orders
+       WHERE market_id=? AND side=? AND status='open' ${priceClause}
+       ORDER BY ${orderBy}
+       LIMIT 1 FOR UPDATE`,
+      params
+    );
+    if (!matchRows.length) break;
+    const maker = matchRows[0];
+    const makerRemainingBase = bigIntFromValue(maker.remaining_base_wei);
+    if (makerRemainingBase <= 0n) {
+      await conn.query('UPDATE spot_orders SET remaining_base_wei=0, status="filled" WHERE id=?', [maker.id]);
+      continue;
+    }
+    const makerPriceWei = BigInt(maker.price_wei);
+    if (makerPriceWei <= 0n) {
+      await conn.query('UPDATE spot_orders SET status="cancelled" WHERE id=?', [maker.id]);
+      continue;
+    }
+
+    let tradeBase = taker.remainingBase < makerRemainingBase ? taker.remainingBase : makerRemainingBase;
+    if (tradeBase <= 0n) break;
+
+    const makerFeeBps = clampBps(bigIntFromValue(maker.fee_bps || 0));
+    const takerFeeBps = clampBps(BigInt(taker.feeBps || 0));
+
+    const feeMultiplier = 10000n + takerFeeBps;
+    const costPerBase = mulDiv(makerPriceWei, feeMultiplier, 10000n);
+
+    if (taker.side === 'buy') {
+      const availableQuote = taker.type === 'market' ? taker.availableQuote : taker.remainingQuote;
+      let takerCost = mulDiv(tradeBase, costPerBase, PRICE_SCALE);
+      if (takerCost > availableQuote) {
+        const maxBase = mulDiv(availableQuote, PRICE_SCALE, costPerBase);
+        if (maxBase <= 0n) break;
+        tradeBase = maxBase;
+        takerCost = mulDiv(tradeBase, costPerBase, PRICE_SCALE);
+      }
+      if (tradeBase <= 0n) break;
+    }
+
+    const quoteWithoutFee = computeQuoteAmount(tradeBase, makerPriceWei);
+    if (quoteWithoutFee <= 0n) {
+      await conn.query('UPDATE spot_orders SET status="cancelled" WHERE id=?', [maker.id]);
+      continue;
+    }
+
+    const takerFee = (quoteWithoutFee * takerFeeBps) / 10000n;
+    const makerFee = (quoteWithoutFee * makerFeeBps) / 10000n;
+    const takerCost = taker.side === 'buy' ? quoteWithoutFee + takerFee : 0n;
+    const takerReceiveQuote = taker.side === 'sell' ? quoteWithoutFee - takerFee : 0n;
+
+    if (taker.side === 'buy') {
+      if (taker.type === 'market') taker.availableQuote -= takerCost;
+      else taker.remainingQuote -= takerCost;
+      result.spentQuote += takerCost;
+      result.receivedBase += tradeBase;
+    } else {
+      result.receivedQuote += takerReceiveQuote;
+    }
+    result.filledBase += tradeBase;
+    result.takerFee += takerFee;
+    taker.remainingBase -= tradeBase;
+
+    const makerNetQuote = quoteWithoutFee - makerFee;
+    let makerRemainingQuote = bigIntFromValue(maker.remaining_quote_wei);
+    let refundQuote = 0n;
+    if (oppositeSide === 'buy') {
+      const makerCost = quoteWithoutFee + makerFee;
+      makerRemainingQuote = makerRemainingQuote > makerCost ? makerRemainingQuote - makerCost : 0n;
+    }
+    const newMakerRemainingBase = makerRemainingBase - tradeBase;
+    let makerStatus = newMakerRemainingBase <= 0n ? 'filled' : 'open';
+    if (makerStatus === 'filled' && makerRemainingQuote > 0n) {
+      refundQuote = makerRemainingQuote;
+      makerRemainingQuote = 0n;
+    }
+    await conn.query('UPDATE spot_orders SET remaining_base_wei=?, remaining_quote_wei=?, status=? WHERE id=?', [
+      newMakerRemainingBase.toString(),
+      makerRemainingQuote.toString(),
+      makerStatus,
+      maker.id,
+    ]);
+
+    if (oppositeSide === 'sell') {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [maker.user_id, market.quote_asset, makerNetQuote.toString()]
+      );
+    } else {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [maker.user_id, market.base_asset, tradeBase.toString()]
+      );
+    }
+    if (refundQuote > 0n) {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [maker.user_id, market.quote_asset, refundQuote.toString()]
+      );
+    }
+
+    const buyOrderId = taker.side === 'buy' ? taker.id : maker.id;
+    const sellOrderId = taker.side === 'sell' ? taker.id : maker.id;
+    const buyFeeWei = taker.side === 'buy' ? takerFee : makerFee;
+    const sellFeeWei = taker.side === 'sell' ? takerFee : makerFee;
+    const [tradeInsert] = await conn.query(
+      'INSERT INTO spot_trades (market_id, buy_order_id, sell_order_id, price_wei, base_amount_wei, quote_amount_wei, buy_fee_wei, sell_fee_wei, fee_asset, taker_side) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [
+        market.id,
+        buyOrderId,
+        sellOrderId,
+        makerPriceWei.toString(),
+        tradeBase.toString(),
+        quoteWithoutFee.toString(),
+        buyFeeWei.toString(),
+        sellFeeWei.toString(),
+        market.quote_asset,
+        taker.side,
+      ]
+    );
+    const tradeId = tradeInsert.insertId;
+    if (takerFee > 0n) {
+      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+        'spot',
+        `trade:${tradeId}:taker`,
+        market.quote_asset,
+        takerFee.toString(),
+      ]);
+    }
+    if (makerFee > 0n) {
+      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+        'spot',
+        `trade:${tradeId}:maker:${maker.id}`,
+        market.quote_asset,
+        makerFee.toString(),
+      ]);
+    }
+
+    result.trades.push({
+      trade_id: tradeId,
+      maker_order_id: maker.id,
+      price_wei: makerPriceWei,
+      base_amount_wei: tradeBase,
+      quote_amount_wei: quoteWithoutFee,
+      taker_fee_wei: takerFee,
+      maker_fee_wei: makerFee,
+    });
+
+    if (taker.side === 'buy') {
+      if (taker.type === 'market' && taker.availableQuote <= 0n) break;
+      if (taker.type === 'limit' && taker.remainingQuote <= 0n) break;
+    }
+  }
+
+  if (result.filledBase > 0n) {
+    const grossQuote = taker.side === 'buy' ? result.spentQuote - result.takerFee : result.receivedQuote + result.takerFee;
+    if (grossQuote > 0n) result.averagePriceWei = mulDiv(grossQuote, PRICE_SCALE, result.filledBase);
+  }
+
+  return result;
+}
 
 const TransferSchema = z.object({
   to_user_id: z.coerce.number().int().positive(),
@@ -248,6 +498,22 @@ const TradeQuoteSchema = z.object({
 
 const TradeExecuteSchema = z.object({
   quote_id: z.string().uuid(),
+});
+
+const SpotOrderSchema = z.object({
+  market: z.string().min(3).max(32),
+  side: z.enum(['buy', 'sell']),
+  type: z.enum(['limit', 'market']),
+  amount: z.string().min(1),
+  price: z.string().optional(),
+});
+
+const SpotOrderbookSchema = z.object({
+  market: z.string().min(3).max(32),
+});
+
+const SpotOrdersQuerySchema = z.object({
+  market: z.string().min(3).max(32).optional(),
 });
 
 async function requireUser(req) {
@@ -529,9 +795,11 @@ app.get('/trade/markets', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
-      `SELECT UPPER(ap.asset) AS asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps, ap.updated_at, ub.balance_wei
+      `SELECT UPPER(ap.asset) AS asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps, ap.updated_at, ub.balance_wei,
+              lp.asset_reserve_wei, lp.eltx_reserve_wei
        FROM asset_prices ap
        LEFT JOIN user_balances ub ON ub.user_id = ? AND UPPER(ub.asset) = UPPER(ap.asset)
+       LEFT JOIN swap_liquidity_pools lp ON UPPER(lp.asset) = UPPER(ap.asset)
        WHERE UPPER(ap.asset) <> ?
        ORDER BY asset`,
       [userId, ELTX_SYMBOL]
@@ -541,7 +809,13 @@ app.get('/trade/markets', walletLimiter, async (req, res, next) => {
       const decimals = getSymbolDecimals(symbol);
       const balanceRaw = row.balance_wei ? row.balance_wei.toString() : '0';
       const balanceWei = balanceRaw.includes('.') ? balanceRaw.split('.')[0] : balanceRaw;
-      const priceStr = row.price_eltx?.toString() || '0';
+      let priceStr = row.price_eltx?.toString() || '0';
+      const assetReserve = bigIntFromValue(row.asset_reserve_wei);
+      const eltxReserve = bigIntFromValue(row.eltx_reserve_wei);
+      if (assetReserve > 0n && eltxReserve > 0n) {
+        const priceWei = mulDiv(eltxReserve, PRICE_SCALE, assetReserve);
+        priceStr = trimDecimal(formatUnitsStr(priceWei.toString(), 18));
+      }
       const minStr = row.min_amount?.toString() || '0';
       const maxStr = row.max_amount?.toString() || null;
       const spread = row.spread_bps !== undefined && row.spread_bps !== null ? Number(row.spread_bps) : 0;
@@ -658,44 +932,47 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
       [userId, asset]
     );
     let balanceWei = 0n;
-    if (balanceRow) {
-      const rawBal = balanceRow.balance_wei?.toString() || '0';
-      const normalizedBal = rawBal.includes('.') ? rawBal.split('.')[0] : rawBal;
-      try {
-        balanceWei = BigInt(normalizedBal);
-      } catch {
-        balanceWei = 0n;
-      }
-    }
+    if (balanceRow) balanceWei = bigIntFromValue(balanceRow.balance_wei);
     if (balanceWei < amountWei)
       return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
 
-    const priceStr = priceRow.price_eltx?.toString() || '0';
-    let basePriceWei;
-    try {
-      basePriceWei = ethers.parseUnits(priceStr, 18);
-    } catch {
-      return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing configuration invalid' });
-    }
-    if (basePriceWei <= 0n)
-      return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing configuration invalid' });
+    const poolRow = await getSwapPoolRow(pool, asset);
+    if (!poolRow)
+      return next({ status: 400, code: 'POOL_UNAVAILABLE', message: 'No liquidity available for this asset' });
+    const assetReserve = bigIntFromValue(poolRow.asset_reserve_wei);
+    const eltxReserve = bigIntFromValue(poolRow.eltx_reserve_wei);
+    if (assetReserve <= 0n || eltxReserve <= 0n)
+      return next({ status: 400, code: 'POOL_EMPTY', message: 'Liquidity pool is empty' });
 
+    let grossEltxWei = mulDiv(amountWei, eltxReserve, assetReserve);
     const spreadBps = priceRow.spread_bps !== undefined && priceRow.spread_bps !== null ? Number(priceRow.spread_bps) : 0;
     if (spreadBps >= 10000)
       return next({ status: 500, code: 'INVALID_SPREAD', message: 'Pricing configuration invalid' });
-    const effectivePriceWei =
-      spreadBps > 0 ? (basePriceWei * (10000n - BigInt(spreadBps))) / 10000n : basePriceWei;
-    if (effectivePriceWei <= 0n)
-      return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing configuration invalid' });
-
-    const eltxWei = (amountWei * effectivePriceWei) / 10n ** BigInt(assetDecimals);
-    if (eltxWei <= 0n)
+    if (spreadBps > 0) grossEltxWei = (grossEltxWei * (10000n - BigInt(spreadBps))) / 10000n;
+    if (grossEltxWei <= 0n)
       return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small to convert' });
+    if (grossEltxWei >= eltxReserve)
+      return next({ status: 400, code: 'INSUFFICIENT_LIQUIDITY', message: 'Liquidity insufficient for this swap' });
 
+    let swapFeeBps = 0n;
+    try {
+      const feeVal = await getPlatformSettingValue('swap_fee_bps', '0');
+      swapFeeBps = BigInt(Number.parseInt(feeVal, 10) || 0);
+      if (swapFeeBps < 0n) swapFeeBps = 0n;
+      if (swapFeeBps > 10000n) swapFeeBps = 10000n;
+    } catch {}
+    let feeWei = (grossEltxWei * swapFeeBps) / 10000n;
+    if (feeWei > grossEltxWei) feeWei = grossEltxWei;
+    const netEltxWei = grossEltxWei - feeWei;
+    if (netEltxWei <= 0n)
+      return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small after fees' });
+
+    const priceWei = mulDiv(grossEltxWei, PRICE_SCALE, amountWei);
+    const priceStr = trimDecimal(formatUnitsStr(priceWei.toString(), 18));
     const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
     const quoteId = crypto.randomUUID();
     await pool.query(
-      'INSERT INTO trade_quotes (id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_eltx, price_wei, spread_bps, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO trade_quotes (id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_eltx, price_wei, spread_bps, fee_bps, fee_asset, fee_amount_wei, expires_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [
         quoteId,
         userId,
@@ -703,10 +980,13 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
         assetDecimals,
         targetDecimals,
         amountWei.toString(),
-        eltxWei.toString(),
+        netEltxWei.toString(),
         priceStr,
-        effectivePriceWei.toString(),
+        priceWei.toString(),
         spreadBps,
+        Number(swapFeeBps),
+        ELTX_SYMBOL,
+        feeWei.toString(),
         expiresAt,
       ]
     );
@@ -720,11 +1000,15 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
         target_decimals: targetDecimals,
         amount: trimDecimal(formatUnitsStr(amountWei.toString(), assetDecimals)),
         amount_wei: amountWei.toString(),
-        eltx_amount: trimDecimal(formatUnitsStr(eltxWei.toString(), targetDecimals)),
-        eltx_amount_wei: eltxWei.toString(),
-        price_eltx: trimDecimal(priceStr),
-        rate: trimDecimal(formatUnitsStr(effectivePriceWei.toString(), 18)),
+        eltx_amount: trimDecimal(formatUnitsStr(netEltxWei.toString(), targetDecimals)),
+        eltx_amount_wei: netEltxWei.toString(),
+        price_eltx: priceStr,
+        rate: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
         spread_bps: spreadBps,
+        fee_bps: Number(swapFeeBps),
+        fee_asset: ELTX_SYMBOL,
+        fee_amount: trimDecimal(formatUnitsStr(feeWei.toString(), targetDecimals)),
+        fee_amount_wei: feeWei.toString(),
         expires_at: expiresAt.toISOString(),
       },
     });
@@ -742,7 +1026,7 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
     conn = await pool.getConnection();
     await conn.beginTransaction();
     const [rows] = await conn.query(
-      'SELECT id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei, spread_bps, status, expires_at FROM trade_quotes WHERE id=? FOR UPDATE',
+      'SELECT id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei, spread_bps, fee_bps, fee_asset, fee_amount_wei, status, expires_at FROM trade_quotes WHERE id=? FOR UPDATE',
       [quote_id]
     );
     if (!rows.length) {
@@ -771,6 +1055,8 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
     const targetDecimals = quoteRow.target_decimals || getSymbolDecimals(ELTX_SYMBOL);
     const amountWei = BigInt(quoteRow.asset_amount_wei);
     const eltxWei = BigInt(quoteRow.eltx_amount_wei);
+    const feeWei = bigIntFromValue(quoteRow.fee_amount_wei);
+    const grossEltxWei = eltxWei + feeWei;
     const priceWei = BigInt(quoteRow.price_wei);
 
     const [balRows] = await conn.query(
@@ -789,6 +1075,29 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
       return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
     }
 
+    const poolRow = await getSwapPoolRow(conn, asset, { forUpdate: true });
+    if (!poolRow) {
+      await conn.rollback();
+      return next({ status: 400, code: 'POOL_UNAVAILABLE', message: 'No liquidity available for this asset' });
+    }
+    const assetReserve = bigIntFromValue(poolRow.asset_reserve_wei);
+    const eltxReserve = bigIntFromValue(poolRow.eltx_reserve_wei);
+    if (eltxReserve < grossEltxWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'POOL_EMPTY', message: 'Liquidity insufficient to settle quote' });
+    }
+
+    const newAssetReserve = assetReserve + amountWei;
+    const newEltxReserve = eltxReserve - grossEltxWei;
+
+    await updateSwapPool(conn, asset, newAssetReserve, newEltxReserve);
+
+    if (newAssetReserve > 0n && newEltxReserve > 0n) {
+      const newPriceWei = mulDiv(newEltxReserve, PRICE_SCALE, newAssetReserve);
+      const newPriceStr = trimDecimal(formatUnitsStr(newPriceWei.toString(), 18));
+      await conn.query('UPDATE asset_prices SET price_eltx=? WHERE UPPER(asset)=?', [newPriceStr, asset]);
+    }
+
     await conn.query(
       'UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?',
       [amountWei.toString(), userId, asset]
@@ -798,7 +1107,7 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
       [userId, ELTX_SYMBOL, eltxWei.toString()]
     );
     await conn.query(
-      'INSERT INTO trade_swaps (quote_id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei) VALUES (?,?,?,?,?,?,?,?)',
+      'INSERT INTO trade_swaps (quote_id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei, gross_eltx_amount_wei, fee_asset, fee_amount_wei) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [
         quote_id,
         userId,
@@ -808,8 +1117,19 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
         amountWei.toString(),
         eltxWei.toString(),
         priceWei.toString(),
+        grossEltxWei.toString(),
+        ELTX_SYMBOL,
+        feeWei.toString(),
       ]
     );
+    if (feeWei > 0n) {
+      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+        'swap',
+        quote_id,
+        ELTX_SYMBOL,
+        feeWei.toString(),
+      ]);
+    }
     await conn.query('UPDATE trade_quotes SET status="completed", executed_at=NOW() WHERE id=?', [quote_id]);
     await conn.commit();
 
@@ -824,8 +1144,544 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
         eltx_amount_wei: eltxWei.toString(),
         rate: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
         spread_bps: quoteRow.spread_bps !== undefined && quoteRow.spread_bps !== null ? Number(quoteRow.spread_bps) : 0,
+        fee_bps: quoteRow.fee_bps !== undefined && quoteRow.fee_bps !== null ? Number(quoteRow.fee_bps) : 0,
+        fee_asset: quoteRow.fee_asset || ELTX_SYMBOL,
+        fee_amount: trimDecimal(formatUnitsStr(feeWei.toString(), targetDecimals)),
+        fee_amount_wei: feeWei.toString(),
       },
     });
+  } catch (err) {
+    if (conn) await conn.rollback();
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/spot/markets', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT sm.id, sm.symbol, sm.base_asset, sm.base_decimals, sm.quote_asset, sm.quote_decimals, sm.min_base_amount, sm.min_quote_amount,
+              sm.price_precision, sm.amount_precision, sm.active,
+              (SELECT price_wei FROM spot_trades WHERE market_id = sm.id ORDER BY id DESC LIMIT 1) AS last_price_wei
+       FROM spot_markets sm
+       WHERE sm.active = 1
+       ORDER BY sm.symbol`
+    );
+    const markets = rows.map((row) => {
+      const lastPriceWei = bigIntFromValue(row.last_price_wei);
+      return {
+        id: row.id,
+        symbol: row.symbol,
+        base_asset: row.base_asset,
+        base_decimals: row.base_decimals,
+        quote_asset: row.quote_asset,
+        quote_decimals: row.quote_decimals,
+        min_base_amount: trimDecimal(row.min_base_amount),
+        min_quote_amount: trimDecimal(row.min_quote_amount),
+        price_precision: row.price_precision,
+        amount_precision: row.amount_precision,
+        last_price: lastPriceWei > 0n ? trimDecimal(formatUnitsStr(lastPriceWei.toString(), 18)) : null,
+      };
+    });
+    res.json({ ok: true, markets });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const { market } = SpotOrderbookSchema.parse({ market: req.query.market });
+    const marketRow = await getSpotMarket(pool, market);
+    if (!marketRow || !marketRow.active)
+      return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
+
+    const [bidRows] = await pool.query(
+      `SELECT price_wei, SUM(remaining_base_wei) AS base_total
+       FROM spot_orders
+       WHERE market_id=? AND status='open' AND side='buy'
+       GROUP BY price_wei
+       ORDER BY price_wei DESC
+       LIMIT 50`,
+      [marketRow.id]
+    );
+    const [askRows] = await pool.query(
+      `SELECT price_wei, SUM(remaining_base_wei) AS base_total
+       FROM spot_orders
+       WHERE market_id=? AND status='open' AND side='sell'
+       GROUP BY price_wei
+       ORDER BY price_wei ASC
+       LIMIT 50`,
+      [marketRow.id]
+    );
+    const formatLevel = (row) => {
+      const priceWei = BigInt(row.price_wei);
+      const baseWei = bigIntFromValue(row.base_total);
+      const quoteWei = computeQuoteAmount(baseWei, priceWei);
+      return {
+        price: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
+        price_wei: priceWei.toString(),
+        base_amount: trimDecimal(formatUnitsStr(baseWei.toString(), marketRow.base_decimals)),
+        base_amount_wei: baseWei.toString(),
+        quote_amount: trimDecimal(formatUnitsStr(quoteWei.toString(), marketRow.quote_decimals)),
+        quote_amount_wei: quoteWei.toString(),
+      };
+    };
+
+    const [tradeRows] = await pool.query(
+      `SELECT id, price_wei, base_amount_wei, quote_amount_wei, taker_side, created_at
+       FROM spot_trades
+       WHERE market_id=?
+       ORDER BY id DESC
+       LIMIT 50`,
+      [marketRow.id]
+    );
+    const trades = tradeRows.map((row) => ({
+      id: row.id,
+      price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
+      price_wei: row.price_wei?.toString() || '0',
+      base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
+      base_amount_wei: row.base_amount_wei?.toString() || '0',
+      quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
+      quote_amount_wei: row.quote_amount_wei?.toString() || '0',
+      taker_side: row.taker_side,
+      created_at: row.created_at,
+    }));
+
+    res.json({
+      ok: true,
+      market: {
+        symbol: marketRow.symbol,
+        base_asset: marketRow.base_asset,
+        quote_asset: marketRow.quote_asset,
+      },
+      orderbook: {
+        bids: bidRows.map(formatLevel),
+        asks: askRows.map(formatLevel),
+      },
+      trades,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/spot/orders', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const { market } = SpotOrdersQuerySchema.parse({ market: req.query.market });
+    let marketRow = null;
+    const orderParams = [userId];
+    let marketFilter = '';
+    if (market) {
+      marketRow = await getSpotMarket(pool, market);
+      if (!marketRow)
+        return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
+      marketFilter = 'AND so.market_id = ?';
+      orderParams.push(marketRow.id);
+    }
+
+    const [orderRows] = await pool.query(
+      `SELECT so.*, sm.symbol, sm.base_asset, sm.quote_asset, sm.base_decimals, sm.quote_decimals
+       FROM spot_orders so
+       JOIN spot_markets sm ON sm.id = so.market_id
+       WHERE so.user_id = ? ${marketFilter}
+       ORDER BY FIELD(so.status,'open','filled','cancelled'), so.id DESC
+       LIMIT 100`,
+      orderParams
+    );
+    const orders = orderRows.map((row) => {
+      const baseDecimals = row.base_decimals;
+      const quoteDecimals = row.quote_decimals;
+      const priceWei = BigInt(row.price_wei || 0);
+      const baseWei = bigIntFromValue(row.base_amount_wei);
+      const remainingBaseWei = bigIntFromValue(row.remaining_base_wei);
+      const quoteWei = bigIntFromValue(row.quote_amount_wei);
+      const remainingQuoteWei = bigIntFromValue(row.remaining_quote_wei);
+      return {
+        id: row.id,
+        market: row.symbol,
+        side: row.side,
+        type: row.type,
+        status: row.status,
+        price: priceWei > 0n ? trimDecimal(formatUnitsStr(priceWei.toString(), 18)) : null,
+        price_wei: priceWei.toString(),
+        base_amount: trimDecimal(formatUnitsStr(baseWei.toString(), baseDecimals)),
+        base_amount_wei: baseWei.toString(),
+        remaining_base_amount: trimDecimal(formatUnitsStr(remainingBaseWei.toString(), baseDecimals)),
+        remaining_base_wei: remainingBaseWei.toString(),
+        quote_amount: trimDecimal(formatUnitsStr(quoteWei.toString(), quoteDecimals)),
+        quote_amount_wei: quoteWei.toString(),
+        remaining_quote_amount: trimDecimal(formatUnitsStr(remainingQuoteWei.toString(), quoteDecimals)),
+        remaining_quote_wei: remainingQuoteWei.toString(),
+        fee_bps: row.fee_bps,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    });
+
+    const tradeParamsBuy = [userId];
+    if (marketRow) tradeParamsBuy.push(marketRow.id);
+    const [buyTrades] = await pool.query(
+      `SELECT st.id, st.market_id, st.price_wei, st.base_amount_wei, st.quote_amount_wei, st.buy_fee_wei AS fee_wei, st.taker_side, st.created_at, sm.symbol
+       FROM spot_trades st
+       JOIN spot_orders so ON so.id = st.buy_order_id
+       JOIN spot_markets sm ON sm.id = st.market_id
+       WHERE so.user_id = ? ${marketRow ? 'AND st.market_id = ?' : ''}
+       ORDER BY st.id DESC
+       LIMIT 100`,
+      tradeParamsBuy
+    );
+
+    const tradeParamsSell = [userId];
+    if (marketRow) tradeParamsSell.push(marketRow.id);
+    const [sellTrades] = await pool.query(
+      `SELECT st.id, st.market_id, st.price_wei, st.base_amount_wei, st.quote_amount_wei, st.sell_fee_wei AS fee_wei, st.taker_side, st.created_at, sm.symbol
+       FROM spot_trades st
+       JOIN spot_orders so ON so.id = st.sell_order_id
+       JOIN spot_markets sm ON sm.id = st.market_id
+       WHERE so.user_id = ? ${marketRow ? 'AND st.market_id = ?' : ''}
+       ORDER BY st.id DESC
+       LIMIT 100`,
+      tradeParamsSell
+    );
+
+    const combinedTrades = [
+      ...buyTrades.map((row) => ({ ...row, role: 'buy' })),
+      ...sellTrades.map((row) => ({ ...row, role: 'sell' })),
+    ];
+    combinedTrades.sort((a, b) => {
+      const aTime = new Date(a.created_at).getTime();
+      const bTime = new Date(b.created_at).getTime();
+      return bTime - aTime;
+    });
+    const limitedSource = combinedTrades.slice(0, 100);
+    const marketInfoCache = new Map();
+    const limitedTrades = [];
+    for (const row of limitedSource) {
+      let info = marketInfoCache.get(row.symbol);
+      if (!info) {
+        info = await getSpotMarket(pool, row.symbol);
+        marketInfoCache.set(row.symbol, info);
+      }
+      const baseDecimals = info ? info.base_decimals : marketRow?.base_decimals || 18;
+      const quoteDecimals = info ? info.quote_decimals : marketRow?.quote_decimals || 18;
+      limitedTrades.push({
+        id: row.id,
+        market: row.symbol,
+        role: row.role,
+        price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
+        price_wei: row.price_wei?.toString() || '0',
+        base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), baseDecimals)),
+        base_amount_wei: row.base_amount_wei?.toString() || '0',
+        quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), quoteDecimals)),
+        quote_amount_wei: row.quote_amount_wei?.toString() || '0',
+        fee_wei: row.fee_wei?.toString() || '0',
+        taker_side: row.taker_side,
+        created_at: row.created_at,
+      });
+    }
+
+    res.json({ ok: true, orders, trades: limitedTrades });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/spot/orders', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const { market: rawMarket, side, type, amount, price } = SpotOrderSchema.parse(req.body);
+    const marketSymbol = normalizeMarketSymbol(rawMarket);
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const market = await getSpotMarket(conn, marketSymbol, { forUpdate: true });
+    if (!market || !market.active) {
+      await conn.rollback();
+      return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not available' });
+    }
+
+    const baseDecimals = market.base_decimals;
+    const quoteDecimals = market.quote_decimals;
+    let amountWei;
+    try {
+      amountWei = ethers.parseUnits(amount, baseDecimals);
+    } catch {
+      await conn.rollback();
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    }
+    if (amountWei <= 0n) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Amount must be greater than zero' });
+    }
+
+    if (market.min_base_amount && !isZeroDecimal(market.min_base_amount)) {
+      const minBaseWei = ethers.parseUnits(market.min_base_amount.toString(), baseDecimals);
+      if (amountWei < minBaseWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount below minimum' });
+      }
+    }
+
+    let priceWei = 0n;
+    if (type === 'limit') {
+      if (!price) {
+        await conn.rollback();
+        return next({ status: 400, code: 'PRICE_REQUIRED', message: 'Price required for limit orders' });
+      }
+      try {
+        priceWei = ethers.parseUnits(price, 18);
+      } catch {
+        await conn.rollback();
+        return next({ status: 400, code: 'INVALID_PRICE', message: 'Invalid price' });
+      }
+      if (priceWei <= 0n) {
+        await conn.rollback();
+        return next({ status: 400, code: 'INVALID_PRICE', message: 'Price must be greater than zero' });
+      }
+    }
+
+    let feeBps = 0n;
+    try {
+      const feeVal = await getPlatformSettingValue('spot_trade_fee_bps', '0', conn);
+      feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
+    } catch {}
+
+    const baseAsset = market.base_asset;
+    const quoteAsset = market.quote_asset;
+
+    let quoteBalance = 0n;
+    let baseBalance = 0n;
+    if (side === 'buy') {
+      const [rows] = await conn.query(
+        'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+        [userId, quoteAsset]
+      );
+      quoteBalance = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+    } else {
+      const [rows] = await conn.query(
+        'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+        [userId, baseAsset]
+      );
+      baseBalance = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+    }
+
+    let reservedQuote = 0n;
+    let availableQuote = quoteBalance;
+    if (side === 'buy') {
+      if (type === 'limit') {
+        const quoteWithoutFee = computeQuoteAmount(amountWei, priceWei);
+        const feeAmount = (quoteWithoutFee * feeBps) / 10000n;
+        reservedQuote = quoteWithoutFee + feeAmount;
+        if (quoteBalance < reservedQuote) {
+          await conn.rollback();
+          return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
+        }
+        await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+          reservedQuote.toString(),
+          userId,
+          quoteAsset,
+        ]);
+        availableQuote = reservedQuote;
+      } else {
+        if (quoteBalance <= 0n) {
+          await conn.rollback();
+          return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
+        }
+        availableQuote = quoteBalance;
+      }
+    } else {
+      if (baseBalance < amountWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient base balance' });
+      }
+      await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+        amountWei.toString(),
+        userId,
+        baseAsset,
+      ]);
+    }
+
+    const [insert] = await conn.query(
+      'INSERT INTO spot_orders (market_id, user_id, side, type, price_wei, base_amount_wei, quote_amount_wei, remaining_base_wei, remaining_quote_wei, fee_bps, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      [
+        market.id,
+        userId,
+        side,
+        type,
+        priceWei.toString(),
+        amountWei.toString(),
+        side === 'buy' && type === 'limit' ? reservedQuote.toString() : '0',
+        amountWei.toString(),
+        side === 'buy' && type === 'limit' ? reservedQuote.toString() : '0',
+        Number(feeBps),
+        'open',
+      ]
+    );
+    const orderId = insert.insertId;
+
+    const taker = {
+      id: orderId,
+      userId,
+      side,
+      type,
+      priceWei,
+      remainingBase: amountWei,
+      remainingQuote: side === 'buy' && type === 'limit' ? reservedQuote : 0n,
+      availableQuote,
+      feeBps,
+    };
+
+    const matchResult = await matchSpotOrder(conn, market, taker);
+
+    let orderStatus = 'open';
+    if (taker.remainingBase <= 0n) orderStatus = 'filled';
+    if (type === 'market') {
+      if (matchResult.filledBase > 0n) orderStatus = 'filled';
+      else orderStatus = 'cancelled';
+    }
+
+    let remainingQuote = taker.remainingQuote;
+    let quoteAmountRecord = side === 'buy' && type === 'limit' ? reservedQuote : matchResult.spentQuote;
+
+    if (side === 'buy') {
+      if (matchResult.receivedBase > 0n) {
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [userId, baseAsset, matchResult.receivedBase.toString()]
+        );
+      }
+      if (type === 'market') {
+        if (matchResult.spentQuote > 0n) {
+          if (quoteBalance < matchResult.spentQuote) {
+            await conn.rollback();
+            return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
+          }
+          await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+            matchResult.spentQuote.toString(),
+            userId,
+            quoteAsset,
+          ]);
+        }
+        remainingQuote = 0n;
+      } else if (orderStatus !== 'open' && remainingQuote > 0n) {
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [userId, quoteAsset, remainingQuote.toString()]
+        );
+        remainingQuote = 0n;
+      }
+    } else {
+      const leftoverBase = amountWei - matchResult.filledBase;
+      if (leftoverBase > 0n) {
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [userId, baseAsset, leftoverBase.toString()]
+        );
+      }
+      if (matchResult.receivedQuote > 0n) {
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [userId, quoteAsset, matchResult.receivedQuote.toString()]
+        );
+      }
+      quoteAmountRecord = matchResult.receivedQuote + matchResult.takerFee;
+    }
+
+    await conn.query('UPDATE spot_orders SET remaining_base_wei=?, remaining_quote_wei=?, status=?, quote_amount_wei=? WHERE id=?', [
+      taker.remainingBase.toString(),
+      remainingQuote.toString(),
+      orderStatus,
+      quoteAmountRecord.toString(),
+      orderId,
+    ]);
+
+    await conn.commit();
+
+    const trades = matchResult.trades.map((trade) => ({
+      trade_id: trade.trade_id,
+      maker_order_id: trade.maker_order_id,
+      price: trimDecimal(formatUnitsStr(trade.price_wei.toString(), 18)),
+      price_wei: trade.price_wei.toString(),
+      base_amount: trimDecimal(formatUnitsStr(trade.base_amount_wei.toString(), baseDecimals)),
+      base_amount_wei: trade.base_amount_wei.toString(),
+      quote_amount: trimDecimal(formatUnitsStr(trade.quote_amount_wei.toString(), quoteDecimals)),
+      quote_amount_wei: trade.quote_amount_wei.toString(),
+      taker_fee_wei: trade.taker_fee_wei.toString(),
+      maker_fee_wei: trade.maker_fee_wei.toString(),
+    }));
+
+    res.json({
+      ok: true,
+      order: {
+        id: orderId,
+        status: orderStatus,
+        remaining_base_wei: taker.remainingBase.toString(),
+        remaining_quote_wei: remainingQuote.toString(),
+        filled_base_wei: matchResult.filledBase.toString(),
+        filled_base: trimDecimal(formatUnitsStr(matchResult.filledBase.toString(), baseDecimals)),
+        average_price: matchResult.averagePriceWei > 0n ? trimDecimal(formatUnitsStr(matchResult.averagePriceWei.toString(), 18)) : null,
+      },
+      trades,
+    });
+  } catch (err) {
+    if (conn) await conn.rollback();
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/spot/orders/:id/cancel', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const orderId = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(orderId)) return next({ status: 400, code: 'INVALID_ORDER', message: 'Invalid order id' });
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [rows] = await conn.query(
+      `SELECT so.*, sm.base_asset, sm.quote_asset, sm.base_decimals, sm.quote_decimals
+       FROM spot_orders so
+       JOIN spot_markets sm ON sm.id = so.market_id
+       WHERE so.id=? AND so.user_id=? FOR UPDATE`,
+      [orderId, userId]
+    );
+    if (!rows.length) {
+      await conn.rollback();
+      return next({ status: 404, code: 'ORDER_NOT_FOUND', message: 'Order not found' });
+    }
+    const order = rows[0];
+    if (order.status !== 'open') {
+      await conn.rollback();
+      return next({ status: 400, code: 'ORDER_NOT_OPEN', message: 'Order is not open' });
+    }
+
+    const baseAsset = order.base_asset;
+    const quoteAsset = order.quote_asset;
+    const remainingBase = bigIntFromValue(order.remaining_base_wei);
+    const remainingQuote = bigIntFromValue(order.remaining_quote_wei);
+
+    if (order.side === 'buy' && remainingQuote > 0n) {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [userId, quoteAsset, remainingQuote.toString()]
+      );
+    }
+    if (order.side === 'sell' && remainingBase > 0n) {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [userId, baseAsset, remainingBase.toString()]
+      );
+    }
+
+    await conn.query('UPDATE spot_orders SET status="cancelled", remaining_base_wei=0, remaining_quote_wei=0 WHERE id=?', [orderId]);
+    await conn.commit();
+    res.json({ ok: true });
   } catch (err) {
     if (conn) await conn.rollback();
     next(err);
