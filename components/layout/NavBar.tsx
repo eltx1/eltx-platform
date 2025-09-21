@@ -27,6 +27,7 @@ export default function NavBar() {
   const links: NavLink[] = [
     { href: '/', label: t.nav.home },
     { href: '/wallet', label: t.nav.wallet },
+    { href: '/trade', label: t.nav.trade },
     { href: '/earn', label: t.nav.earn },
     { href: '/faq', label: t.nav.faq },
   ];
