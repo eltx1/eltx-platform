@@ -56,73 +56,146 @@ const pool = mysql.createPool(
   }
 );
 
+const walletSchemaPath = path.join(__dirname, '../db/wallet.sql');
+let walletStatements = [];
+try {
+  const schema = fs.readFileSync(walletSchemaPath, 'utf8');
+  walletStatements = schema
+    .split(/;\s*\n/)
+    .map((s) => s.trim())
+    .filter((s) => s && !s.startsWith('--'));
+} catch (err) {
+  console.error('Failed to load wallet schema file', err);
+}
+
+let walletSchemaEnsured = false;
+let walletSchemaPromise = null;
+
+const originalPoolQuery = pool.query.bind(pool);
+const originalGetConnection = pool.getConnection.bind(pool);
+
+async function ensureWalletSchema() {
+  if (walletSchemaEnsured) return;
+  if (!walletStatements.length) throw new Error('Wallet schema is empty');
+  if (!walletSchemaPromise) {
+    const runner = (async () => {
+      const conn = await originalGetConnection();
+      const originalConnQuery = conn.query.bind(conn);
+      try {
+        for (const sql of walletStatements) {
+          if (/DROP COLUMN IF EXISTS/i.test(sql) || /DROP INDEX IF EXISTS/i.test(sql)) {
+            const tableMatch = sql.match(/ALTER TABLE\s+([`\w]+)/i);
+            if (!tableMatch) continue;
+            const table = tableMatch[1].replace(/`/g, '');
+            try {
+              const [tbl] = await originalConnQuery('SHOW TABLES LIKE ?', [table]);
+              if (!tbl.length) {
+                console.warn(`table ${table} missing, skip drop`);
+              } else {
+                if (/DROP COLUMN IF EXISTS/i.test(sql)) {
+                  const dropCols = [...sql.matchAll(/DROP COLUMN IF EXISTS\s+([`\w]+)/gi)].map((m) =>
+                    m[1].replace(/`/g, '')
+                  );
+                  for (const column of dropCols) {
+                    const [cols] = await originalConnQuery(`SHOW COLUMNS FROM ${table} LIKE ?`, [column]);
+                    if (cols.length) await originalConnQuery(`ALTER TABLE ${table} DROP COLUMN ${column}`);
+                    else console.warn(`${table}.${column} missing, skip drop`);
+                  }
+                }
+                if (/DROP INDEX IF EXISTS/i.test(sql)) {
+                  const dropIdx = [...sql.matchAll(/DROP INDEX IF EXISTS\s+([`\w]+)/gi)].map((m) =>
+                    m[1].replace(/`/g, '')
+                  );
+                  for (const index of dropIdx) {
+                    const [idxs] = await originalConnQuery(`SHOW INDEX FROM ${table} WHERE Key_name = ?`, [index]);
+                    if (idxs.length) await originalConnQuery(`ALTER TABLE ${table} DROP INDEX ${index}`);
+                    else console.warn(`${table}.${index} index missing, skip drop`);
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('schema adjust failed', e);
+            }
+
+            const cleaned = sql
+              .replace(/DROP COLUMN IF EXISTS\s+[`\w]+(?:,)?/gi, '')
+              .replace(/DROP INDEX IF EXISTS\s+[`\w]+(?:,)?/gi, '')
+              .replace(/,\s*;/g, ';')
+              .trim();
+            if (cleaned && !/^ALTER TABLE\s+[`\w]+\s*;?$/i.test(cleaned)) {
+              await originalConnQuery(cleaned);
+            }
+            continue;
+          }
+          await originalConnQuery(sql);
+        }
+      } finally {
+        conn.release();
+      }
+    })();
+    walletSchemaPromise = runner
+      .then(() => {
+        walletSchemaEnsured = true;
+        console.log('Wallet schema ready');
+      })
+      .catch((err) => {
+        walletSchemaEnsured = false;
+        console.error('Wallet schema sync failed', err);
+        throw err;
+      })
+      .finally(() => {
+        walletSchemaPromise = null;
+      });
+  }
+  return walletSchemaPromise;
+}
+
+function isMissingTableError(err) {
+  if (!err) return false;
+  if (err.code === 'ER_NO_SUCH_TABLE' || err.errno === 1146) return true;
+  const message = err.sqlMessage || err.message;
+  return typeof message === 'string' && message.toLowerCase().includes("doesn't exist");
+}
+
+async function handleMissingTable(err) {
+  if (!isMissingTableError(err)) return false;
+  walletSchemaEnsured = false;
+  try {
+    await ensureWalletSchema();
+    return true;
+  } catch (schemaErr) {
+    console.error('Failed to recover schema after missing table', schemaErr);
+    return false;
+  }
+}
+
+function wrapQuery(context, originalQuery) {
+  return async function wrappedQuery(...args) {
+    try {
+      return await originalQuery.apply(context, args);
+    } catch (err) {
+      if (await handleMissingTable(err)) {
+        return originalQuery.apply(context, args);
+      }
+      throw err;
+    }
+  };
+}
+
+pool.query = wrapQuery(pool, originalPoolQuery);
+
+pool.getConnection = async function (...args) {
+  const conn = await originalGetConnection(...args);
+  const originalConnQuery = conn.query.bind(conn);
+  conn.query = wrapQuery(conn, originalConnQuery);
+  return conn;
+};
+
+ensureWalletSchema().catch(() => {});
+
 // start background scanner runner
 const startRunner = require('./background/runner');
 startRunner(pool);
-
-// ensure wallet tables exist
-(async () => {
-  try {
-    const schema = fs.readFileSync(path.join(__dirname, '../db/wallet.sql'), 'utf8');
-    const statements = schema
-      .split(/;\s*\n/)
-      .map((s) => s.trim())
-      .filter((s) => s && !s.startsWith('--'));
-    const conn = await pool.getConnection();
-    try {
-      for (const sql of statements) {
-        if (/DROP COLUMN IF EXISTS/i.test(sql) || /DROP INDEX IF EXISTS/i.test(sql)) {
-          const table = sql.match(/ALTER TABLE\s+([`\w]+)/i)[1].replace(/`/g, '');
-          try {
-            const [tbl] = await conn.query('SHOW TABLES LIKE ?', [table]);
-            if (!tbl.length) {
-              console.warn(`table ${table} missing, skip drop`);
-            } else {
-              if (/DROP COLUMN IF EXISTS/i.test(sql)) {
-                const dropCols = [...sql.matchAll(/DROP COLUMN IF EXISTS\s+([`\w]+)/gi)].map((m) =>
-                  m[1].replace(/`/g, '')
-                );
-                for (const column of dropCols) {
-                  const [cols] = await conn.query(`SHOW COLUMNS FROM ${table} LIKE ?`, [column]);
-                  if (cols.length) await conn.query(`ALTER TABLE ${table} DROP COLUMN ${column}`);
-                  else console.warn(`${table}.${column} missing, skip drop`);
-                }
-              }
-              if (/DROP INDEX IF EXISTS/i.test(sql)) {
-                const dropIdx = [...sql.matchAll(/DROP INDEX IF EXISTS\s+([`\w]+)/gi)].map((m) =>
-                  m[1].replace(/`/g, '')
-                );
-                for (const index of dropIdx) {
-                  const [idxs] = await conn.query(`SHOW INDEX FROM ${table} WHERE Key_name = ?`, [index]);
-                  if (idxs.length) await conn.query(`ALTER TABLE ${table} DROP INDEX ${index}`);
-                  else console.warn(`${table}.${index} index missing, skip drop`);
-                }
-              }
-            }
-          } catch (e) {
-            console.warn('schema adjust failed', e);
-          }
-
-          const cleaned = sql
-            .replace(/DROP COLUMN IF EXISTS\s+[`\w]+(?:,)?/gi, '')
-            .replace(/DROP INDEX IF EXISTS\s+[`\w]+(?:,)?/gi, '')
-            .replace(/,\s*;/g, ';')
-            .trim();
-          if (!/^ALTER TABLE\s+[`\w]+\s*;?$/i.test(cleaned)) {
-            await conn.query(cleaned);
-          }
-          continue;
-        }
-        await conn.query(sql);
-      }
-    } finally {
-      conn.release();
-    }
-    console.log('Wallet schema ready');
-  } catch (err) {
-    console.error('Wallet schema sync failed', err);
-  }
-})();
 
 const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
 const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
