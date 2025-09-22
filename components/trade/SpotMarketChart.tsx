@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CandlestickData, IChartApi, ISeriesApi, LineData, UTCTimestamp } from 'lightweight-charts';
-import { ColorType, createChart } from 'lightweight-charts';
+import { AreaSeries, CandlestickSeries, ColorType, createChart } from 'lightweight-charts';
 import { apiFetch } from '../../app/lib/api';
 import { dict, useLang } from '../../app/lib/i18n';
 
@@ -101,7 +101,7 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
     fetchCandles(marketSymbol, timeframe);
   }, [marketSymbol, timeframe, fetchCandles]);
 
-  const candlestickData = useMemo<CandlestickData[]>(() => {
+  const candlestickData = useMemo<CandlestickData<UTCTimestamp>[]>(() => {
     return candles
       .map((candle) => {
         const open = Number(candle.open);
@@ -117,10 +117,10 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
           close,
         };
       })
-      .filter((candle): candle is CandlestickData => candle !== null);
+      .filter((candle): candle is CandlestickData<UTCTimestamp> => candle !== null);
   }, [candles]);
 
-  const lineData = useMemo<LineData[]>(() => {
+  const lineData = useMemo<LineData<UTCTimestamp>[]>(() => {
     return candlestickData.map((candle) => ({ time: candle.time, value: candle.close }));
   }, [candlestickData]);
 
@@ -147,7 +147,7 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
       },
     });
 
-    const areaSeries = chart.addAreaSeries({
+    const areaSeries = chart.addSeries(AreaSeries, {
       lineColor: '#38bdf8',
       topColor: 'rgba(56, 189, 248, 0.25)',
       bottomColor: 'rgba(56, 189, 248, 0.05)',
@@ -155,7 +155,7 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
       visible: initialModeRef.current === 'line',
     });
 
-    const candleSeries = chart.addCandlestickSeries({
+    const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#22c55e',
       downColor: '#ef4444',
       wickUpColor: '#22c55e',
