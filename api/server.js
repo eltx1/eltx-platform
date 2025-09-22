@@ -1453,6 +1453,12 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
        WHERE sm.active = 1
        ORDER BY sm.symbol`
     );
+    let feeSetting = '0';
+    try {
+      feeSetting = await getPlatformSettingValue('spot_trade_fee_bps', '0');
+    } catch {}
+    const feeBps = Number.parseInt(feeSetting, 10);
+    const normalizedFeeBps = Number.isFinite(feeBps) ? feeBps : 0;
     const markets = rows.map((row) => {
       const lastPriceWei = bigIntFromValue(row.last_price_wei);
       return {
@@ -1469,7 +1475,11 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
         last_price: lastPriceWei > 0n ? trimDecimal(formatUnitsStr(lastPriceWei.toString(), 18)) : null,
       };
     });
-    res.json({ ok: true, markets });
+    res.json({
+      ok: true,
+      markets,
+      fees: { maker_bps: normalizedFeeBps, taker_bps: normalizedFeeBps },
+    });
   } catch (err) {
     next(err);
   }
