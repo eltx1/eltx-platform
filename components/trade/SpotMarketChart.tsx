@@ -26,11 +26,19 @@ type SpotMarketChartProps = {
   quoteAsset?: string | null;
   title: string;
   emptyLabel: string;
+  enabled?: boolean;
 };
 
 const CACHE_TTL_MS = 60 * 1000;
 
-export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, title, emptyLabel }: SpotMarketChartProps) {
+export default function SpotMarketChart({
+  marketSymbol,
+  baseAsset,
+  quoteAsset,
+  title,
+  emptyLabel,
+  enabled = true,
+}: SpotMarketChartProps) {
   const { lang } = useLang();
   const t = dict[lang];
 
@@ -81,7 +89,7 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
   );
 
   useEffect(() => {
-    if (!marketSymbol) {
+    if (!enabled || !marketSymbol) {
       setCandles([]);
       setError(null);
       latestRequestRef.current = '';
@@ -99,7 +107,7 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
       return;
     }
     fetchCandles(marketSymbol, timeframe);
-  }, [marketSymbol, timeframe, fetchCandles]);
+  }, [marketSymbol, timeframe, fetchCandles, enabled]);
 
   const candlestickData = useMemo<CandlestickData<UTCTimestamp>[]>(() => {
     return candles
@@ -230,6 +238,8 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
     { value: '1d', label: t.spotTrade.chart.timeframes['1d'] },
   ];
 
+  const showModeToggle = enabled && hasData;
+
   const lastUpdatedLabel = useMemo(() => {
     if (!lastUpdated) return t.spotTrade.chart.updatedNever;
     const date = new Date(lastUpdated);
@@ -250,32 +260,39 @@ export default function SpotMarketChart({ marketSymbol, baseAsset, quoteAsset, t
               <button
                 key={btn.value}
                 className={`px-3 py-1 rounded-full transition ${
-                  timeframe === btn.value ? 'bg-white text-black shadow' : 'text-white/70 hover:text-white'
+                  timeframe === btn.value && enabled
+                    ? 'bg-white text-black shadow'
+                    : enabled
+                    ? 'text-white/70 hover:text-white'
+                    : 'text-white/30 cursor-not-allowed'
                 }`}
-                onClick={() => setTimeframe(btn.value)}
+                onClick={() => enabled && setTimeframe(btn.value)}
+                disabled={!enabled}
               >
                 {btn.label}
               </button>
             ))}
           </div>
-          <div className="flex rounded-full bg-white/10 p-1 shadow-inner">
-            {(['line', 'candles'] as ChartMode[]).map((option) => (
-              <button
-                key={option}
-                className={`px-3 py-1 rounded-full transition ${
-                  mode === option ? 'bg-white text-black shadow' : 'text-white/70 hover:text-white'
-                }`}
-                onClick={() => setMode(option)}
-              >
-                {t.spotTrade.chart.modes[option]}
-              </button>
-            ))}
-          </div>
+          {showModeToggle && (
+            <div className="flex rounded-full bg-white/10 p-1 shadow-inner">
+              {(['line', 'candles'] as ChartMode[]).map((option) => (
+                <button
+                  key={option}
+                  className={`px-3 py-1 rounded-full transition ${
+                    mode === option ? 'bg-white text-black shadow' : 'text-white/70 hover:text-white'
+                  }`}
+                  onClick={() => setMode(option)}
+                >
+                  {t.spotTrade.chart.modes[option]}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
       <div className="relative h-72">
         <div ref={containerRef} className="absolute inset-0" />
-        {!hasData && !loading && !error && (
+        {(!enabled || !hasData) && !loading && !error && (
           <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">
             {emptyLabel}
           </div>
