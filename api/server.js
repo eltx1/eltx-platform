@@ -12,6 +12,12 @@ const { z } = require('zod');
 const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
+const {
+  syncSwapAssetPrices,
+  getSwapAssetConfig,
+  getSwapPricingMode,
+  isSupportedSwapAsset,
+} = require('./src/services/pricing');
 require('dotenv').config();
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
@@ -1018,10 +1024,12 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
 app.get('/trade/markets', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
+    await syncSwapAssetPrices(pool);
     const [rows] = await pool.query(
       `SELECT UPPER(ap.asset) AS asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps, ap.updated_at, ub.balance_wei,
               lp.asset_reserve_wei, lp.eltx_reserve_wei
        FROM asset_prices ap
+       INNER JOIN swap_assets_config sac ON UPPER(sac.asset) = UPPER(ap.asset) AND sac.enabled = 1
        LEFT JOIN user_balances ub ON ub.user_id = ? AND UPPER(ub.asset) = UPPER(ap.asset)
        LEFT JOIN swap_liquidity_pools lp ON UPPER(lp.asset) = UPPER(ap.asset)
        WHERE UPPER(ap.asset) <> ?
@@ -1119,8 +1127,16 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
     if (asset === ELTX_SYMBOL)
       return next({ status: 400, code: 'INVALID_ASSET', message: 'Cannot swap ELTX to itself' });
 
+    await syncSwapAssetPrices(pool);
+
+    if (!isSupportedSwapAsset(asset))
+      return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Asset not supported for swap' });
+
     const [[priceRow]] = await pool.query(
-      'SELECT UPPER(asset) AS asset, price_eltx, min_amount, max_amount, spread_bps FROM asset_prices WHERE UPPER(asset)=?',
+      `SELECT UPPER(ap.asset) AS asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps
+       FROM asset_prices ap
+       INNER JOIN swap_assets_config sac ON UPPER(sac.asset) = UPPER(ap.asset) AND sac.enabled = 1
+       WHERE UPPER(ap.asset)=?`,
       [asset]
     );
     if (!priceRow)
@@ -1160,23 +1176,60 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
     if (balanceWei < amountWei)
       return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
 
-    const poolRow = await getSwapPoolRow(pool, asset);
-    if (!poolRow)
-      return next({ status: 400, code: 'POOL_UNAVAILABLE', message: 'No liquidity available for this asset' });
-    const assetReserve = bigIntFromValue(poolRow.asset_reserve_wei);
-    const eltxReserve = bigIntFromValue(poolRow.eltx_reserve_wei);
-    if (assetReserve <= 0n || eltxReserve <= 0n)
-      return next({ status: 400, code: 'POOL_EMPTY', message: 'Liquidity pool is empty' });
-
-    let grossEltxWei = mulDiv(amountWei, eltxReserve, assetReserve);
+    const config = getSwapAssetConfig(asset);
     const spreadBps = priceRow.spread_bps !== undefined && priceRow.spread_bps !== null ? Number(priceRow.spread_bps) : 0;
-    if (spreadBps >= 10000)
-      return next({ status: 500, code: 'INVALID_SPREAD', message: 'Pricing configuration invalid' });
-    if (spreadBps > 0) grossEltxWei = (grossEltxWei * (10000n - BigInt(spreadBps))) / 10000n;
-    if (grossEltxWei <= 0n)
-      return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small to convert' });
-    if (grossEltxWei >= eltxReserve)
-      return next({ status: 400, code: 'INSUFFICIENT_LIQUIDITY', message: 'Liquidity insufficient for this swap' });
+    let grossEltxWei = 0n;
+    let priceWei = 0n;
+    let priceStr = priceRow.price_eltx?.toString() || '0';
+
+    let pricingMode = getSwapPricingMode(asset);
+    let poolRow = null;
+    if (pricingMode !== 'oracle') {
+      poolRow = await getSwapPoolRow(pool, asset);
+      pricingMode = getSwapPricingMode(asset, { hasPool: !!poolRow });
+    }
+
+    if (pricingMode === 'unsupported')
+      return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Asset not supported for swap' });
+
+    if (pricingMode === 'pool') {
+      if (!poolRow)
+        return next({ status: 400, code: 'POOL_UNAVAILABLE', message: 'No liquidity available for this asset' });
+      const assetReserve = bigIntFromValue(poolRow.asset_reserve_wei);
+      const eltxReserve = bigIntFromValue(poolRow.eltx_reserve_wei);
+      if (assetReserve <= 0n || eltxReserve <= 0n)
+        return next({ status: 400, code: 'POOL_EMPTY', message: 'Liquidity pool is empty' });
+
+      grossEltxWei = mulDiv(amountWei, eltxReserve, assetReserve);
+      if (spreadBps >= 10000)
+        return next({ status: 500, code: 'INVALID_SPREAD', message: 'Pricing configuration invalid' });
+      if (spreadBps > 0) grossEltxWei = (grossEltxWei * (10000n - BigInt(spreadBps))) / 10000n;
+      if (grossEltxWei <= 0n)
+        return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small to convert' });
+      if (grossEltxWei >= eltxReserve)
+        return next({ status: 400, code: 'INSUFFICIENT_LIQUIDITY', message: 'Liquidity insufficient for this swap' });
+
+      priceWei = mulDiv(grossEltxWei, PRICE_SCALE, amountWei);
+      priceStr = trimDecimal(formatUnitsStr(priceWei.toString(), 18));
+    } else {
+      if (!config)
+        return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Asset not supported for swap' });
+      if (isZeroDecimal(priceStr))
+        return next({ status: 503, code: 'PRICING_UNAVAILABLE', message: 'Pricing temporarily unavailable' });
+      try {
+        priceWei = ethers.parseUnits(priceStr, 18);
+      } catch (err) {
+        return next({ status: 500, code: 'INVALID_PRICE', message: 'Pricing data invalid' });
+      }
+      if (priceWei <= 0n)
+        return next({ status: 503, code: 'PRICING_UNAVAILABLE', message: 'Pricing temporarily unavailable' });
+      grossEltxWei = mulDiv(amountWei, priceWei, PRICE_SCALE);
+      if (spreadBps >= 10000)
+        return next({ status: 500, code: 'INVALID_SPREAD', message: 'Pricing configuration invalid' });
+      if (spreadBps > 0) grossEltxWei = (grossEltxWei * (10000n - BigInt(spreadBps))) / 10000n;
+      if (grossEltxWei <= 0n)
+        return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small to convert' });
+    }
 
     let swapFeeBps = 0n;
     try {
@@ -1191,8 +1244,6 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
     if (netEltxWei <= 0n)
       return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount too small after fees' });
 
-    const priceWei = mulDiv(grossEltxWei, PRICE_SCALE, amountWei);
-    const priceStr = trimDecimal(formatUnitsStr(priceWei.toString(), 18));
     const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
     const quoteId = crypto.randomUUID();
     await pool.query(
@@ -1299,27 +1350,40 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
       return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
     }
 
-    const poolRow = await getSwapPoolRow(conn, asset, { forUpdate: true });
-    if (!poolRow) {
-      await conn.rollback();
-      return next({ status: 400, code: 'POOL_UNAVAILABLE', message: 'No liquidity available for this asset' });
-    }
-    const assetReserve = bigIntFromValue(poolRow.asset_reserve_wei);
-    const eltxReserve = bigIntFromValue(poolRow.eltx_reserve_wei);
-    if (eltxReserve < grossEltxWei) {
-      await conn.rollback();
-      return next({ status: 400, code: 'POOL_EMPTY', message: 'Liquidity insufficient to settle quote' });
+    let pricingMode = getSwapPricingMode(asset);
+    let poolRow = null;
+    if (pricingMode !== 'oracle') {
+      poolRow = await getSwapPoolRow(conn, asset, { forUpdate: true });
+      pricingMode = getSwapPricingMode(asset, { hasPool: !!poolRow });
     }
 
-    const newAssetReserve = assetReserve + amountWei;
-    const newEltxReserve = eltxReserve - grossEltxWei;
+    if (pricingMode === 'unsupported') {
+      await conn.rollback();
+      return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Asset not supported for swap' });
+    }
 
-    await updateSwapPool(conn, asset, newAssetReserve, newEltxReserve);
+    if (pricingMode === 'pool') {
+      if (!poolRow) {
+        await conn.rollback();
+        return next({ status: 400, code: 'POOL_UNAVAILABLE', message: 'No liquidity available for this asset' });
+      }
+      const assetReserve = bigIntFromValue(poolRow.asset_reserve_wei);
+      const eltxReserve = bigIntFromValue(poolRow.eltx_reserve_wei);
+      if (eltxReserve < grossEltxWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'POOL_EMPTY', message: 'Liquidity insufficient to settle quote' });
+      }
 
-    if (newAssetReserve > 0n && newEltxReserve > 0n) {
-      const newPriceWei = mulDiv(newEltxReserve, PRICE_SCALE, newAssetReserve);
-      const newPriceStr = trimDecimal(formatUnitsStr(newPriceWei.toString(), 18));
-      await conn.query('UPDATE asset_prices SET price_eltx=? WHERE UPPER(asset)=?', [newPriceStr, asset]);
+      const newAssetReserve = assetReserve + amountWei;
+      const newEltxReserve = eltxReserve - grossEltxWei;
+
+      await updateSwapPool(conn, asset, newAssetReserve, newEltxReserve);
+
+      if (newAssetReserve > 0n && newEltxReserve > 0n) {
+        const newPriceWei = mulDiv(newEltxReserve, PRICE_SCALE, newAssetReserve);
+        const newPriceStr = trimDecimal(formatUnitsStr(newPriceWei.toString(), 18));
+        await conn.query('UPDATE asset_prices SET price_eltx=? WHERE UPPER(asset)=?', [newPriceStr, asset]);
+      }
     }
 
     await conn.query(

@@ -124,6 +124,37 @@ ALTER TABLE user_balances
   DROP COLUMN IF EXISTS usd_balance,
   MODIFY COLUMN user_id INT NOT NULL;
 
+-- swap asset configuration (pricing sources, limits, spreads)
+CREATE TABLE IF NOT EXISTS swap_assets_config (
+  asset VARCHAR(32) NOT NULL,
+  provider ENUM('coingecko') NOT NULL DEFAULT 'coingecko',
+  provider_id VARCHAR(191) NOT NULL,
+  mode ENUM('oracle','pool','auto') NOT NULL DEFAULT 'oracle',
+  min_amount DECIMAL(36,18) NOT NULL DEFAULT 0,
+  max_amount DECIMAL(36,18) DEFAULT NULL,
+  spread_bps INT UNSIGNED NOT NULL DEFAULT 0,
+  fallback_price DECIMAL(36,18) NOT NULL DEFAULT 0,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (asset)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE swap_assets_config
+  ADD COLUMN IF NOT EXISTS provider ENUM('coingecko') NOT NULL DEFAULT 'coingecko' AFTER asset,
+  ADD COLUMN IF NOT EXISTS provider_id VARCHAR(191) NOT NULL AFTER provider,
+  ADD COLUMN IF NOT EXISTS mode ENUM('oracle','pool','auto') NOT NULL DEFAULT 'oracle' AFTER provider_id,
+  ADD COLUMN IF NOT EXISTS min_amount DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER mode,
+  ADD COLUMN IF NOT EXISTS max_amount DECIMAL(36,18) DEFAULT NULL AFTER min_amount,
+  ADD COLUMN IF NOT EXISTS spread_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER max_amount,
+  ADD COLUMN IF NOT EXISTS fallback_price DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER spread_bps,
+  ADD COLUMN IF NOT EXISTS enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER fallback_price,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER enabled;
+INSERT IGNORE INTO swap_assets_config (asset, provider, provider_id, mode, min_amount, spread_bps, fallback_price)
+VALUES
+  ('USDT', 'coingecko', 'tether', 'pool', 1, 0, 1),
+  ('USDC', 'coingecko', 'usd-coin', 'pool', 1, 0, 1),
+  ('BNB', 'coingecko', 'binancecoin', 'oracle', 0.01, 25, 0),
+  ('ETH', 'coingecko', 'ethereum', 'oracle', 0.005, 25, 0);
+
 -- centrally managed asset prices for ELTX swaps
 CREATE TABLE IF NOT EXISTS asset_prices (
   asset VARCHAR(32) NOT NULL,
@@ -142,6 +173,9 @@ ALTER TABLE asset_prices
   ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER spread_bps;
 INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('ELTX', 1, 0, 0);
 INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('USDT', 1, 1, 0);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('USDC', 1, 1, 0);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('BNB', 0, 0.01, 25);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('ETH', 0, 0.005, 25);
 
 -- stored swap quotes
 CREATE TABLE IF NOT EXISTS trade_quotes (

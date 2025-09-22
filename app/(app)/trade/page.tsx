@@ -2,6 +2,7 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ChevronDown, Clock, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
 import { apiFetch } from '../../lib/api';
@@ -60,20 +61,6 @@ type SwapResponse = {
   fee_amount_wei: string;
 };
 
-function formatWei(wei: string, decimals: number, precision = 6): string {
-  try {
-    const bn = BigInt(wei);
-    const base = 10n ** BigInt(decimals);
-    const integer = bn / base;
-    let frac = (bn % base).toString().padStart(decimals, '0');
-    if (precision >= 0) frac = frac.slice(0, precision).replace(/0+$/, '');
-    else frac = frac.replace(/0+$/, '');
-    return frac ? `${integer}.${frac}` : integer.toString();
-  } catch {
-    return '0';
-  }
-}
-
 function trimDecimal(value: string): string {
   if (!value) return '0';
   if (!value.includes('.')) return value;
@@ -89,6 +76,24 @@ function isZero(value?: string | null): boolean {
 
 function formatSpread(bps: number): string {
   return (bps / 100).toFixed(2);
+}
+
+function formatRelativeTime(date: Date | null): string {
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 4) return `${weeks}w`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo`;
+  const years = Math.floor(days / 365);
+  return `${years}y`;
 }
 
 export default function TradePage() {
@@ -205,6 +210,8 @@ export default function TradePage() {
         case 'QUOTE_NOT_FOUND':
         case 'QUOTE_INACTIVE':
           return t.trade.errors.quoteUnavailable;
+        case 'PRICING_UNAVAILABLE':
+          return t.trade.errors.pricingUnavailable;
         default:
           return fallback || t.common.genericError;
       }
@@ -218,6 +225,7 @@ export default function TradePage() {
       t.trade.errors.quoteExpired,
       t.trade.errors.unsupportedAsset,
       t.trade.errors.quoteUnavailable,
+      t.trade.errors.pricingUnavailable,
     ]
   );
 
@@ -279,132 +287,280 @@ export default function TradePage() {
     if (code === 'INSUFFICIENT_BALANCE') loadMarkets();
   };
 
+  const estimatedReceive = useMemo(() => {
+    if (!selectedMarket || !normalizedAmount) return '';
+    const price = Number.parseFloat(selectedMarket.price_eltx || '0');
+    const amt = Number.parseFloat(normalizedAmount);
+    if (!Number.isFinite(price) || !Number.isFinite(amt)) return '';
+    const result = price * amt;
+    if (!Number.isFinite(result)) return '';
+    return trimDecimal(result.toFixed(8));
+  }, [normalizedAmount, selectedMarket]);
+
+  const lastUpdatedLabel = useMemo(() => {
+    if (!selectedMarket?.updated_at) return '';
+    const relative = formatRelativeTime(new Date(selectedMarket.updated_at));
+    if (!relative) return '';
+    return t.trade.lastUpdated.replace('{time}', relative);
+  }, [selectedMarket?.updated_at, t.trade.lastUpdated]);
+
+  const priceDisplay = useMemo(() => {
+    if (!selectedMarket) return '';
+    return trimDecimal(selectedMarket.price_eltx || '0');
+  }, [selectedMarket]);
+
+  const receiveDisplay = quote ? trimDecimal(quote.eltx_amount) : estimatedReceive;
+  const rateDisplay = quote ? trimDecimal(quote.rate) : priceDisplay;
+  const balanceDisplay = selectedMarket ? trimDecimal(selectedMarket.balance || '0') : '0';
+  const minAmountDisplay = selectedMarket && !isZero(selectedMarket.min_amount)
+    ? trimDecimal(selectedMarket.min_amount)
+    : '';
+  const maxAmountDisplay =
+    selectedMarket && selectedMarket.max_amount && !isZero(selectedMarket.max_amount)
+      ? trimDecimal(selectedMarket.max_amount)
+      : '';
+  const assetList = useMemo(() => markets.map((m) => m.asset).join(' · '), [markets]);
+
+  const handleUseMax = () => {
+    if (!selectedMarket) return;
+    setAmount(selectedMarket.balance);
+    setQuote(null);
+    setQuoteInput(null);
+    setQuoteError('');
+  };
+
   if (unauth) return <div className="p-4 text-sm opacity-80">{t.trade.signInRequired}</div>;
   if (error) return <div className="p-4">{error}</div>;
 
   return (
-    <div className="p-4 space-y-6 overflow-x-hidden">
-      <div className="space-y-2">
-        <h1 className="text-xl font-semibold">{t.trade.title}</h1>
-        <p className="text-sm opacity-80">{t.trade.description}</p>
-      </div>
-      {loadingMarkets ? (
-        <div className="text-sm opacity-80">{t.trade.loading}</div>
-      ) : markets.length === 0 ? (
-        <div className="text-sm opacity-80">{t.trade.noAssets}</div>
-      ) : (
-        <div className="space-y-6">
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm mb-1">{t.trade.asset}</label>
-              <select
-                value={selectedAsset}
-                onChange={(e) => {
-                  setSelectedAsset(e.target.value);
-                  setAmount('');
-                  setQuote(null);
-                  setQuoteInput(null);
-                  setQuoteError('');
-                }}
-                className="w-full p-2 rounded bg-black/20 border border-white/20"
-              >
-                {markets.map((m) => (
-                  <option key={m.asset} value={m.asset}>
-                    {m.asset}
-                  </option>
-                ))}
-              </select>
+    <div className="overflow-x-hidden p-4 sm:p-6">
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-zinc-900/70 via-black to-black p-6 shadow-2xl sm:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight">{t.trade.title}</h1>
+              <p className="text-sm text-white/60">{t.trade.description}</p>
             </div>
-            <div>
-              <label className="block text-sm mb-1">{t.trade.amount}</label>
-              <input
-                type="number"
-                min="0"
-                value={amount}
-                onChange={(e) => {
-                  setAmount(e.target.value);
-                  setQuoteError('');
-                }}
-                className="w-full p-2 rounded bg-black/20 border border-white/20"
-              />
-              {selectedMarket && (
-                <div className="text-xs opacity-70 mt-1">
-                  {t.trade.balance}: {trimDecimal(formatWei(selectedMarket.balance_wei, selectedMarket.decimals))}{' '}
-                  {selectedMarket.asset}
-                </div>
-              )}
-              {selectedMarket && !isZero(selectedMarket.min_amount) && (
-                <div className="text-xs opacity-70 mt-1">
-                  {t.trade.min}: {trimDecimal(selectedMarket.min_amount)} {selectedMarket.asset}
-                </div>
-              )}
-              {selectedMarket && selectedMarket.max_amount && !isZero(selectedMarket.max_amount) && (
-                <div className="text-xs opacity-70 mt-1">
-                  {t.trade.max}: {trimDecimal(selectedMarket.max_amount)} {selectedMarket.asset}
-                </div>
-              )}
-            </div>
-            {quoteError && <div className="text-xs text-red-500">{quoteError}</div>}
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                onClick={handleGetQuote}
-                disabled={!selectedAsset || !normalizedAmount || loadingQuote}
-                className="px-3 py-2 bg-gray-100 text-black rounded disabled:opacity-50"
-              >
-                {loadingQuote ? t.trade.loading : t.trade.getQuote}
-              </button>
-              <button
-                onClick={handleConfirm}
-                disabled={!quote || submitting || quoteExpired || staleQuote}
-                className="px-3 py-2 bg-white/10 rounded border border-white/10 disabled:opacity-50"
-              >
-                {submitting ? t.trade.submitting : t.trade.confirm}
-              </button>
-            </div>
-            {staleQuote && <div className="text-xs text-yellow-400">{t.trade.quote.needsRefresh}</div>}
-            {quote && (
-              <div className="p-4 bg-white/5 rounded space-y-2 text-sm">
-                <div className="font-semibold">{t.trade.quote.title}</div>
-                <div className="flex justify-between text-xs">
-                  <span>{t.trade.quote.rate}</span>
-                  <span>
-                    {trimDecimal(quote.rate)} {baseAsset.symbol}
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span>{t.trade.quote.youSend}</span>
-                  <span>
-                    {trimDecimal(quote.amount)} {quote.asset}
-                  </span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span>{t.trade.quote.youReceive}</span>
-                  <span>
-                    {trimDecimal(quote.eltx_amount)} {baseAsset.symbol}
-                  </span>
-                </div>
-                {quote.spread_bps > 0 && (
-                  <div className="flex justify-between text-xs opacity-70">
-                    <span>{t.trade.quote.spread}</span>
-                    <span>{formatSpread(quote.spread_bps)}%</span>
-                  </div>
-                )}
-                {quoteExpiresIn !== null && (
-                  <div className={`text-xs ${quoteExpired ? 'text-red-400' : 'opacity-70'}`}>
-                    {quoteExpired
-                      ? t.trade.quote.expired
-                      : `${t.trade.quote.expiresIn}: ${quoteExpiresIn}s`}
-                  </div>
-                )}
-                {staleQuote && (
-                  <div className="text-xs text-yellow-400">{t.trade.quote.needsRefresh}</div>
-                )}
+            {lastUpdatedLabel && (
+              <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-white/50">
+                <Clock className="h-4 w-4" />
+                <span>{lastUpdatedLabel}</span>
               </div>
             )}
           </div>
-          <div className="text-xs opacity-60">{t.trade.pricing}</div>
+          {loadingMarkets ? (
+            <div className="mt-10 text-sm text-white/60">{t.trade.loading}</div>
+          ) : markets.length === 0 ? (
+            <div className="mt-10 text-sm text-white/60">{t.trade.noAssets}</div>
+          ) : (
+            <div className="mt-8 space-y-6">
+              <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur">
+                <div className="flex items-center justify-between text-xs uppercase tracking-wide text-white/60">
+                  <span>{t.trade.youPay}</span>
+                  <button
+                    type="button"
+                    onClick={handleUseMax}
+                    disabled={!selectedMarket || isZero(balanceDisplay)}
+                    className="rounded-full bg-emerald-500/10 px-3 py-1 text-[11px] font-medium text-emerald-200 transition hover:bg-emerald-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {t.trade.useMax}
+                  </button>
+                </div>
+                <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <div className="flex flex-col gap-2">
+                    <div className="relative">
+                      <select
+                        value={selectedAsset}
+                        onChange={(e) => {
+                          setSelectedAsset(e.target.value);
+                          setAmount('');
+                          setQuote(null);
+                          setQuoteInput(null);
+                          setQuoteError('');
+                        }}
+                        className="w-40 appearance-none rounded-2xl border border-white/10 bg-black/40 px-4 py-3 pr-10 text-sm font-medium text-white shadow-inner focus:border-emerald-400/60 focus:outline-none focus:ring-2 focus:ring-emerald-400/40 sm:w-48"
+                      >
+                        {markets.map((m) => (
+                          <option key={m.asset} value={m.asset}>
+                            {m.asset}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/60" />
+                    </div>
+                    <div className="text-xs text-white/50">
+                      {t.trade.balance}: {balanceDisplay} {selectedAsset || '—'}
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      min="0"
+                      value={amount}
+                      onChange={(e) => {
+                        setAmount(e.target.value);
+                        setQuoteError('');
+                      }}
+                      placeholder="0.00"
+                      className="w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-right text-3xl font-semibold tracking-tight text-white shadow-inner focus:border-emerald-400/60 focus:outline-none focus:ring-2 focus:ring-emerald-400/40"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-2 text-xs text-white/60 sm:grid-cols-2">
+                  <div>
+                    {t.trade.liveRate}:{' '}
+                    <span className="font-medium text-white/80">
+                      1 {selectedAsset || '—'} ≈ {priceDisplay || '—'} {baseAsset.symbol}
+                    </span>
+                  </div>
+                  {minAmountDisplay && (
+                    <div>
+                      {t.trade.min}:{' '}
+                      <span className="font-medium text-white/80">
+                        {minAmountDisplay} {selectedAsset}
+                      </span>
+                    </div>
+                  )}
+                  {maxAmountDisplay && (
+                    <div>
+                      {t.trade.max}:{' '}
+                      <span className="font-medium text-white/80">
+                        {maxAmountDisplay} {selectedAsset}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="rounded-3xl border border-emerald-400/20 bg-emerald-500/10 p-5 backdrop-blur">
+                <div className="flex items-center justify-between text-xs uppercase tracking-wide text-emerald-200">
+                  <span>{t.trade.youReceive}</span>
+                  <span>{baseAsset.symbol}</span>
+                </div>
+                <div className="mt-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-400/20 text-lg font-semibold text-emerald-100">
+                      {baseAsset.symbol.slice(0, 3)}
+                    </div>
+                    <div className="text-sm text-emerald-100/80">{baseAsset.symbol}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-semibold tracking-tight text-white">
+                      {receiveDisplay || '0'}
+                    </div>
+                    {quote ? (
+                      <div className="text-xs text-emerald-200/80">{t.trade.quote.locked}</div>
+                    ) : normalizedAmount && estimatedReceive ? (
+                      <div className="text-xs text-white/60">
+                        {t.trade.estimated.replace('{amount}', estimatedReceive)} {baseAsset.symbol}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-white/40">{t.trade.awaitingAmount}</div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-100/80">
+                  <div>
+                    {t.trade.rateLabel}: 1 {selectedAsset || '—'} ≈ {rateDisplay || '—'} {baseAsset.symbol}
+                  </div>
+                  {quote && quoteExpiresIn !== null && (
+                    <div className={`flex items-center gap-1 ${quoteExpired ? 'text-red-300' : 'text-emerald-200/80'}`}>
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>
+                        {quoteExpired
+                          ? t.trade.quote.expiredShort
+                          : t.trade.quote.expiresInShort.replace('{seconds}', String(quoteExpiresIn))}{' '}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {quote && (
+                <div className="rounded-3xl border border-emerald-400/20 bg-emerald-400/10 p-5 text-sm text-white shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-emerald-100">
+                      <Sparkles className="h-4 w-4" />
+                      <span className="font-medium">{t.trade.quote.title}</span>
+                    </div>
+                    <div className={`text-xs ${quoteExpired ? 'text-red-300' : 'text-emerald-200/80'}`}>
+                      {quoteExpired
+                        ? t.trade.quote.expiredShort
+                        : t.trade.quote.expiresInShort.replace('{seconds}', String(quoteExpiresIn ?? 0))}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-1 gap-3 text-xs text-white/80 sm:grid-cols-2">
+                    <div>
+                      <div className="text-white/50 uppercase tracking-wide">{t.trade.quote.youSend}</div>
+                      <div className="mt-1 font-medium text-white">
+                        {trimDecimal(quote.amount)} {quote.asset}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-white/50 uppercase tracking-wide">{t.trade.quote.youReceive}</div>
+                      <div className="mt-1 font-medium text-white">
+                        {trimDecimal(quote.eltx_amount)} {baseAsset.symbol}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-white/50 uppercase tracking-wide">{t.trade.quote.rate}</div>
+                      <div className="mt-1 font-medium text-white">
+                        {trimDecimal(quote.rate)} {baseAsset.symbol}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-white/50 uppercase tracking-wide">{t.trade.quote.platformFee}</div>
+                      <div className="mt-1 font-medium text-white">
+                        {trimDecimal(quote.fee_amount)} {quote.fee_asset}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-3 text-xs text-white/70">
+                    {quote.spread_bps > 0 && (
+                      <span className="rounded-full bg-white/10 px-3 py-1">
+                        {t.trade.quote.spread}: {formatSpread(quote.spread_bps)}%
+                      </span>
+                    )}
+                    {quote.fee_bps > 0 && (
+                      <span className="rounded-full bg-white/10 px-3 py-1">
+                        {t.trade.quote.feeRate.replace('{bps}', String(quote.fee_bps))}
+                      </span>
+                    )}
+                    {staleQuote && (
+                      <span className="rounded-full bg-yellow-500/10 px-3 py-1 text-yellow-200">
+                        {t.trade.quote.needsRefresh}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+              {quoteError && (
+                <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-200">
+                  {quoteError}
+                </div>
+              )}
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={handleGetQuote}
+                  disabled={!selectedAsset || !normalizedAmount || loadingQuote}
+                  className="flex-1 rounded-2xl bg-white px-4 py-3 text-sm font-semibold text-black shadow-lg transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {loadingQuote ? t.trade.loading : t.trade.getQuote}
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  disabled={!quote || submitting || quoteExpired || staleQuote}
+                  className="flex-1 rounded-2xl border border-emerald-400/40 bg-emerald-500/20 px-4 py-3 text-sm font-semibold text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {submitting ? t.trade.submitting : t.trade.confirm}
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-white/50">
+                <span>{t.trade.pricing}</span>
+                {assetList && <span>{t.trade.assetsAvailable.replace('{assets}', assetList)}</span>}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
