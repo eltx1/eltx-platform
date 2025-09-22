@@ -142,6 +142,9 @@ ALTER TABLE asset_prices
   ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER spread_bps;
 INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('ELTX', 1, 0, 0);
 INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('USDT', 1, 1, 0);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('USDC', 1, 1, 0);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('BNB', 0, 0.01, 25);
+INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('ETH', 0, 0.005, 25);
 
 -- stored swap quotes
 CREATE TABLE IF NOT EXISTS trade_quotes (
