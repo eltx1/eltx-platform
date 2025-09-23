@@ -28,6 +28,7 @@ export default function PositionsPage() {
           <thead className="sticky top-0 bg-white/10">
             <tr>
               <th className="p-2 text-left">Plan</th>
+              <th className="p-2 text-left">Asset</th>
               <th className="p-2 text-right">Amount</th>
               <th className="p-2 text-right">Accrued</th>
               <th className="p-2 text-left">End</th>
@@ -38,8 +39,13 @@ export default function PositionsPage() {
             {positions.map((p) => (
               <tr key={p.id} className="border-b border-white/5 hover:bg-white/5">
                 <td className="p-2">{p.name}</td>
-                <td className="p-2 text-right">{p.amount}</td>
-                <td className="p-2 text-right">{p.accrued_total}</td>
+                <td className="p-2">{(p.stake_asset || 'ELTX').toUpperCase()}</td>
+                <td className="p-2 text-right">
+                  {p.amount} {(p.stake_asset || 'ELTX').toUpperCase()}
+                </td>
+                <td className="p-2 text-right">
+                  {p.accrued_total} {(p.stake_asset || 'ELTX').toUpperCase()}
+                </td>
                 <td className="p-2">{p.end_date?.slice(0, 10)}</td>
                 <td className="p-2">{p.status}</td>
               </tr>

@@ -605,6 +605,8 @@ export default function SpotTradePage() {
     }
     toast({ message: t.spotTrade.notifications.placed, variant: 'success' });
     if (res.data.order.status === 'filled') toast({ message: t.spotTrade.notifications.filled, variant: 'success' });
+    else if (res.data.order.status === 'cancelled')
+      toast({ message: t.spotTrade.notifications.cancelledNoLiquidity, variant: 'error' });
     setAmount('');
     if (formType === 'limit') setPrice('');
     loadOrderbook(selectedMarket);
