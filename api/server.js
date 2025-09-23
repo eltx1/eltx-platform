@@ -2152,13 +2152,27 @@ app.get('/api/transactions', walletLimiter, async (req, res, next) => {
 app.get('/staking/plans', async (req, res, next) => {
   try {
     const [rows] = await pool.query('SELECT * FROM staking_plans WHERE is_active=1');
-    const plans = rows.map((r) => ({
-      id: r.id,
-      name: r.name || r.title,
-      duration_days: r.duration_days ?? r.duration_months ?? null,
-      apr_bps: r.apr_bps ?? r.daily_rate ?? null,
-      min_deposit_wei: r.min_deposit_wei ? r.min_deposit_wei.toString() : undefined,
-    }));
+    const plans = rows.map((r) => {
+      const asset = (r.stake_asset || 'ELTX').toUpperCase();
+      const decimalsRaw = r.stake_decimals !== undefined && r.stake_decimals !== null ? Number(r.stake_decimals) : null;
+      const decimals = Number.isFinite(decimalsRaw) && decimalsRaw > 0 ? decimalsRaw : getSymbolDecimals(asset);
+      const minDepositWei = r.min_deposit_wei ? bigIntFromValue(r.min_deposit_wei) : 0n;
+      let minDeposit = null;
+      if (minDepositWei > 0n) {
+        const decimalVal = decimalFromWei(minDepositWei, decimals);
+        minDeposit = formatDecimalValue(decimalVal, Math.min(decimals, 8));
+      }
+      return {
+        id: r.id,
+        name: r.name || r.title,
+        duration_days: r.duration_days ?? r.duration_months ?? null,
+        apr_bps: r.apr_bps ?? r.daily_rate ?? null,
+        asset,
+        asset_decimals: decimals,
+        min_deposit: minDeposit,
+        min_deposit_wei: minDepositWei > 0n ? minDepositWei.toString() : null,
+      };
+    });
     res.json({ ok: true, plans });
   } catch (err) {
     next(err);
@@ -2172,18 +2186,80 @@ app.post('/staking/positions', async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const { planId, amount } = CreatePosSchema.parse(req.body);
-    const amt = parseFloat(amount);
-    if (amt <= 0) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    const normalizedAmount = amount.trim();
+    if (!normalizedAmount)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
     conn = await pool.getConnection();
-    const [[plan]] = await conn.query('SELECT id,duration_days,apr_bps FROM staking_plans WHERE id=? AND is_active=1', [planId]);
-    if (!plan) return next({ status: 400, code: 'INVALID_PLAN', message: 'Plan not found' });
-    const daily = +(amt * (plan.apr_bps / 10000 / 365)).toFixed(8);
-    const [result] = await conn.query(
-      'INSERT INTO staking_positions (user_id,plan_id,amount,apr_bps_snapshot,start_date,end_date,daily_reward) VALUES (?, ?, ?, ?, CURDATE(), DATE_ADD(CURDATE(), INTERVAL ? DAY), ?)',
-      [userId, plan.id, amt, plan.apr_bps, plan.duration_days, daily]
+    await conn.beginTransaction();
+    const [[plan]] = await conn.query(
+      'SELECT id, duration_days, apr_bps, stake_asset, stake_decimals, min_deposit_wei FROM staking_plans WHERE id=? AND is_active=1',
+      [planId]
     );
+    if (!plan) return next({ status: 400, code: 'INVALID_PLAN', message: 'Plan not found' });
+    const asset = (plan.stake_asset || 'ELTX').toUpperCase();
+    const decimalsRaw = plan.stake_decimals !== undefined && plan.stake_decimals !== null ? Number(plan.stake_decimals) : null;
+    const stakeDecimals = Number.isFinite(decimalsRaw) && decimalsRaw > 0 ? decimalsRaw : getSymbolDecimals(asset);
+    let amountWei;
+    try {
+      amountWei = ethers.parseUnits(normalizedAmount, stakeDecimals);
+    } catch {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+    if (amountWei <= 0n) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+
+    const minDepositWei = plan.min_deposit_wei ? bigIntFromValue(plan.min_deposit_wei) : 0n;
+    if (minDepositWei > 0n && amountWei < minDepositWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount below minimum' });
+    }
+
+    const [balanceRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+      [userId, asset]
+    );
+    if (!balanceRows.length) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+    }
+    const balanceWei = bigIntFromValue(balanceRows[0].balance_wei);
+    if (balanceWei < amountWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+    }
+
+    await conn.query(
+      'UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?',
+      [amountWei.toString(), userId, asset]
+    );
+
+    const amountDecimal = decimalFromWei(amountWei, stakeDecimals);
+    const amountStr = formatDecimalValue(amountDecimal, Math.min(stakeDecimals, 18));
+    const aprBps = Number(plan.apr_bps || 0);
+    const dailyDecimal = amountDecimal.mul(aprBps).div(10000).div(365);
+    const dailyStr = formatDecimalValue(dailyDecimal, Math.min(stakeDecimals, 18));
+
+    const [result] = await conn.query(
+      'INSERT INTO staking_positions (user_id,plan_id,stake_asset,stake_decimals,amount,amount_wei,apr_bps_snapshot,start_date,end_date,daily_reward) VALUES (?, ?, ?, ?, ?, ?, ?, CURDATE(), DATE_ADD(CURDATE(), INTERVAL ? DAY), ?)',
+      [
+        userId,
+        plan.id,
+        asset,
+        stakeDecimals,
+        amountStr,
+        amountWei.toString(),
+        aprBps,
+        plan.duration_days,
+        dailyStr,
+      ]
+    );
+    await conn.commit();
     res.json({ ok: true, id: result.insertId });
   } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input' });
     next(err);
@@ -2196,10 +2272,38 @@ app.get('/staking/positions', async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
-      'SELECT sp.id, sp.amount, sp.start_date, sp.end_date, sp.daily_reward, sp.accrued_total, sp.status, pl.name FROM staking_positions sp JOIN staking_plans pl ON sp.plan_id=pl.id WHERE sp.user_id=? ORDER BY sp.created_at DESC',
+      `SELECT sp.id, sp.amount, sp.amount_wei, sp.stake_asset, sp.stake_decimals, sp.start_date, sp.end_date, sp.daily_reward,
+              sp.accrued_total, sp.status, pl.name
+         FROM staking_positions sp
+         JOIN staking_plans pl ON sp.plan_id=pl.id
+        WHERE sp.user_id=?
+        ORDER BY sp.created_at DESC`,
       [userId]
     );
-    res.json({ ok: true, positions: rows });
+    const positions = rows.map((row) => {
+      const asset = (row.stake_asset || 'ELTX').toUpperCase();
+      const decimalsRaw = row.stake_decimals !== undefined && row.stake_decimals !== null ? Number(row.stake_decimals) : null;
+      const stakeDecimals = Number.isFinite(decimalsRaw) && decimalsRaw > 0 ? decimalsRaw : getSymbolDecimals(asset);
+      const amountWei = row.amount_wei ? bigIntFromValue(row.amount_wei) : 0n;
+      const amountDecimal = decimalFromWei(amountWei, stakeDecimals);
+      const amount = formatDecimalValue(amountDecimal, Math.min(stakeDecimals, 8));
+      const daily = formatDecimalValue(row.daily_reward, Math.min(stakeDecimals, 8));
+      const accrued = formatDecimalValue(row.accrued_total, Math.min(stakeDecimals, 8));
+      return {
+        id: row.id,
+        name: row.name,
+        amount,
+        amount_wei: amountWei.toString(),
+        daily_reward: daily,
+        accrued_total: accrued,
+        stake_asset: asset,
+        stake_decimals: stakeDecimals,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        status: row.status,
+      };
+    });
+    res.json({ ok: true, positions });
   } catch (err) {
     next(err);
   }

@@ -219,6 +219,7 @@ export const dict = {
         placed: 'Order placed.',
         cancelled: 'Order cancelled.',
         filled: 'Order filled.',
+        cancelledNoLiquidity: 'Order cancelled because no liquidity was available.',
       },
       errors: {
         marketRequired: 'Select a market first.',
@@ -536,6 +537,7 @@ export const dict = {
         placed: 'تم إنشاء الأمر.',
         cancelled: 'تم إلغاء الأمر.',
         filled: 'تم تنفيذ الأمر بالكامل.',
+        cancelledNoLiquidity: 'الأمر اتلغى تلقائيًا علشان مافيش سيولة كفاية دلوقتي.',
       },
       errors: {
         marketRequired: 'يرجى اختيار السوق.',
