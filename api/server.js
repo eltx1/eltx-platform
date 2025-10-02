@@ -203,8 +203,30 @@ ensureWalletSchema().catch(() => {});
 const startRunner = require('./background/runner');
 startRunner(pool);
 
-const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
-const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+function createJsonRateLimiter({ windowMs, max, code = 'RATE_LIMITED', message = 'Too many requests. Please slow down.' }) {
+  return rateLimit({
+    windowMs,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req, res, next, options) => {
+      const status = options?.statusCode ?? 429;
+      res.status(status).json({ ok: false, error: { code, message } });
+    },
+  });
+}
+
+const loginLimiter = createJsonRateLimiter({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: 'Too many login attempts. Please wait before trying again.',
+});
+const walletLimiter = createJsonRateLimiter({ windowMs: 60 * 1000, max: 120 });
+const spotDataLimiter = createJsonRateLimiter({
+  windowMs: 60 * 1000,
+  max: 240,
+  message: 'Too many spot refresh requests. Please slow down.',
+});
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const sessionCookie = {
@@ -887,7 +909,7 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
+app.get('/wallet/assets', spotDataLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
@@ -1442,7 +1464,7 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/markets', walletLimiter, async (req, res, next) => {
+app.get('/spot/markets', spotDataLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const [rows] = await pool.query(
@@ -1485,7 +1507,7 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
+app.get('/spot/orderbook', spotDataLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const { market } = SpotOrderbookSchema.parse({ market: req.query.market });
@@ -1563,7 +1585,7 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/candles', walletLimiter, async (req, res, next) => {
+app.get('/spot/candles', spotDataLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const query = {
@@ -1657,7 +1679,7 @@ app.get('/spot/candles', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/orders', walletLimiter, async (req, res, next) => {
+app.get('/spot/orders', spotDataLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const { market } = SpotOrdersQuerySchema.parse({ market: req.query.market });
