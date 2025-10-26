@@ -1,3 +1,4 @@
+require('dotenv').config({ path: '/home/dash/.env' });
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -9,6 +10,8 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
+const { provisionUserAddress } = require('./src/services/wallet');
+//require('dotenv').config();
 const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
@@ -18,7 +21,7 @@ const {
   getSwapPricingMode,
   isSupportedSwapAsset,
 } = require('./src/services/pricing');
-require('dotenv').config();
+//require('dotenv').config();
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
