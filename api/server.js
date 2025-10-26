@@ -19,7 +19,6 @@ const {
   getSwapPricingMode,
   isSupportedSwapAsset,
 } = require('./src/services/pricing');
-//require('dotenv').config();
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
