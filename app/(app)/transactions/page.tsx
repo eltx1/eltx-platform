@@ -1,18 +1,25 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
-import { ethers } from 'ethers';
-
-type Deposit = {
-  tx_hash: string;
+type Transaction = {
+  tx_hash: string | null;
   amount_wei: string;
+  display_symbol: string;
+  decimals: number;
+  amount_formatted: string;
+  amount_int: string;
   confirmations: number;
   status: string;
   created_at: string;
+  type: 'deposit' | 'transfer';
+  direction?: 'in' | 'out';
+  counterparty?: number;
+  chain_id?: number;
 };
 
 export default function TransactionsPage() {
@@ -20,7 +27,7 @@ export default function TransactionsPage() {
   const router = useRouter();
   const { lang } = useLang();
   const t = dict[lang];
-  const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState<'all' | 'pending' | 'confirmed'>('all');
 
   useEffect(() => {
@@ -28,22 +35,38 @@ export default function TransactionsPage() {
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch('/wallet/me')
-      .then(d => setDeposits(d.deposits || []))
-      .catch(err => { if (err.status === 401) router.replace('/login'); });
+    const load = () => {
+      apiFetch<{ transactions: Transaction[] }>('/wallet/transactions').then(res => {
+        if (!res.ok) {
+          if (res.status === 401) router.replace('/login');
+        } else {
+          setTransactions(res.data.transactions || []);
+        }
+      });
+    };
+    load();
+    const id = setInterval(load, 10000);
+    const onFocus = () => load();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [router]);
 
   const statusLabel = (s: string) => {
     if (s === 'seen') return t.wallet.table.status.pending;
     if (s === 'confirmed' || s === 'swept') return t.wallet.table.status.confirmed;
     if (s === 'orphaned') return t.wallet.table.status.orphaned;
+    if (s === 'sent') return t.wallet.transfer.sent;
+    if (s === 'received') return t.wallet.transfer.received;
     return s;
   };
 
-  const filtered = deposits.filter(d => {
+  const filtered = transactions.filter(d => {
     if (filter === 'all') return true;
     if (filter === 'pending') return d.status === 'seen';
-    return d.status === 'confirmed' || d.status === 'swept';
+    return d.status === 'confirmed' || d.status === 'swept' || d.status === 'sent' || d.status === 'received';
   });
 
   return (
@@ -60,20 +83,30 @@ export default function TransactionsPage() {
       </select>
       <div className="space-y-2">
         {filtered.map(d => (
-          <div key={d.tx_hash} className="p-3 bg-white/5 rounded text-sm space-y-1">
+          <div key={(d.tx_hash || '') + d.created_at} className="p-3 bg-white/5 rounded text-sm space-y-1">
             <div className="flex justify-between text-xs opacity-70">
               <span>{new Date(d.created_at).toLocaleString()}</span>
               <span>{d.confirmations}</span>
             </div>
-            <a
-              href={`https://bscscan.com/tx/${d.tx_hash}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="break-all underline"
-            >
-              {d.tx_hash}
-            </a>
-            <div>{Number(ethers.formatEther(d.amount_wei)).toFixed(4)} BNB</div>
+            {d.tx_hash ? (
+              <a
+                href={`${d.chain_id === 1 ? 'https://etherscan.io/tx/' : 'https://bscscan.com/tx/'}${d.tx_hash}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all underline"
+              >
+                {d.tx_hash}
+              </a>
+            ) : (
+              <div>
+                {d.direction === 'out'
+                  ? `${t.wallet.transfer.to} ${d.counterparty}`
+                  : `${t.wallet.transfer.from} ${d.counterparty}`}
+              </div>
+            )}
+            <div>
+              {(d.direction === 'out' ? '-' : '') + Number(d.amount_formatted).toFixed(6)} {d.display_symbol}
+            </div>
             <div className="text-xs">{statusLabel(d.status)}</div>
           </div>
         ))}

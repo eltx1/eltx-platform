@@ -21,15 +21,26 @@
       {
         "name": "next"
       }
-    ]
+    ],
+    "allowImportingTsExtensions": true
   },
   "include": [
     "next-env.d.ts",
-    "**/*.ts",
-    "**/*.tsx",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "styles/**/*.ts",
+    "styles/**/*.tsx",
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "api",
+    "apps/worker",
+    "apps/api",
+    "apps/worker2",
+    "apps/sweeper",
+    "apps/shared"
   ]
 }

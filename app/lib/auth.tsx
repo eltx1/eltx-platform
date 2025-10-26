@@ -14,20 +14,14 @@ const AuthContext = createContext<AuthContextType>({ user: undefined, refresh: a
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any | null | undefined>(undefined);
   const refresh = async () => {
-    try {
-      const u = await apiFetch('/auth/me');
-      setUser(u);
-    } catch {
-      setUser(null);
-    }
+    const res = await apiFetch<any>('/auth/me');
+    setUser(res.ok ? res.data : null);
   };
   useEffect(() => {
     refresh();
   }, []);
   const logout = async () => {
-    try {
-      await apiFetch('/auth/logout', { method: 'POST' });
-    } catch {}
+    await apiFetch('/auth/logout', { method: 'POST' });
     setUser(null);
   };
   return <AuthContext.Provider value={{ user, refresh, logout }}>{children}</AuthContext.Provider>;
