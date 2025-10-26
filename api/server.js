@@ -1,3 +1,4 @@
+require('dotenv').config({ path: '/home/dash/.env' });
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
@@ -8,7 +9,7 @@ const helmet = require('helmet');
 const crypto = require('crypto');
 const { z } = require('zod');
 const { provisionUserAddress } = require('./src/services/wallet');
-require('dotenv').config();
+//require('dotenv').config();
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
