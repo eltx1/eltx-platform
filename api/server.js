@@ -10,8 +10,6 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { z } = require('zod');
-const { provisionUserAddress } = require('./src/services/wallet');
-//require('dotenv').config();
 const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
