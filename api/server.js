@@ -12,6 +12,7 @@ const path = require('path');
 const { z } = require('zod');
 const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
+const Stripe = require('stripe');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 const {
   syncSwapAssetPrices,
@@ -19,6 +20,33 @@ const {
   getSwapPricingMode,
   isSupportedSwapAsset,
 } = require('./src/services/pricing');
+
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
+const STRIPE_PUBLISHABLE_KEY =
+  process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || null;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || null;
+const STRIPE_MIN_PURCHASE_USD = Number(process.env.STRIPE_MIN_PURCHASE_USD || '10');
+const STRIPE_MAX_PURCHASE_USD = process.env.STRIPE_MAX_PURCHASE_USD
+  ? Number(process.env.STRIPE_MAX_PURCHASE_USD)
+  : null;
+const STRIPE_RETURN_BASE =
+  process.env.APP_BASE_URL || process.env.STRIPE_RETURN_URL_BASE || 'https://eltx.online';
+const STRIPE_SUCCESS_URL =
+  process.env.STRIPE_SUCCESS_URL || `${STRIPE_RETURN_BASE}/buy?status=success&session_id={CHECKOUT_SESSION_ID}`;
+const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL || `${STRIPE_RETURN_BASE}/buy?status=cancelled`;
+
+let stripe = null;
+if (STRIPE_SECRET_KEY) {
+  try {
+    stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+  } catch (err) {
+    console.error('[stripe] init failed', err.message || err);
+    stripe = null;
+  }
+}
+const STRIPE_ENABLED = !!stripe && !!STRIPE_PUBLISHABLE_KEY;
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
@@ -41,6 +69,7 @@ app.use((req, res, next) => {
   res.setHeader('x-request-id', req.requestId);
   next();
 });
+app.use('/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 app.use(cookieParser());
 // ensure wallet routes are not cached
@@ -636,6 +665,11 @@ const SpotCandlesQuerySchema = z.object({
   limit: z.coerce.number().int().min(10).max(500).default(200),
 });
 
+const StripeSessionSchema = z.object({
+  amount_usd: z.union([z.string(), z.number()]),
+  expected_price_eltx: z.string().optional(),
+});
+
 const CANDLE_INTERVALS = {
   '5m': { seconds: 300 },
   '1h': { seconds: 3600 },
@@ -652,6 +686,236 @@ async function requireUser(req) {
   if (!rows.length) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
   return rows[0].id;
 }
+
+app.post('/stripe/webhook', async (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(503).send('Stripe unavailable');
+  }
+  const signature = req.headers['stripe-signature'];
+  if (!signature) return res.status(400).send('Missing signature');
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.warn('[stripe] invalid webhook signature', err.message || err);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed':
+        await handleStripeCheckoutCompleted(event.data.object);
+        break;
+      case 'checkout.session.expired':
+        await markStripeSessionStatus(event.data.object, 'expired');
+        break;
+      case 'payment_intent.payment_failed':
+      case 'payment_intent.canceled':
+        await handleStripePaymentFailed(event.data.object);
+        break;
+      case 'charge.refunded':
+      case 'charge.refund.updated':
+        await handleStripeRefund(event.data.object);
+        break;
+      default:
+        break;
+    }
+    res.json({ received: true });
+  } catch (err) {
+    console.error('[stripe] webhook handler failed', err);
+    res.status(500).send('Webhook handler error');
+  }
+});
+
+app.get('/fiat/stripe/rate', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    if (stripe) {
+      try {
+        await syncSwapAssetPrices(pool);
+      } catch (err) {
+        console.warn('[stripe] price sync skipped', err.message || err);
+      }
+    }
+    const pricing = await getStripePricing(pool);
+    const min = pricing.min.toFixed(2, Decimal.ROUND_UP);
+    const max = pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null;
+    res.json({
+      ok: true,
+      pricing: {
+        asset: pricing.asset,
+        price_eltx: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
+        min_usd: min,
+        max_usd: max,
+        updated_at: pricing.updatedAt,
+      },
+      stripe: {
+        enabled: STRIPE_ENABLED,
+        publishableKey: STRIPE_PUBLISHABLE_KEY,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
+  if (!STRIPE_ENABLED) {
+    return next({ status: 503, code: 'STRIPE_DISABLED', message: 'Card payments are not available right now.' });
+  }
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = StripeSessionSchema.parse(req.body || {});
+    const amountInput =
+      typeof payload.amount_usd === 'number' ? payload.amount_usd.toString() : String(payload.amount_usd || '').trim();
+    let amountDecimal;
+    try {
+      amountDecimal = new Decimal(amountInput || '0');
+    } catch {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+    if (!amountDecimal.isFinite() || amountDecimal.lte(0)) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const pricing = await getStripePricing(conn);
+    const min = pricing.min;
+    const max = pricing.max;
+    if (amountDecimal.lt(min)) {
+      await conn.rollback();
+      return next({
+        status: 400,
+        code: 'AMOUNT_TOO_SMALL',
+        message: 'Amount below minimum',
+        details: { min: min.toFixed(2, Decimal.ROUND_UP) },
+      });
+    }
+    if (max && amountDecimal.gt(max)) {
+      await conn.rollback();
+      return next({
+        status: 400,
+        code: 'AMOUNT_TOO_LARGE',
+        message: 'Amount above maximum',
+        details: { max: max.toFixed(2, Decimal.ROUND_DOWN) },
+      });
+    }
+
+    const normalizedUsd = amountDecimal.toFixed(2, Decimal.ROUND_HALF_UP);
+    const amountMinor = Number(amountDecimal.mul(100).toFixed(0, Decimal.ROUND_HALF_UP));
+    if (!Number.isFinite(amountMinor) || amountMinor <= 0) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+
+    const price = pricing.price;
+    const eltxDecimal = amountDecimal.mul(price);
+    const eltxAmount = eltxDecimal.toFixed(18, Decimal.ROUND_DOWN);
+    const eltxWei = ethers.parseUnits(eltxAmount, 18).toString();
+
+    const [[userRow]] = await conn.query('SELECT email FROM users WHERE id=? LIMIT 1', [userId]);
+
+    const [insert] = await conn.query(
+      `INSERT INTO fiat_purchases (user_id, status, currency, usd_amount, usd_amount_minor, price_eltx, eltx_amount, eltx_amount_wei)
+       VALUES (?, 'pending', 'USD', ?, ?, ?, ?, ?)`,
+      [userId, normalizedUsd, amountMinor, price.toFixed(18, Decimal.ROUND_DOWN), eltxAmount, eltxWei]
+    );
+    const purchaseId = insert.insertId;
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      client_reference_id: String(purchaseId),
+      customer_email: userRow?.email || undefined,
+      success_url: STRIPE_SUCCESS_URL,
+      cancel_url: STRIPE_CANCEL_URL,
+      metadata: { purchaseId: String(purchaseId), userId: String(userId) },
+      payment_intent_data: {
+        metadata: { purchaseId: String(purchaseId), userId: String(userId) },
+      },
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: 'usd',
+            product_data: { name: 'ELTX Purchase' },
+            unit_amount: amountMinor,
+          },
+        },
+      ],
+    });
+
+    await conn.query('UPDATE fiat_purchases SET stripe_session_id=?, updated_at=NOW() WHERE id=?', [session.id, purchaseId]);
+    await conn.commit();
+
+    res.json({
+      ok: true,
+      sessionId: session.id,
+      publishableKey: STRIPE_PUBLISHABLE_KEY,
+      limits: {
+        min_usd: min.toFixed(2, Decimal.ROUND_UP),
+        max_usd: max ? max.toFixed(2, Decimal.ROUND_DOWN) : null,
+      },
+      quote: {
+        price_eltx: price.toFixed(18, Decimal.ROUND_DOWN),
+        eltx_amount: eltxAmount,
+        eltx_amount_wei: eltxWei,
+        usd_amount: normalizedUsd,
+      },
+    });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/fiat/stripe/purchases', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT id, user_id, status, currency, usd_amount, usd_amount_minor, price_eltx, eltx_amount, eltx_amount_wei,
+              credited, stripe_payment_intent_id, stripe_session_id, amount_charged_minor,
+              created_at, completed_at, credited_at
+         FROM fiat_purchases
+         WHERE user_id=?
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      [userId]
+    );
+    res.json({ ok: true, purchases: rows.map(formatFiatPurchaseRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/fiat/stripe/session/:sessionId', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const sessionId = req.params.sessionId;
+    if (!sessionId) return next({ status: 400, code: 'BAD_INPUT', message: 'Session id required' });
+    const [[row]] = await pool.query(
+      `SELECT id, user_id, status, currency, usd_amount, usd_amount_minor, price_eltx, eltx_amount, eltx_amount_wei,
+              credited, stripe_payment_intent_id, stripe_session_id, amount_charged_minor,
+              created_at, completed_at, credited_at
+         FROM fiat_purchases
+         WHERE stripe_session_id=? AND user_id=?
+         LIMIT 1`,
+      [sessionId, userId]
+    );
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Session not found' });
+    res.json({ ok: true, purchase: formatFiatPurchaseRow(row) });
+  } catch (err) {
+    next(err);
+  }
+});
 
 app.post('/auth/signup', async (req, res, next) => {
   let conn;
@@ -2328,6 +2592,252 @@ app.post('/staking/positions/:id/close', async (req, res, next) => {
     next(err);
   }
 });
+
+function toPlainIntegerString(value) {
+  if (value === null || value === undefined) return '0';
+  const str = value.toString();
+  return str.includes('.') ? str.split('.')[0] : str;
+}
+
+function isTruthyFlag(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'boolean') return value;
+  const str = value.toString().toLowerCase();
+  return str === '1' || str === 'true' || str === 'yes';
+}
+
+async function getStripePricing(conn = pool) {
+  let row = null;
+  try {
+    const [rows] = await conn.query(
+      'SELECT asset, price_eltx, min_amount, max_amount, updated_at FROM asset_prices WHERE UPPER(asset)=? LIMIT 1',
+      ['USDC']
+    );
+    if (rows.length) row = rows[0];
+  } catch (err) {
+    console.warn('[stripe] failed to read asset_prices', err.message || err);
+  }
+
+  let price = null;
+  if (row?.price_eltx !== undefined && row.price_eltx !== null) {
+    try {
+      const candidate = new Decimal(row.price_eltx);
+      if (candidate.isFinite() && candidate.gt(0)) price = candidate;
+    } catch {}
+  }
+  if (!price) {
+    const base = Number.parseFloat(process.env.ELTX_PRICE_USD || '1');
+    const normalizedBase = Number.isFinite(base) && base > 0 ? base : 1;
+    try {
+      price = new Decimal(1).div(normalizedBase);
+    } catch {
+      price = new Decimal(1);
+    }
+  }
+
+  let min = new Decimal(Number.isFinite(STRIPE_MIN_PURCHASE_USD) && STRIPE_MIN_PURCHASE_USD > 0 ? STRIPE_MIN_PURCHASE_USD : 10);
+  if (row?.min_amount !== undefined && row.min_amount !== null) {
+    try {
+      const dbMin = new Decimal(row.min_amount);
+      if (dbMin.isFinite() && dbMin.gt(min)) min = dbMin;
+    } catch {}
+  }
+
+  let max = null;
+  if (Number.isFinite(STRIPE_MAX_PURCHASE_USD) && STRIPE_MAX_PURCHASE_USD > 0) {
+    try {
+      max = new Decimal(STRIPE_MAX_PURCHASE_USD);
+    } catch {}
+  }
+  if (row?.max_amount !== undefined && row.max_amount !== null) {
+    try {
+      const dbMax = new Decimal(row.max_amount);
+      if (dbMax.isFinite() && dbMax.gt(0)) {
+        max = max ? Decimal.min(max, dbMax) : dbMax;
+      }
+    } catch {}
+  }
+
+  return { asset: row?.asset || 'USDC', price, min, max, updatedAt: row?.updated_at || null };
+}
+
+function formatFiatPurchaseRow(row) {
+  const usdMinorRaw = row.usd_amount_minor !== undefined && row.usd_amount_minor !== null ? row.usd_amount_minor : 0;
+  const usdMinor = Number(usdMinorRaw);
+  return {
+    id: row.id,
+    status: row.status,
+    usd_amount: row.usd_amount?.toString() || '0',
+    usd_amount_minor: Number.isFinite(usdMinor) ? usdMinor : 0,
+    price_eltx: row.price_eltx?.toString() || '0',
+    eltx_amount: row.eltx_amount?.toString() || '0',
+    eltx_amount_wei: toPlainIntegerString(row.eltx_amount_wei),
+    credited: isTruthyFlag(row.credited),
+    stripe_payment_intent_id: row.stripe_payment_intent_id || null,
+    stripe_session_id: row.stripe_session_id || null,
+    amount_charged_minor:
+      row.amount_charged_minor !== undefined && row.amount_charged_minor !== null
+        ? Number(row.amount_charged_minor)
+        : null,
+    created_at: row.created_at,
+    completed_at: row.completed_at || null,
+    credited_at: row.credited_at || null,
+  };
+}
+
+async function creditFiatPurchase(conn, purchase, refs = {}) {
+  const alreadyCredited = isTruthyFlag(purchase.credited);
+  if (alreadyCredited) {
+    if (refs.paymentIntentId) {
+      await conn.query(
+        'UPDATE fiat_purchases SET stripe_payment_intent_id=COALESCE(?, stripe_payment_intent_id) WHERE id=?',
+        [refs.paymentIntentId, purchase.id]
+      );
+    }
+    return;
+  }
+
+  const eltxWei = BigInt(toPlainIntegerString(purchase.eltx_amount_wei));
+  if (eltxWei <= 0n) {
+    await conn.query('UPDATE fiat_purchases SET credited=1, credited_at=NOW() WHERE id=?', [purchase.id]);
+    return;
+  }
+
+  await conn.query(
+    `INSERT INTO user_balances (user_id, asset, balance_wei, created_at)
+     VALUES (?, ?, ?, NOW())
+     ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+    [purchase.user_id, ELTX_SYMBOL, eltxWei.toString()]
+  );
+
+  const txHash = refs.paymentIntentId
+    ? `stripe:${refs.paymentIntentId}`
+    : refs.sessionId
+    ? `stripe_session:${refs.sessionId}`
+    : `stripe:${purchase.id}`;
+
+  const [depositRes] = await conn.query(
+    `INSERT INTO wallet_deposits (
+        user_id, chain_id, address, token_symbol, tx_hash, log_index, block_number, block_hash,
+        token_address, amount_wei, confirmations, status, credited, source, created_at, last_update_at)
+     VALUES (?, ?, ?, ?, ?, 0, 0, ?, ?, ?, 0, 'confirmed', 1, 'stripe', NOW(), NOW())
+     ON DUPLICATE KEY UPDATE
+       id=LAST_INSERT_ID(id),
+       status='confirmed',
+       credited=1,
+       amount_wei=VALUES(amount_wei),
+       source='stripe',
+       last_update_at=NOW()`,
+    [purchase.user_id, 0, 'stripe', ELTX_SYMBOL, txHash, 'stripe', ZERO_ADDRESS, eltxWei.toString()]
+  );
+  const depositId = depositRes.insertId;
+
+  await conn.query(
+    'UPDATE fiat_purchases SET credited=1, credited_at=NOW(), wallet_deposit_id=COALESCE(wallet_deposit_id, ?) WHERE id=?',
+    [depositId, purchase.id]
+  );
+}
+
+async function handleStripeCheckoutCompleted(session) {
+  const metadata = session.metadata || {};
+  const purchaseId = metadata.purchaseId ? Number(metadata.purchaseId) : null;
+  if (!purchaseId) {
+    console.warn('[stripe] checkout completed without purchaseId metadata');
+    return;
+  }
+
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[purchase]] = await conn.query('SELECT * FROM fiat_purchases WHERE id=? FOR UPDATE', [purchaseId]);
+    if (!purchase) {
+      await conn.rollback();
+      console.warn('[stripe] purchase not found for checkout session', purchaseId);
+      return;
+    }
+
+    const paymentIntentId = session.payment_intent ? String(session.payment_intent) : null;
+    const amountTotal =
+      session.amount_total !== undefined && session.amount_total !== null ? Number(session.amount_total) : null;
+    const currency = (session.currency || purchase.currency || 'USD').toUpperCase();
+
+    await conn.query(
+      `UPDATE fiat_purchases
+         SET status='succeeded',
+             stripe_payment_intent_id=COALESCE(?, stripe_payment_intent_id),
+             amount_charged_minor=COALESCE(?, amount_charged_minor),
+             currency=?,
+             stripe_session_id=COALESCE(?, stripe_session_id),
+             completed_at=NOW(),
+             updated_at=NOW()
+       WHERE id=?`,
+      [paymentIntentId, amountTotal, currency, session.id, purchaseId]
+    );
+
+    purchase.credited = isTruthyFlag(purchase.credited);
+    await creditFiatPurchase(conn, purchase, { paymentIntentId, sessionId: session.id });
+    await conn.commit();
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    throw err;
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
+async function markStripeSessionStatus(session, status) {
+  const metadata = session.metadata || {};
+  const purchaseId = metadata.purchaseId ? Number(metadata.purchaseId) : null;
+  try {
+    if (purchaseId) {
+      await pool.query(
+        "UPDATE fiat_purchases SET status=?, updated_at=NOW() WHERE id=? AND status IN ('pending','failed')",
+        [status, purchaseId]
+      );
+    } else if (session.id) {
+      await pool.query(
+        "UPDATE fiat_purchases SET status=?, updated_at=NOW() WHERE stripe_session_id=? AND status IN ('pending','failed')",
+        [status, session.id]
+      );
+    }
+  } catch (err) {
+    console.error('[stripe] failed to update session status', err);
+  }
+}
+
+async function handleStripePaymentFailed(paymentIntent) {
+  const metadata = paymentIntent.metadata || {};
+  const purchaseId = metadata.purchaseId ? Number(metadata.purchaseId) : null;
+  if (!purchaseId) return;
+  try {
+    const failureCode = paymentIntent.last_payment_error?.code || paymentIntent.status || null;
+    const failureMessage = paymentIntent.last_payment_error?.message || null;
+    await pool.query(
+      "UPDATE fiat_purchases SET status='failed', failure_code=?, failure_message=?, stripe_payment_intent_id=COALESCE(?, stripe_payment_intent_id), updated_at=NOW() WHERE id=? AND status IN ('pending','failed')",
+      [failureCode, failureMessage, paymentIntent.id, purchaseId]
+    );
+  } catch (err) {
+    console.error('[stripe] failed to mark purchase failed', err);
+  }
+}
+
+async function handleStripeRefund(charge) {
+  const paymentIntentId = charge.payment_intent ? String(charge.payment_intent) : null;
+  if (!paymentIntentId) return;
+  try {
+    await pool.query(
+      "UPDATE fiat_purchases SET status='refunded', failure_code='refunded', failure_message=NULL, updated_at=NOW() WHERE stripe_payment_intent_id=?",
+      [paymentIntentId]
+    );
+  } catch (err) {
+    console.error('[stripe] failed to mark purchase refunded', err);
+  }
+}
 
 app.use((err, req, res, next) => {
   const id = req.requestId || crypto.randomUUID();

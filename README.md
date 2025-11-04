@@ -50,6 +50,36 @@ SESSION_COOKIE_NAME
 
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.
 
+### Stripe card payments
+
+The dashboard now exposes a **Buy Crypto** flow backed by Stripe. To activate it you must set the
+following variables (see `.env.example` for defaults):
+
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_PUBLISHABLE_KEY` (optional if you reuse the public key)
+- `STRIPE_SECRET_KEY`
+- `STRIPE_WEBHOOK_SECRET`
+- `APP_BASE_URL`, `STRIPE_SUCCESS_URL`, and `STRIPE_CANCEL_URL` for redirect handling
+- `STRIPE_MIN_PURCHASE_USD` / `STRIPE_MAX_PURCHASE_USD` to clamp purchase limits
+
+After configuring the keys, register the webhook endpoint at
+`https://<api-domain>/stripe/webhook` inside your Stripe dashboard.
+
+#### Database migration
+
+The feature introduces a new table `fiat_purchases` plus additional metadata columns
+on `wallet_deposits`. Apply the SQL found in `db/migrations/202503230900_stripe_fiat_purchases.sql`
+against your primary database before enabling payments. The schema loader in the API will
+create the structures automatically when it runs, but running the migration manually keeps
+local and production environments in sync.
+
+#### Package lock refresh
+
+`@stripe/stripe-js` and `stripe` were added as runtime dependencies. If the lock file fails
+to regenerate because the registry blocks downloads in your environment, rerun
+`npm install --package-lock-only` once access is restored so the new modules are captured in
+`package-lock.json`.
+
 ### Auth responses
 `POST /auth/signup` and `POST /auth/login` both return the user's hot-wallet address:
 
