@@ -1,11 +1,16 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { dict, useLang } from '../../app/lib/i18n';
 
 export default function Footer() {
   const { lang } = useLang();
   const t = dict[lang];
+  const pathname = usePathname();
+  if (pathname?.startsWith('/mo')) {
+    return null;
+  }
   return (
     <footer className="border-t border-white/10 p-6 text-center text-sm bg-black/40 backdrop-blur-sm">
       <div className="mb-3 font-semibold">ELTX</div>

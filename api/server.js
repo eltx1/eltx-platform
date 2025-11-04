@@ -245,6 +245,17 @@ const sessionCookie = {
   maxAge: 1000 * 60 * 60,
 };
 
+const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
+const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 2));
+const adminSessionCookie = {
+  httpOnly: true,
+  sameSite: 'strict',
+  secure: true,
+  domain: process.env.SESSION_COOKIE_DOMAIN || '.eltx.online',
+  path: '/',
+  maxAge: ADMIN_SESSION_TTL_SECONDS * 1000,
+};
+
 const SignupSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
@@ -260,6 +271,110 @@ const LoginSchema = z
   })
   .refine((d) => d.email || d.username, {
     message: 'Email or username required',
+  });
+
+const AdminLoginSchema = z.object({
+  identifier: z.string().min(3),
+  password: z.string().min(8),
+});
+
+const PaginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const AdminUserCreateSchema = z.object({
+  email: z.string().email(),
+  username: z.string().min(3).max(64),
+  password: z.string().min(12),
+  role: z.enum(['superadmin', 'manager']).default('manager'),
+  is_active: z.boolean().optional(),
+});
+
+const AdminUserUpdateSchema = z
+  .object({
+    email: z.string().email().optional(),
+    username: z.string().min(3).max(64).optional(),
+    password: z.string().min(12).optional(),
+    role: z.enum(['superadmin', 'manager']).optional(),
+    is_active: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No update fields provided',
+  });
+
+const AdminUsersQuerySchema = PaginationSchema.extend({
+  q: z.string().max(191).optional(),
+});
+
+const UserUpdateSchema = z
+  .object({
+    email: z.string().email().optional(),
+    username: z.string().min(3).optional(),
+    language: z.string().max(5).optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No update fields provided',
+  });
+
+const AdminPasswordResetSchema = z.object({
+  password: z.string().min(8),
+});
+
+const AdminBalanceAdjustSchema = z.object({
+  asset: z.string().min(2).max(32),
+  amount: z.string().min(1),
+  direction: z.enum(['credit', 'debit']),
+  reason: z.string().max(255).optional(),
+});
+
+const AdminTransactionsQuerySchema = PaginationSchema.extend({
+  type: z.enum(['deposits', 'transfers', 'swaps', 'spot', 'fiat']).default('deposits'),
+});
+
+const AdminStakingPlanCreateSchema = z.object({
+  name: z.string().min(2).max(32),
+  duration_days: z.coerce.number().int().min(1).max(3650),
+  apr_bps: z.coerce.number().int().min(0).max(100000),
+  stake_asset: z.string().min(2).max(32).default('ELTX'),
+  stake_decimals: z.coerce.number().int().min(0).max(36).default(18),
+  min_deposit: z.string().optional(),
+  is_active: z.boolean().optional(),
+});
+
+const AdminStakingPlanUpdateSchema = AdminStakingPlanCreateSchema.partial();
+
+const AdminStakingPositionUpdateSchema = z.object({
+  status: z.enum(['active', 'matured', 'cancelled']),
+});
+
+const AdminStakingPositionsQuerySchema = PaginationSchema.extend({
+  status: z.enum(['active', 'matured', 'cancelled', 'all']).default('active'),
+});
+
+const AdminSwapPriceUpdateSchema = z
+  .object({
+    price_eltx: z.string().optional(),
+    min_amount: z.string().optional(),
+    max_amount: z.string().nullable().optional(),
+    spread_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    asset_reserve_wei: z.string().optional(),
+    eltx_reserve_wei: z.string().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No update fields provided',
+  });
+
+const AdminSpotMarketUpdateSchema = z
+  .object({
+    min_base_amount: z.string().optional(),
+    min_quote_amount: z.string().optional(),
+    price_precision: z.coerce.number().int().min(0).max(18).optional(),
+    amount_precision: z.coerce.number().int().min(0).max(18).optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No update fields provided',
   });
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
@@ -387,6 +502,34 @@ function bigIntFromValue(val) {
   } catch {
     return 0n;
   }
+}
+
+function decimalToWeiString(amount, decimals) {
+  try {
+    const decimalValue = new Decimal(amount);
+    if (!decimalValue.isFinite() || decimalValue.isNegative()) return null;
+    const scaled = decimalValue.mul(Decimal.pow(10, decimals));
+    const fixed = scaled.toFixed(0, Decimal.ROUND_DOWN);
+    return fixed;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePositiveDecimal(value, precision = 18) {
+  try {
+    const decimalValue = new Decimal(value);
+    if (!decimalValue.isFinite() || decimalValue.isNegative()) return null;
+    return decimalValue.toFixed(precision, Decimal.ROUND_DOWN);
+  } catch {
+    return null;
+  }
+}
+
+function presentAdminRow(row) {
+  if (!row) return null;
+  const { password_hash, ...rest } = row;
+  return rest;
 }
 
 async function getPlatformSettingValue(name, defaultValue = '0', conn = pool) {
@@ -685,6 +828,28 @@ async function requireUser(req) {
   );
   if (!rows.length) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
   return rows[0].id;
+}
+
+async function requireAdmin(req, { extend = true } = {}) {
+  const token = req.cookies[ADMIN_COOKIE_NAME];
+  if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Admin authentication required' };
+  const [rows] = await pool.query(
+    `SELECT au.id, au.email, au.username, au.role, au.is_active
+       FROM admin_sessions s
+       JOIN admin_users au ON au.id = s.admin_id
+      WHERE s.id = ? AND s.expires_at > NOW()`,
+    [token]
+  );
+  if (!rows.length) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Admin authentication required' };
+  const admin = rows[0];
+  if (!admin.is_active) throw { status: 403, code: 'ADMIN_DISABLED', message: 'Admin account disabled' };
+  if (extend) {
+    await pool.query('UPDATE admin_sessions SET expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE id=?', [
+      ADMIN_SESSION_TTL_SECONDS,
+      token,
+    ]);
+  }
+  return admin;
 }
 
 app.post('/stripe/webhook', async (req, res) => {
@@ -1018,6 +1183,1162 @@ app.get('/auth/me', async (req, res, next) => {
     if (!rows.length) return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
     res.json(rows[0]);
   } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/admin/auth/login', loginLimiter, async (req, res, next) => {
+  try {
+    const { identifier, password } = AdminLoginSchema.parse(req.body || {});
+    const [rows] = await pool.query(
+      'SELECT id, email, username, password_hash, role, is_active, last_login_at, created_at, updated_at FROM admin_users WHERE email=? OR username=? LIMIT 1',
+      [identifier, identifier]
+    );
+    if (!rows.length) return next({ status: 401, code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
+    const adminRow = rows[0];
+    if (!adminRow.is_active) return next({ status: 403, code: 'ADMIN_DISABLED', message: 'Admin account disabled' });
+    const valid = await argon2.verify(adminRow.password_hash, password);
+    if (!valid) return next({ status: 401, code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
+    const sessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + ADMIN_SESSION_TTL_SECONDS * 1000);
+    await pool.query('INSERT INTO admin_sessions (id, admin_id, expires_at) VALUES (?, ?, ?)', [
+      sessionId,
+      adminRow.id,
+      expiresAt,
+    ]);
+    await pool.query('UPDATE admin_users SET last_login_at = NOW() WHERE id=?', [adminRow.id]);
+    res.cookie(ADMIN_COOKIE_NAME, sessionId, adminSessionCookie);
+    res.json({ ok: true, admin: presentAdminRow(adminRow) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.post('/admin/auth/logout', async (req, res) => {
+  const token = req.cookies[ADMIN_COOKIE_NAME];
+  if (token) {
+    await pool.query('DELETE FROM admin_sessions WHERE id=?', [token]);
+  }
+  res.clearCookie(ADMIN_COOKIE_NAME, { path: '/' });
+  res.json({ ok: true });
+});
+
+app.get('/admin/auth/me', async (req, res, next) => {
+  try {
+    const admin = await requireAdmin(req);
+    res.json({ ok: true, admin: presentAdminRow(admin) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/dashboard/summary', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [
+      [[userRow]],
+      [[adminRow]],
+      [[balanceRow]],
+      [[stakingRow]],
+      [[swapRow]],
+      [[spotRow]],
+      [[fiatRow]],
+      [[depositRow]],
+    ] = await Promise.all([
+      pool.query('SELECT COUNT(*) AS total_users FROM users'),
+      pool.query('SELECT COUNT(*) AS total_admins FROM admin_users WHERE is_active = 1'),
+      pool.query("SELECT COALESCE(SUM(balance_wei),0) AS eltx_balance_wei FROM user_balances WHERE UPPER(asset)='ELTX'"),
+      pool.query("SELECT COUNT(*) AS active_staking FROM staking_positions WHERE status='active'"),
+      pool.query(
+        'SELECT COUNT(*) AS swap_count, COALESCE(SUM(eltx_amount_wei),0) AS eltx_volume_wei FROM trade_swaps'
+      ),
+      pool.query('SELECT COUNT(*) AS spot_trades FROM spot_trades'),
+      pool.query(
+        "SELECT COUNT(*) AS fiat_completed, COALESCE(SUM(usd_amount),0) AS fiat_volume_usd FROM fiat_purchases WHERE status='succeeded'"
+      ),
+      pool.query(
+        "SELECT COUNT(*) AS confirmed_deposits FROM wallet_deposits WHERE status IN ('confirmed','swept')"
+      ),
+    ]);
+
+    const eltxBalanceWei = bigIntFromValue(balanceRow?.eltx_balance_wei || 0);
+    const eltxBalance = trimDecimal(formatUnitsStr(eltxBalanceWei.toString(), getSymbolDecimals(ELTX_SYMBOL)));
+    const swapVolumeWei = bigIntFromValue(swapRow?.eltx_volume_wei || 0);
+    const swapVolume = trimDecimal(formatUnitsStr(swapVolumeWei.toString(), getSymbolDecimals(ELTX_SYMBOL)));
+
+    res.json({
+      ok: true,
+      summary: {
+        total_users: Number(userRow?.total_users || 0),
+        total_admins: Number(adminRow?.total_admins || 0),
+        eltx_circulating_balance: {
+          wei: eltxBalanceWei.toString(),
+          display: eltxBalance,
+        },
+        staking_active: Number(stakingRow?.active_staking || 0),
+        swap_volume: {
+          count: Number(swapRow?.swap_count || 0),
+          eltx_wei: swapVolumeWei.toString(),
+          eltx: swapVolume,
+        },
+        spot_trades: Number(spotRow?.spot_trades || 0),
+        fiat_completed: {
+          count: Number(fiatRow?.fiat_completed || 0),
+          usd: formatDecimalValue(fiatRow?.fiat_volume_usd || 0, 2),
+        },
+        confirmed_deposits: Number(depositRow?.confirmed_deposits || 0),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/admin-users', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { q, limit, offset } = AdminUsersQuerySchema.parse(req.query || {});
+    const params = [];
+    let sql =
+      'SELECT id, email, username, role, is_active, last_login_at, created_at, updated_at FROM admin_users';
+    if (q) {
+      sql += ' WHERE email LIKE ? OR username LIKE ?';
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    const [rows] = await pool.query(sql, params);
+    res.json({
+      ok: true,
+      admins: rows.map((row) => presentAdminRow(row)),
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.post('/admin/admin-users', async (req, res, next) => {
+  try {
+    const admin = await requireAdmin(req);
+    if (admin.role !== 'superadmin')
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Only superadmins can create admins' });
+    const payload = AdminUserCreateSchema.parse(req.body || {});
+    const passwordHash = await argon2.hash(payload.password);
+    const isActive = payload.is_active === undefined ? 1 : payload.is_active ? 1 : 0;
+    const [result] = await pool.query(
+      'INSERT INTO admin_users (email, username, password_hash, role, is_active) VALUES (?, ?, ?, ?, ?)',
+      [payload.email, payload.username, passwordHash, payload.role, isActive]
+    );
+    const insertedId = result.insertId;
+    const [[row]] = await pool.query(
+      'SELECT id, email, username, role, is_active, last_login_at, created_at, updated_at FROM admin_users WHERE id=?',
+      [insertedId]
+    );
+    res.json({ ok: true, admin: presentAdminRow(row) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    if (err?.code === 'ER_DUP_ENTRY') {
+      return next({ status: 409, code: 'DUPLICATE', message: 'Email or username already exists' });
+    }
+    next(err);
+  }
+});
+
+app.patch('/admin/admin-users/:id', async (req, res, next) => {
+  const adminId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(adminId) || adminId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid admin id' });
+  try {
+    const acting = await requireAdmin(req);
+    if (acting.role !== 'superadmin' && acting.id !== adminId)
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Insufficient permissions' });
+    const updates = AdminUserUpdateSchema.parse(req.body || {});
+    if (updates.role && acting.role !== 'superadmin')
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Only superadmins can change roles' });
+    if (updates.is_active === false && acting.id === adminId)
+      return next({ status: 400, code: 'INVALID_OPERATION', message: 'Cannot disable your own account' });
+    if (updates.role === 'manager' && acting.id === adminId)
+      return next({ status: 400, code: 'INVALID_OPERATION', message: 'Cannot demote your own account' });
+
+    const fields = [];
+    const params = [];
+    if (updates.email) {
+      fields.push('email = ?');
+      params.push(updates.email);
+    }
+    if (updates.username) {
+      fields.push('username = ?');
+      params.push(updates.username);
+    }
+    if (updates.role) {
+      fields.push('role = ?');
+      params.push(updates.role);
+    }
+    if (updates.is_active !== undefined) {
+      fields.push('is_active = ?');
+      params.push(updates.is_active ? 1 : 0);
+    }
+    if (updates.password) {
+      const hash = await argon2.hash(updates.password);
+      fields.push('password_hash = ?');
+      params.push(hash);
+    }
+
+    if (!fields.length) return next({ status: 400, code: 'BAD_INPUT', message: 'No fields to update' });
+
+    params.push(adminId);
+
+    await pool.query(`UPDATE admin_users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`, params);
+
+    if ((updates.role || updates.is_active === false) && updates.role !== 'superadmin') {
+      const [[superCount]] = await pool.query(
+        'SELECT COUNT(*) AS total FROM admin_users WHERE role = "superadmin" AND is_active = 1'
+      );
+      const total = Number(superCount?.total || 0);
+      if (total <= 0)
+        return next({ status: 400, code: 'INVALID_OPERATION', message: 'At least one superadmin must remain active' });
+    }
+
+    const [[row]] = await pool.query(
+      'SELECT id, email, username, role, is_active, last_login_at, created_at, updated_at FROM admin_users WHERE id=?',
+      [adminId]
+    );
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Admin not found' });
+    res.json({ ok: true, admin: presentAdminRow(row) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    if (err?.code === 'ER_DUP_ENTRY') {
+      return next({ status: 409, code: 'DUPLICATE', message: 'Email or username already exists' });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/users', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { q, limit, offset } = AdminUsersQuerySchema.parse(req.query || {});
+    const params = [];
+    let sql = 'SELECT id, email, username, language, created_at, updated_at FROM users';
+    if (q) {
+      sql += ' WHERE email LIKE ? OR username LIKE ?';
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    const [rows] = await pool.query(sql, params);
+    res.json({ ok: true, users: rows });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/users/:id', async (req, res, next) => {
+  const userId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(userId) || userId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid user id' });
+  try {
+    await requireAdmin(req);
+    const [[user]] = await pool.query(
+      'SELECT id, email, username, language, created_at, updated_at FROM users WHERE id=?',
+      [userId]
+    );
+    if (!user) return next({ status: 404, code: 'NOT_FOUND', message: 'User not found' });
+
+    const [balancesRows] = await pool.query(
+      'SELECT asset, balance_wei, created_at FROM user_balances WHERE user_id=? ORDER BY asset',
+      [userId]
+    );
+    const balances = balancesRows.map((row) => {
+      const symbol = (row.asset || '').toUpperCase();
+      const decimals = getSymbolDecimals(symbol);
+      const wei = bigIntFromValue(row.balance_wei || 0);
+      return {
+        asset: symbol,
+        balance_wei: wei.toString(),
+        balance: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+        created_at: row.created_at,
+      };
+    });
+
+    const [positionsRows] = await pool.query(
+      `SELECT sp.id, sp.plan_id, sp.amount, sp.amount_wei, sp.apr_bps_snapshot, sp.start_date, sp.end_date, sp.status,
+              sp.daily_reward, sp.accrued_total, sp.created_at, sp.updated_at, sp.stake_asset, sp.stake_decimals,
+              p.name AS plan_name
+         FROM staking_positions sp
+         LEFT JOIN staking_plans p ON p.id = sp.plan_id
+         WHERE sp.user_id=?
+         ORDER BY sp.created_at DESC
+         LIMIT 100`,
+      [userId]
+    );
+
+    const staking = positionsRows.map((row) => {
+      const decimals = Number(row.stake_decimals || 18);
+      const amountWei = bigIntFromValue(row.amount_wei || 0);
+      return {
+        id: row.id,
+        plan_id: row.plan_id,
+        plan_name: row.plan_name,
+        amount_wei: amountWei.toString(),
+        amount: trimDecimal(formatUnitsStr(amountWei.toString(), decimals)),
+        apr_bps_snapshot: Number(row.apr_bps_snapshot || 0),
+        start_date: row.start_date,
+        end_date: row.end_date,
+        status: row.status,
+        daily_reward: trimDecimal(row.daily_reward),
+        accrued_total: trimDecimal(row.accrued_total),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    });
+
+    const [fiatRows] = await pool.query(
+      `SELECT id, status, usd_amount, eltx_amount, price_eltx, created_at, updated_at
+         FROM fiat_purchases
+         WHERE user_id=?
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      [userId]
+    );
+
+    const fiat = fiatRows.map((row) => ({
+      id: row.id,
+      status: row.status,
+      usd_amount: formatDecimalValue(row.usd_amount || 0, 2),
+      eltx_amount: trimDecimal(row.eltx_amount),
+      price_eltx: trimDecimal(row.price_eltx),
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    }));
+
+    const [depositRows] = await pool.query(
+      `SELECT id, chain_id, token_symbol, token_address, amount_wei, status, confirmations, source, created_at
+         FROM wallet_deposits
+         WHERE user_id=?
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      [userId]
+    );
+
+    const deposits = depositRows.map((row) => {
+      const symbol = (row.token_symbol || 'ELTX').toUpperCase();
+      const decimals = getSymbolDecimals(symbol);
+      const wei = bigIntFromValue(row.amount_wei || 0);
+      return {
+        id: row.id,
+        asset: symbol,
+        amount_wei: wei.toString(),
+        amount: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+        status: row.status,
+        confirmations: row.confirmations,
+        source: row.source,
+        created_at: row.created_at,
+      };
+    });
+
+    const [transferRows] = await pool.query(
+      `SELECT id, from_user_id, to_user_id, asset, amount_wei, fee_wei, created_at
+         FROM wallet_transfers
+         WHERE from_user_id=? OR to_user_id=?
+         ORDER BY created_at DESC
+         LIMIT 50`,
+      [userId, userId]
+    );
+
+    const transfers = transferRows.map((row) => {
+      const symbol = (row.asset || 'ELTX').toUpperCase();
+      const decimals = getSymbolDecimals(symbol);
+      const wei = bigIntFromValue(row.amount_wei || 0);
+      return {
+        id: row.id,
+        asset: symbol,
+        amount_wei: wei.toString(),
+        amount: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+        from_user_id: row.from_user_id,
+        to_user_id: row.to_user_id,
+        fee_wei: bigIntFromValue(row.fee_wei || 0).toString(),
+        created_at: row.created_at,
+      };
+    });
+
+    res.json({ ok: true, user, balances, staking, fiat, deposits, transfers });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/users/:id', async (req, res, next) => {
+  const userId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(userId) || userId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid user id' });
+  try {
+    await requireAdmin(req);
+    const updates = UserUpdateSchema.parse(req.body || {});
+    const fields = [];
+    const params = [];
+    if (updates.email) {
+      fields.push('email = ?');
+      params.push(updates.email);
+    }
+    if (updates.username) {
+      fields.push('username = ?');
+      params.push(updates.username);
+    }
+    if (updates.language) {
+      fields.push('language = ?');
+      params.push(updates.language);
+    }
+    if (!fields.length) return next({ status: 400, code: 'BAD_INPUT', message: 'No fields to update' });
+    params.push(userId);
+    await pool.query(`UPDATE users SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`, params);
+    const [[user]] = await pool.query(
+      'SELECT id, email, username, language, created_at, updated_at FROM users WHERE id=?',
+      [userId]
+    );
+    res.json({ ok: true, user });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    if (err?.code === 'ER_DUP_ENTRY') {
+      return next({ status: 409, code: 'DUPLICATE', message: 'Email or username already exists' });
+    }
+    next(err);
+  }
+});
+
+app.post('/admin/users/:id/reset-password', async (req, res, next) => {
+  const userId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(userId) || userId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid user id' });
+  try {
+    await requireAdmin(req);
+    const { password } = AdminPasswordResetSchema.parse(req.body || {});
+    const hash = await argon2.hash(password);
+    await pool.query(
+      'INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?) ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash)',
+      [userId, hash]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/users/:id/balances', async (req, res, next) => {
+  const userId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(userId) || userId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid user id' });
+  try {
+    await requireAdmin(req);
+    const [rows] = await pool.query(
+      'SELECT asset, balance_wei, created_at FROM user_balances WHERE user_id=? ORDER BY asset',
+      [userId]
+    );
+    const balances = rows.map((row) => {
+      const symbol = (row.asset || '').toUpperCase();
+      const decimals = getSymbolDecimals(symbol);
+      const wei = bigIntFromValue(row.balance_wei || 0);
+      return {
+        asset: symbol,
+        balance_wei: wei.toString(),
+        balance: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+        created_at: row.created_at,
+      };
+    });
+    res.json({ ok: true, balances });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/admin/users/:id/balances/adjust', async (req, res, next) => {
+  const userId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(userId) || userId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid user id' });
+  let conn;
+  try {
+    const admin = await requireAdmin(req);
+    const payload = AdminBalanceAdjustSchema.parse(req.body || {});
+    const asset = payload.asset.toUpperCase();
+    const decimals = getSymbolDecimals(asset);
+    const weiStr = decimalToWeiString(payload.amount, decimals);
+    if (!weiStr) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    const wei = BigInt(weiStr);
+    if (wei <= 0n) return next({ status: 400, code: 'BAD_INPUT', message: 'Amount must be positive' });
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [balanceRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+      [userId, asset]
+    );
+    let currentWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+
+    if (payload.direction === 'debit') {
+      if (currentWei < wei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+      }
+      currentWei -= wei;
+      await conn.query('UPDATE user_balances SET balance_wei = ? WHERE user_id=? AND UPPER(asset)=?', [
+        currentWei.toString(),
+        userId,
+        asset,
+      ]);
+    } else {
+      currentWei += wei;
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei = VALUES(balance_wei)',
+        [userId, asset, currentWei.toString()]
+      );
+    }
+
+    await conn.query(
+      'INSERT INTO admin_balance_adjustments (admin_id, user_id, asset, amount_change_wei, direction, reason) VALUES (?, ?, ?, ?, ?, ?)',
+      [admin.id, userId, asset, wei.toString(), payload.direction, payload.reason || null]
+    );
+
+    await conn.commit();
+
+    res.json({
+      ok: true,
+      balance: {
+        asset,
+        balance_wei: currentWei.toString(),
+        balance: trimDecimal(formatUnitsStr(currentWei.toString(), decimals)),
+      },
+    });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/admin/transactions', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { type, limit, offset } = AdminTransactionsQuerySchema.parse(req.query || {});
+    let results = [];
+
+    if (type === 'deposits') {
+      const [rows] = await pool.query(
+        `SELECT id, user_id, token_symbol, token_address, amount_wei, confirmations, status, source, created_at
+           FROM wallet_deposits
+           ORDER BY created_at DESC
+           LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+      results = rows.map((row) => {
+        const symbol = (row.token_symbol || 'ELTX').toUpperCase();
+        const decimals = getSymbolDecimals(symbol);
+        const wei = bigIntFromValue(row.amount_wei || 0);
+        return {
+          id: row.id,
+          user_id: row.user_id,
+          asset: symbol,
+          amount_wei: wei.toString(),
+          amount: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+          confirmations: row.confirmations,
+          status: row.status,
+          source: row.source,
+          created_at: row.created_at,
+        };
+      });
+    } else if (type === 'transfers') {
+      const [rows] = await pool.query(
+        `SELECT id, from_user_id, to_user_id, asset, amount_wei, fee_wei, created_at
+           FROM wallet_transfers
+           ORDER BY created_at DESC
+           LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+      results = rows.map((row) => {
+        const symbol = (row.asset || 'ELTX').toUpperCase();
+        const decimals = getSymbolDecimals(symbol);
+        const wei = bigIntFromValue(row.amount_wei || 0);
+        return {
+          id: row.id,
+          from_user_id: row.from_user_id,
+          to_user_id: row.to_user_id,
+          asset: symbol,
+          amount_wei: wei.toString(),
+          amount: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+          fee_wei: bigIntFromValue(row.fee_wei || 0).toString(),
+          created_at: row.created_at,
+        };
+      });
+    } else if (type === 'swaps') {
+      const [rows] = await pool.query(
+        `SELECT id, user_id, asset, asset_decimals, target_decimals, asset_amount_wei, eltx_amount_wei, price_wei, fee_amount_wei, created_at
+           FROM trade_swaps
+           ORDER BY created_at DESC
+           LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+      results = rows.map((row) => {
+        const asset = (row.asset || '').toUpperCase();
+        const assetDecimals = Number(row.asset_decimals || getSymbolDecimals(asset));
+        const eltxDecimals = Number(row.target_decimals || getSymbolDecimals(ELTX_SYMBOL));
+        const assetWei = bigIntFromValue(row.asset_amount_wei || 0);
+        const eltxWei = bigIntFromValue(row.eltx_amount_wei || 0);
+        return {
+          id: row.id,
+          user_id: row.user_id,
+          asset,
+          asset_amount_wei: assetWei.toString(),
+          asset_amount: trimDecimal(formatUnitsStr(assetWei.toString(), assetDecimals)),
+          eltx_amount_wei: eltxWei.toString(),
+          eltx_amount: trimDecimal(formatUnitsStr(eltxWei.toString(), eltxDecimals)),
+          price_eltx: trimDecimal(formatUnitsStr(bigIntFromValue(row.price_wei || 0).toString(), 18)),
+          fee_amount_wei: bigIntFromValue(row.fee_amount_wei || 0).toString(),
+          created_at: row.created_at,
+        };
+      });
+    } else if (type === 'spot') {
+      const [rows] = await pool.query(
+        `SELECT st.id, st.market_id, st.price_wei, st.base_amount_wei, st.quote_amount_wei, st.buy_order_id, st.sell_order_id,
+                st.taker_side, st.created_at,
+                sm.symbol, sm.base_decimals, sm.quote_decimals,
+                bo.user_id AS buy_user_id, so.user_id AS sell_user_id
+           FROM spot_trades st
+           JOIN spot_markets sm ON sm.id = st.market_id
+           JOIN spot_orders bo ON bo.id = st.buy_order_id
+           JOIN spot_orders so ON so.id = st.sell_order_id
+           ORDER BY st.created_at DESC
+           LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+      results = rows.map((row) => {
+        const baseWei = bigIntFromValue(row.base_amount_wei || 0);
+        const quoteWei = bigIntFromValue(row.quote_amount_wei || 0);
+        return {
+          id: row.id,
+          market: row.symbol,
+          buy_user_id: row.buy_user_id,
+          sell_user_id: row.sell_user_id,
+          price: trimDecimal(formatUnitsStr(bigIntFromValue(row.price_wei || 0).toString(), 18)),
+          base_amount: trimDecimal(
+            formatUnitsStr(baseWei.toString(), Number(row.base_decimals || 18))
+          ),
+          quote_amount: trimDecimal(
+            formatUnitsStr(quoteWei.toString(), Number(row.quote_decimals || 18))
+          ),
+          taker_side: row.taker_side,
+          created_at: row.created_at,
+        };
+      });
+    } else if (type === 'fiat') {
+      const [rows] = await pool.query(
+        `SELECT id, user_id, status, usd_amount, eltx_amount, price_eltx, created_at, completed_at
+           FROM fiat_purchases
+           ORDER BY created_at DESC
+           LIMIT ? OFFSET ?`,
+        [limit, offset]
+      );
+      results = rows.map((row) => ({
+        id: row.id,
+        user_id: row.user_id,
+        status: row.status,
+        usd_amount: formatDecimalValue(row.usd_amount || 0, 2),
+        eltx_amount: trimDecimal(row.eltx_amount),
+        price_eltx: trimDecimal(row.price_eltx),
+        created_at: row.created_at,
+        completed_at: row.completed_at,
+      }));
+    }
+
+    res.json({ ok: true, type, results });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/staking/plans', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [rows] = await pool.query(
+      `SELECT id, name, duration_days, apr_bps, stake_asset, stake_decimals, min_deposit_wei, is_active, created_at, updated_at
+         FROM staking_plans
+         ORDER BY id ASC`
+    );
+    const plans = rows.map((row) => {
+      const asset = (row.stake_asset || 'ELTX').toUpperCase();
+      const decimals = Number(row.stake_decimals || getSymbolDecimals(asset));
+      const minWei = bigIntFromValue(row.min_deposit_wei || 0);
+      return {
+        id: row.id,
+        name: row.name,
+        duration_days: row.duration_days,
+        apr_bps: row.apr_bps,
+        stake_asset: asset,
+        stake_decimals: decimals,
+        min_deposit_wei: minWei.toString(),
+        min_deposit: minWei > 0n ? trimDecimal(formatUnitsStr(minWei.toString(), decimals)) : null,
+        is_active: !!row.is_active,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    });
+    res.json({ ok: true, plans });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/admin/staking/plans', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = AdminStakingPlanCreateSchema.parse(req.body || {});
+    const asset = payload.stake_asset.toUpperCase();
+    const decimals = Number(payload.stake_decimals ?? getSymbolDecimals(asset));
+    const minWei = payload.min_deposit ? decimalToWeiString(payload.min_deposit, decimals) : null;
+    if (payload.min_deposit && !minWei)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid minimum deposit amount' });
+    const [result] = await pool.query(
+      `INSERT INTO staking_plans (name, duration_days, apr_bps, stake_asset, stake_decimals, min_deposit_wei, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?)` ,
+      [
+        payload.name,
+        payload.duration_days,
+        payload.apr_bps,
+        asset,
+        decimals,
+        minWei || null,
+        payload.is_active === false ? 0 : 1,
+      ]
+    );
+    const id = result.insertId;
+    const [[row]] = await pool.query(
+      `SELECT id, name, duration_days, apr_bps, stake_asset, stake_decimals, min_deposit_wei, is_active, created_at, updated_at
+         FROM staking_plans WHERE id=?`,
+      [id]
+    );
+    res.json({ ok: true, plan: row });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.patch('/admin/staking/plans/:id', async (req, res, next) => {
+  const planId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(planId) || planId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid plan id' });
+  try {
+    await requireAdmin(req);
+    const updates = AdminStakingPlanUpdateSchema.parse(req.body || {});
+    const fields = [];
+    const params = [];
+    if (updates.name) {
+      fields.push('name = ?');
+      params.push(updates.name);
+    }
+    if (updates.duration_days !== undefined) {
+      fields.push('duration_days = ?');
+      params.push(updates.duration_days);
+    }
+    if (updates.apr_bps !== undefined) {
+      fields.push('apr_bps = ?');
+      params.push(updates.apr_bps);
+    }
+    if (updates.stake_asset) {
+      fields.push('stake_asset = ?');
+      params.push(updates.stake_asset.toUpperCase());
+    }
+    if (updates.stake_decimals !== undefined) {
+      fields.push('stake_decimals = ?');
+      params.push(updates.stake_decimals);
+    }
+    if (updates.is_active !== undefined) {
+      fields.push('is_active = ?');
+      params.push(updates.is_active ? 1 : 0);
+    }
+    if (updates.min_deposit !== undefined) {
+      const asset = updates.stake_asset ? updates.stake_asset.toUpperCase() : undefined;
+      const decimals =
+        updates.stake_decimals !== undefined
+          ? updates.stake_decimals
+          : Number(asset ? getSymbolDecimals(asset) : 18);
+      const minWei = updates.min_deposit ? decimalToWeiString(updates.min_deposit, decimals) : null;
+      if (updates.min_deposit && !minWei)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid minimum deposit amount' });
+      fields.push('min_deposit_wei = ?');
+      params.push(minWei || null);
+    }
+    if (!fields.length) return next({ status: 400, code: 'BAD_INPUT', message: 'No fields to update' });
+    params.push(planId);
+    await pool.query(`UPDATE staking_plans SET ${fields.join(', ')}, updated_at = NOW() WHERE id = ?`, params);
+    const [[row]] = await pool.query(
+      `SELECT id, name, duration_days, apr_bps, stake_asset, stake_decimals, min_deposit_wei, is_active, created_at, updated_at
+         FROM staking_plans WHERE id=?`,
+      [planId]
+    );
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Plan not found' });
+    res.json({ ok: true, plan: row });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/staking/positions', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { status, limit, offset } = AdminStakingPositionsQuerySchema.parse(req.query || {});
+    const params = [];
+    let sql =
+      `SELECT sp.id, sp.user_id, sp.plan_id, sp.amount_wei, sp.apr_bps_snapshot, sp.status, sp.start_date, sp.end_date, sp.daily_reward,
+              sp.accrued_total, sp.created_at, sp.updated_at, sp.stake_asset, sp.stake_decimals,
+              p.name AS plan_name
+         FROM staking_positions sp
+         LEFT JOIN staking_plans p ON p.id = sp.plan_id`;
+    if (status !== 'all') {
+      sql += ' WHERE sp.status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY sp.created_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    const [rows] = await pool.query(sql, params);
+    const positions = rows.map((row) => {
+      const decimals = Number(row.stake_decimals || getSymbolDecimals(row.stake_asset || 'ELTX'));
+      const amountWei = bigIntFromValue(row.amount_wei || 0);
+      return {
+        id: row.id,
+        user_id: row.user_id,
+        plan_id: row.plan_id,
+        plan_name: row.plan_name,
+        amount_wei: amountWei.toString(),
+        amount: trimDecimal(formatUnitsStr(amountWei.toString(), decimals)),
+        apr_bps_snapshot: row.apr_bps_snapshot,
+        status: row.status,
+        start_date: row.start_date,
+        end_date: row.end_date,
+        daily_reward: trimDecimal(row.daily_reward),
+        accrued_total: trimDecimal(row.accrued_total),
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      };
+    });
+    res.json({ ok: true, positions });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.patch('/admin/staking/positions/:id', async (req, res, next) => {
+  const positionId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(positionId) || positionId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid position id' });
+  try {
+    await requireAdmin(req);
+    const { status } = AdminStakingPositionUpdateSchema.parse(req.body || {});
+    await pool.query('UPDATE staking_positions SET status=?, updated_at=NOW() WHERE id=?', [status, positionId]);
+    const [[row]] = await pool.query(
+      `SELECT sp.id, sp.user_id, sp.plan_id, sp.amount_wei, sp.apr_bps_snapshot, sp.status, sp.start_date, sp.end_date,
+              sp.daily_reward, sp.accrued_total, sp.created_at, sp.updated_at, sp.stake_asset, sp.stake_decimals,
+              p.name AS plan_name
+         FROM staking_positions sp
+         LEFT JOIN staking_plans p ON p.id = sp.plan_id
+         WHERE sp.id=?`,
+      [positionId]
+    );
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Position not found' });
+    res.json({ ok: true, position: row });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/pricing', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    try {
+      await syncSwapAssetPrices(pool);
+    } catch (err) {
+      console.warn('[admin] swap price sync skipped', err?.message || err);
+    }
+    const [swapRows] = await pool.query(
+      `SELECT ap.asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps, ap.updated_at,
+              lp.asset_reserve_wei, lp.eltx_reserve_wei, lp.asset_decimals
+         FROM asset_prices ap
+         LEFT JOIN swap_liquidity_pools lp ON UPPER(lp.asset) = UPPER(ap.asset)
+         ORDER BY ap.asset`
+    );
+    const [spotRows] = await pool.query(
+      `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals,
+              min_base_amount, min_quote_amount, price_precision, amount_precision, active, created_at, updated_at
+         FROM spot_markets
+         ORDER BY symbol`
+    );
+    const swap = swapRows.map((row) => {
+      const asset = (row.asset || '').toUpperCase();
+      return {
+        asset,
+        price_eltx: trimDecimal(row.price_eltx),
+        min_amount: trimDecimal(row.min_amount),
+        max_amount: row.max_amount !== null && row.max_amount !== undefined ? trimDecimal(row.max_amount) : null,
+        spread_bps: Number(row.spread_bps || 0),
+        asset_reserve_wei: bigIntFromValue(row.asset_reserve_wei || 0).toString(),
+        eltx_reserve_wei: bigIntFromValue(row.eltx_reserve_wei || 0).toString(),
+        asset_decimals: Number(row.asset_decimals || getSymbolDecimals(asset)),
+        updated_at: row.updated_at,
+      };
+    });
+    const spot = spotRows.map((row) => ({
+      id: row.id,
+      symbol: row.symbol,
+      base_asset: row.base_asset,
+      quote_asset: row.quote_asset,
+      base_decimals: row.base_decimals,
+      quote_decimals: row.quote_decimals,
+      min_base_amount: trimDecimal(row.min_base_amount),
+      min_quote_amount: trimDecimal(row.min_quote_amount),
+      price_precision: row.price_precision,
+      amount_precision: row.amount_precision,
+      active: !!row.active,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    }));
+    res.json({ ok: true, swap, spot });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/pricing/swap/:asset', async (req, res, next) => {
+  const asset = req.params.asset?.toUpperCase();
+  if (!asset) return next({ status: 400, code: 'BAD_INPUT', message: 'Asset required' });
+  try {
+    await requireAdmin(req);
+    const updates = AdminSwapPriceUpdateSchema.parse(req.body || {});
+    const [[row]] = await pool.query('SELECT asset FROM asset_prices WHERE UPPER(asset)=? LIMIT 1', [asset]);
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Asset not found' });
+
+    const fields = [];
+    const params = [];
+    if (updates.price_eltx !== undefined) {
+      const normalized = normalizePositiveDecimal(updates.price_eltx, 18);
+      if (!normalized) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid price value' });
+      fields.push('price_eltx = ?');
+      params.push(normalized);
+    }
+    if (updates.min_amount !== undefined) {
+      const normalized = normalizePositiveDecimal(updates.min_amount, 18);
+      if (normalized === null)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid minimum amount' });
+      fields.push('min_amount = ?');
+      params.push(normalized);
+    }
+    if (updates.max_amount !== undefined) {
+      if (updates.max_amount === null) {
+        fields.push('max_amount = NULL');
+      } else {
+        const normalized = normalizePositiveDecimal(updates.max_amount, 18);
+        if (!normalized)
+          return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid maximum amount' });
+        fields.push('max_amount = ?');
+        params.push(normalized);
+      }
+    }
+    if (updates.spread_bps !== undefined) {
+      fields.push('spread_bps = ?');
+      params.push(updates.spread_bps);
+    }
+
+    if (fields.length) {
+      params.push(asset);
+      await pool.query(`UPDATE asset_prices SET ${fields.join(', ')}, updated_at = NOW() WHERE UPPER(asset)=?`, params);
+    }
+
+    if (updates.asset_reserve_wei !== undefined || updates.eltx_reserve_wei !== undefined) {
+      let assetReserve = null;
+      let eltxReserve = null;
+      if (updates.asset_reserve_wei !== undefined) {
+        try {
+          assetReserve = BigInt(updates.asset_reserve_wei);
+          if (assetReserve < 0n) throw new Error('negative reserve');
+        } catch {
+          return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid asset reserve value' });
+        }
+      }
+      if (updates.eltx_reserve_wei !== undefined) {
+        try {
+          eltxReserve = BigInt(updates.eltx_reserve_wei);
+          if (eltxReserve < 0n) throw new Error('negative reserve');
+        } catch {
+          return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ELTX reserve value' });
+        }
+      }
+      const [poolRows] = await pool.query('SELECT asset FROM swap_liquidity_pools WHERE UPPER(asset)=? LIMIT 1', [asset]);
+      if (!poolRows.length) {
+        await pool.query(
+          'INSERT INTO swap_liquidity_pools (asset, asset_decimals, asset_reserve_wei, eltx_reserve_wei) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE asset_reserve_wei=VALUES(asset_reserve_wei), eltx_reserve_wei=VALUES(eltx_reserve_wei)',
+          [asset, getSymbolDecimals(asset), assetReserve?.toString() || '0', eltxReserve?.toString() || '0']
+        );
+      } else {
+        const poolFields = [];
+        const poolParams = [];
+        if (assetReserve !== null) {
+          poolFields.push('asset_reserve_wei = ?');
+          poolParams.push(assetReserve.toString());
+        }
+        if (eltxReserve !== null) {
+          poolFields.push('eltx_reserve_wei = ?');
+          poolParams.push(eltxReserve.toString());
+        }
+        if (poolFields.length) {
+          poolParams.push(asset);
+          await pool.query(`UPDATE swap_liquidity_pools SET ${poolFields.join(', ')}, updated_at = NOW() WHERE UPPER(asset)=?`, poolParams);
+        }
+      }
+    }
+
+    const [[updated]] = await pool.query(
+      `SELECT ap.asset, ap.price_eltx, ap.min_amount, ap.max_amount, ap.spread_bps, ap.updated_at,
+              lp.asset_reserve_wei, lp.eltx_reserve_wei, lp.asset_decimals
+         FROM asset_prices ap
+         LEFT JOIN swap_liquidity_pools lp ON UPPER(lp.asset) = UPPER(ap.asset)
+         WHERE UPPER(ap.asset)=?`,
+      [asset]
+    );
+    res.json({ ok: true, asset: updated });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.patch('/admin/pricing/spot/:symbol', async (req, res, next) => {
+  const symbol = normalizeMarketSymbol(req.params.symbol || '');
+  if (!symbol) return next({ status: 400, code: 'BAD_INPUT', message: 'Market symbol required' });
+  try {
+    await requireAdmin(req);
+    const updates = AdminSpotMarketUpdateSchema.parse(req.body || {});
+    const [[row]] = await pool.query('SELECT id FROM spot_markets WHERE symbol=? LIMIT 1', [symbol]);
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Market not found' });
+    const fields = [];
+    const params = [];
+    if (updates.min_base_amount !== undefined) {
+      const normalized = normalizePositiveDecimal(updates.min_base_amount, 18);
+      if (normalized === null)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid base minimum amount' });
+      fields.push('min_base_amount = ?');
+      params.push(normalized);
+    }
+    if (updates.min_quote_amount !== undefined) {
+      const normalized = normalizePositiveDecimal(updates.min_quote_amount, 18);
+      if (normalized === null)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid quote minimum amount' });
+      fields.push('min_quote_amount = ?');
+      params.push(normalized);
+    }
+    if (updates.price_precision !== undefined) {
+      fields.push('price_precision = ?');
+      params.push(updates.price_precision);
+    }
+    if (updates.amount_precision !== undefined) {
+      fields.push('amount_precision = ?');
+      params.push(updates.amount_precision);
+    }
+    if (updates.active !== undefined) {
+      fields.push('active = ?');
+      params.push(updates.active ? 1 : 0);
+    }
+    if (!fields.length) return next({ status: 400, code: 'BAD_INPUT', message: 'No fields to update' });
+    params.push(symbol);
+    await pool.query(`UPDATE spot_markets SET ${fields.join(', ')}, updated_at = NOW() WHERE symbol = ?`, params);
+    const [[market]] = await pool.query(
+      `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount,
+              price_precision, amount_precision, active, created_at, updated_at
+         FROM spot_markets WHERE symbol=?`,
+      [symbol]
+    );
+    res.json({ ok: true, market });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/fiat/purchases', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { limit, offset } = PaginationSchema.parse(req.query || {});
+    const [rows] = await pool.query(
+      `SELECT id, user_id, status, currency, usd_amount, price_eltx, eltx_amount, eltx_amount_wei,
+              credited, created_at, updated_at, completed_at, credited_at, stripe_session_id, stripe_payment_intent_id
+         FROM fiat_purchases
+         ORDER BY created_at DESC
+         LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const purchases = rows.map((row) => ({
+      id: row.id,
+      user_id: row.user_id,
+      status: row.status,
+      currency: row.currency,
+      usd_amount: formatDecimalValue(row.usd_amount || 0, 2),
+      price_eltx: trimDecimal(row.price_eltx),
+      eltx_amount: trimDecimal(row.eltx_amount),
+      eltx_amount_wei: bigIntFromValue(row.eltx_amount_wei || 0).toString(),
+      credited: !!row.credited,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      completed_at: row.completed_at,
+      credited_at: row.credited_at,
+      stripe_session_id: row.stripe_session_id,
+      stripe_payment_intent_id: row.stripe_payment_intent_id,
+    }));
+    res.json({ ok: true, purchases });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
     next(err);
   }
 });
