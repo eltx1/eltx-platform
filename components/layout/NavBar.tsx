@@ -19,6 +19,10 @@ export default function NavBar() {
   const [open, setOpen] = useState(false);
   const [logoError, setLogoError] = useState(false);
 
+  if (pathname?.startsWith('/mo')) {
+    return null;
+  }
+
   useEffect(() => {
     if (open) document.body.style.overflow = 'hidden';
     else document.body.style.overflow = '';
