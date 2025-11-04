@@ -12,6 +12,7 @@ import {
   Coins,
   ArrowLeftRight,
   CandlestickChart,
+  ShoppingCart,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import AICard from '../../../components/dashboard/AICard';
@@ -147,9 +148,30 @@ export default function DashboardPage() {
         <div>
           <h2 className="mb-4 text-sm font-semibold opacity-80">Payments</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <SectionCard title="Wallet" href="/wallet" icon={Wallet} />
-            <SectionCard title="Transactions" href="/transactions" icon={ReceiptText} />
-            <SectionCard title="Pay" href="/pay" icon={CreditCard} />
+            <SectionCard
+              title={t.dashboard.cards.buy.title}
+              subtitle={t.dashboard.cards.buy.subtitle}
+              href="/buy"
+              icon={ShoppingCart}
+            />
+            <SectionCard
+              title={t.dashboard.cards.wallet.title}
+              subtitle={t.dashboard.cards.wallet.subtitle}
+              href="/wallet"
+              icon={Wallet}
+            />
+            <SectionCard
+              title={t.dashboard.cards.transactions.title}
+              subtitle={t.dashboard.cards.transactions.subtitle}
+              href="/transactions"
+              icon={ReceiptText}
+            />
+            <SectionCard
+              title={t.dashboard.cards.pay.title}
+              subtitle={t.dashboard.cards.pay.subtitle}
+              href="/pay"
+              icon={CreditCard}
+            />
           </div>
         </div>
         <div className="pt-8 border-t border-white/10">
