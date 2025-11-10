@@ -1320,7 +1320,7 @@ export default function AdminApp() {
 
   const notify = useCallback(
     (message: string, variant: 'success' | 'error' = 'success') => {
-      toast(message, variant === 'success' ? 'success' : 'error');
+      toast({ message, variant: variant === 'success' ? 'success' : 'error' });
     },
     [toast]
   );
