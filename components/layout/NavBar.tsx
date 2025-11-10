@@ -18,15 +18,23 @@ export default function NavBar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [logoError, setLogoError] = useState(false);
-
-  if (pathname?.startsWith('/mo')) {
-    return null;
-  }
+  const hideNav = pathname?.startsWith('/mo');
 
   useEffect(() => {
-    if (open) document.body.style.overflow = 'hidden';
-    else document.body.style.overflow = '';
-  }, [open]);
+    if (hideNav) {
+      return;
+    }
+
+    document.body.style.overflow = open ? 'hidden' : '';
+
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [hideNav, open]);
+
+  if (hideNav) {
+    return null;
+  }
 
   const links: NavLink[] = [
     { href: '/', label: t.nav.home },
