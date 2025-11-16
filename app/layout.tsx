@@ -1,3 +1,4 @@
+import 'server-only';
 import './globals.css';
 import { LangProvider } from './lib/i18n';
 import { ToastProvider } from './lib/toast';
@@ -5,6 +6,18 @@ import { AuthProvider } from './lib/auth';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
 import ServiceWorkerManager from '../components/ServiceWorkerManager';
+import { ensureEnv } from '../src/utils/ensureEnv';
+
+ensureEnv([
+  'DB_HOST',
+  'DB_USER',
+  'DB_PASS',
+  'DB_NAME',
+  'NEXT_PUBLIC_API_BASE',
+  'SMTP_HOST',
+  'SMTP_USER',
+  'SMTP_PASS',
+]);
 
 export const metadata = {
   title: 'ELTX — Next',
