@@ -16,8 +16,6 @@
     "start:eth-sweeper": "node apps/sweeper-eth/sweeper.js"
   },
   "dependencies": {
-    "@tsparticles/react": "^3.0.0",
-    "@tsparticles/slim": "^3.9.1",
     "@stripe/stripe-js": "^3.4.0",
     "argon2": "^0.44.0",
     "cookie-parser": "^1.4.6",

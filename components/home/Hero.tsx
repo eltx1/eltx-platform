@@ -3,41 +3,20 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
-import { useCallback, useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../../app/lib/auth';
-import Particles, { initParticlesEngine } from '@tsparticles/react';
-import { useEffect, useMemo } from 'react';
-import { loadSlim } from '@tsparticles/slim';
 
 export default function Hero() {
   const { user } = useAuth();
   const primaryHref = user ? '/dashboard' : '/signup';
   const primaryLabel = user ? 'Dashboard' : 'Get Started';
   const [logoError, setLogoError] = useState(false);
-  useEffect(() => {
-    initParticlesEngine(async (engine) => {
-      await loadSlim(engine);
-    });
-  }, []);
-  const options = useMemo(
-    () => ({
-      fullScreen: false,
-      background: { color: 'transparent' },
-      particles: {
-        number: { value: 40 },
-        color: { value: '#a855f7' },
-        links: { enable: true, color: '#a855f7', opacity: 0.4 },
-        move: { enable: true, speed: 0.6 },
-        opacity: { value: 0.5 },
-        size: { value: { min: 1, max: 3 } },
-      },
-    }),
-    []
-  );
-
   return (
     <section className="relative overflow-hidden text-white py-24 text-center">
-      <Particles id="hero-particles" options={options} className="absolute inset-0 -z-10" />
+      <div className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(255,255,255,0.08),_transparent_55%)]" />
+        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 via-fuchsia-500/10 to-cyan-500/10 animate-pulse" />
+      </div>
       <div className="absolute inset-0 bg-gradient-to-br from-purple-700 via-fuchsia-600 to-cyan-500 opacity-50 animate-gradient-slow" />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.15),transparent)]" />
       <div className="absolute -top-24 -left-24 w-80 h-80 bg-purple-600/30 rounded-full blur-3xl animate-blob" />
