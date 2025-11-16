@@ -62,6 +62,18 @@ following variables (see `.env.example` for defaults):
 - `APP_BASE_URL`, `STRIPE_SUCCESS_URL`, and `STRIPE_CANCEL_URL` for redirect handling
 - `STRIPE_MIN_PURCHASE_USD` / `STRIPE_MAX_PURCHASE_USD` to clamp purchase limits
 
+In production you can now move the Stripe values out of the environment file and into the
+`platform_settings` table. Insert or update the following keys to override the runtime config:
+
+- `stripe_publishable_key`
+- `stripe_secret_key`
+- `stripe_webhook_secret`
+- `stripe_return_url_base`, `stripe_success_url`, `stripe_cancel_url`
+- `stripe_min_purchase_usd`, `stripe_max_purchase_usd`
+
+The API polls these rows periodically (and at startup) so you can rotate keys without rebuilding
+the frontend.
+
 After configuring the keys, register the webhook endpoint at
 `https://<api-domain>/stripe/webhook` inside your Stripe dashboard.
 

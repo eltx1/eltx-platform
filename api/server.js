@@ -23,39 +23,129 @@ const {
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || null;
-const STRIPE_PUBLISHABLE_KEY =
-  process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || null;
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || null;
-const STRIPE_MIN_PURCHASE_USD = Number(process.env.STRIPE_MIN_PURCHASE_USD || '10');
-const STRIPE_MAX_PURCHASE_USD = process.env.STRIPE_MAX_PURCHASE_USD
-  ? Number(process.env.STRIPE_MAX_PURCHASE_USD)
-  : null;
-const STRIPE_RETURN_BASE =
-  process.env.APP_BASE_URL || process.env.STRIPE_RETURN_URL_BASE || 'https://eltx.online';
-const STRIPE_SUCCESS_URL =
-  process.env.STRIPE_SUCCESS_URL || `${STRIPE_RETURN_BASE}/buy?status=success&session_id={CHECKOUT_SESSION_ID}`;
-const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL || `${STRIPE_RETURN_BASE}/buy?status=cancelled`;
+const STRIPE_BASE_FALLBACK = 'https://eltx.online';
+
+function normalizeSettingValue(value) {
+  if (value === undefined || value === null) return null;
+  const str = value.toString().trim();
+  return str.length ? str : null;
+}
+
+function normalizeBaseUrl(value) {
+  const normalized = normalizeSettingValue(value);
+  if (!normalized) return null;
+  return normalized.replace(/\/+$/, '');
+}
+
+function buildDefaultSuccessUrl(base) {
+  const normalized = normalizeBaseUrl(base) || STRIPE_BASE_FALLBACK;
+  return `${normalized}/buy?status=success&session_id={CHECKOUT_SESSION_ID}`;
+}
+
+function buildDefaultCancelUrl(base) {
+  const normalized = normalizeBaseUrl(base) || STRIPE_BASE_FALLBACK;
+  return `${normalized}/buy?status=cancelled`;
+}
+
+function parsePositiveNumberSetting(value, fallback) {
+  const num = Number(value);
+  if (Number.isFinite(num) && num > 0) return num;
+  return fallback;
+}
+
+function parseOptionalPositiveNumber(value) {
+  const num = Number(value);
+  if (Number.isFinite(num) && num > 0) return num;
+  return null;
+}
+
+const DEFAULT_STRIPE_RETURN_BASE =
+  normalizeBaseUrl(process.env.APP_BASE_URL || process.env.STRIPE_RETURN_URL_BASE || STRIPE_BASE_FALLBACK) ||
+  STRIPE_BASE_FALLBACK;
+
+let stripeSecretKey = normalizeSettingValue(process.env.STRIPE_SECRET_KEY);
+let stripePublishableKey = normalizeSettingValue(
+  process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+);
+let stripeWebhookSecret = normalizeSettingValue(process.env.STRIPE_WEBHOOK_SECRET);
+let stripeReturnBase = DEFAULT_STRIPE_RETURN_BASE;
+let stripeSuccessUrl = normalizeSettingValue(process.env.STRIPE_SUCCESS_URL) || buildDefaultSuccessUrl(stripeReturnBase);
+let stripeCancelUrl = normalizeSettingValue(process.env.STRIPE_CANCEL_URL) || buildDefaultCancelUrl(stripeReturnBase);
+let stripeMinPurchaseUsd = parsePositiveNumberSetting(process.env.STRIPE_MIN_PURCHASE_USD, 10);
+let stripeMaxPurchaseUsd = parseOptionalPositiveNumber(process.env.STRIPE_MAX_PURCHASE_USD);
 
 let stripe = null;
 let stripeInitError = null;
-if (STRIPE_SECRET_KEY) {
+
+function initializeStripeSdk() {
+  stripe = null;
+  stripeInitError = null;
+  if (!stripeSecretKey) return;
   try {
-    stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+    stripe = new Stripe(stripeSecretKey, { apiVersion: '2023-10-16' });
   } catch (err) {
     stripeInitError = err?.message || 'Unknown error';
     console.error('[stripe] init failed', err.message || err);
     stripe = null;
   }
 }
-const STRIPE_ENABLED = !!stripe && !!STRIPE_PUBLISHABLE_KEY;
+
+initializeStripeSdk();
+
+function isStripeEnabled() {
+  return !!stripe && !!stripePublishableKey;
+}
+
+function applyStripeConfig(partial) {
+  let reinitialize = false;
+  if (Object.prototype.hasOwnProperty.call(partial, 'secretKey')) {
+    const normalized = normalizeSettingValue(partial.secretKey);
+    if (normalized !== stripeSecretKey) {
+      stripeSecretKey = normalized;
+      reinitialize = true;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'publishableKey')) {
+    stripePublishableKey = normalizeSettingValue(partial.publishableKey);
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'webhookSecret')) {
+    stripeWebhookSecret = normalizeSettingValue(partial.webhookSecret);
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'returnBase')) {
+    const normalizedBase = normalizeBaseUrl(partial.returnBase) || DEFAULT_STRIPE_RETURN_BASE;
+    stripeReturnBase = normalizedBase;
+    if (!Object.prototype.hasOwnProperty.call(partial, 'successUrl')) {
+      stripeSuccessUrl = buildDefaultSuccessUrl(stripeReturnBase);
+    }
+    if (!Object.prototype.hasOwnProperty.call(partial, 'cancelUrl')) {
+      stripeCancelUrl = buildDefaultCancelUrl(stripeReturnBase);
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'successUrl')) {
+    const normalizedSuccess = normalizeSettingValue(partial.successUrl);
+    stripeSuccessUrl = normalizedSuccess || buildDefaultSuccessUrl(stripeReturnBase);
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'cancelUrl')) {
+    const normalizedCancel = normalizeSettingValue(partial.cancelUrl);
+    stripeCancelUrl = normalizedCancel || buildDefaultCancelUrl(stripeReturnBase);
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'minPurchaseUsd')) {
+    stripeMinPurchaseUsd = parsePositiveNumberSetting(partial.minPurchaseUsd, stripeMinPurchaseUsd || 10);
+  }
+  if (Object.prototype.hasOwnProperty.call(partial, 'maxPurchaseUsd')) {
+    stripeMaxPurchaseUsd = parseOptionalPositiveNumber(partial.maxPurchaseUsd);
+  }
+  if (reinitialize) {
+    initializeStripeSdk();
+  }
+}
 
 function getStripeIssues() {
   const issues = [];
-  if (!STRIPE_SECRET_KEY) issues.push('STRIPE_SECRET_KEY is not set');
-  if (!STRIPE_PUBLISHABLE_KEY) issues.push('STRIPE_PUBLISHABLE_KEY is not set');
-  if (!STRIPE_WEBHOOK_SECRET) issues.push('STRIPE_WEBHOOK_SECRET is not set');
-  if (STRIPE_SECRET_KEY && !stripe) {
+  if (!stripeSecretKey) issues.push('STRIPE_SECRET_KEY is not set');
+  if (!stripePublishableKey) issues.push('STRIPE_PUBLISHABLE_KEY is not set');
+  if (!stripeWebhookSecret) issues.push('STRIPE_WEBHOOK_SECRET is not set');
+  if (stripeSecretKey && !stripe) {
     issues.push(
       stripeInitError ? `Stripe SDK failed to initialize (${stripeInitError})` : 'Stripe SDK is not initialized'
     );
@@ -67,20 +157,20 @@ function getStripeStatusPayload(audience = 'public') {
   const issues = getStripeIssues();
   const reason = issues.length ? issues.join('; ') : null;
   const base = {
-    enabled: STRIPE_ENABLED,
+    enabled: isStripeEnabled(),
     reason,
-    publishableKey: STRIPE_PUBLISHABLE_KEY,
+    publishableKey: stripePublishableKey,
   };
   if (audience === 'admin') {
     return {
       ...base,
-      secretKey: STRIPE_SECRET_KEY,
-      webhookSecret: STRIPE_WEBHOOK_SECRET,
-      returnUrlBase: STRIPE_RETURN_BASE,
-      successUrl: STRIPE_SUCCESS_URL,
-      cancelUrl: STRIPE_CANCEL_URL,
-      minPurchaseUsd: STRIPE_MIN_PURCHASE_USD,
-      maxPurchaseUsd: STRIPE_MAX_PURCHASE_USD,
+      secretKey: stripeSecretKey,
+      webhookSecret: stripeWebhookSecret,
+      returnUrlBase: stripeReturnBase,
+      successUrl: stripeSuccessUrl,
+      cancelUrl: stripeCancelUrl,
+      minPurchaseUsd: stripeMinPurchaseUsd,
+      maxPurchaseUsd: stripeMaxPurchaseUsd,
       sdkReady: !!stripe,
     };
   }
@@ -129,6 +219,65 @@ const pool = mysql.createPool(
     database: process.env.DB_NAME || 'eltx',
   }
 );
+
+const STRIPE_SETTING_KEYS = [
+  'stripe_publishable_key',
+  'stripe_secret_key',
+  'stripe_webhook_secret',
+  'stripe_return_url_base',
+  'stripe_success_url',
+  'stripe_cancel_url',
+  'stripe_min_purchase_usd',
+  'stripe_max_purchase_usd',
+];
+
+async function refreshStripeConfigFromDb() {
+  try {
+    const placeholders = STRIPE_SETTING_KEYS.map(() => '?').join(',');
+    const [rows] = await pool.query(
+      `SELECT name, value FROM platform_settings WHERE name IN (${placeholders})`,
+      STRIPE_SETTING_KEYS
+    );
+    if (!rows.length) return;
+    const updates = {};
+    for (const row of rows) {
+      const rawValue = row.value === undefined || row.value === null ? null : row.value.toString();
+      switch (row.name) {
+        case 'stripe_publishable_key':
+          updates.publishableKey = rawValue;
+          break;
+        case 'stripe_secret_key':
+          updates.secretKey = rawValue;
+          break;
+        case 'stripe_webhook_secret':
+          updates.webhookSecret = rawValue;
+          break;
+        case 'stripe_return_url_base':
+          updates.returnBase = rawValue;
+          break;
+        case 'stripe_success_url':
+          updates.successUrl = rawValue;
+          break;
+        case 'stripe_cancel_url':
+          updates.cancelUrl = rawValue;
+          break;
+        case 'stripe_min_purchase_usd':
+          updates.minPurchaseUsd = rawValue;
+          break;
+        case 'stripe_max_purchase_usd':
+          updates.maxPurchaseUsd = rawValue;
+          break;
+        default:
+          break;
+      }
+    }
+    if (Object.keys(updates).length) {
+      applyStripeConfig(updates);
+    }
+  } catch (err) {
+    console.error('[stripe] Failed to load Stripe configuration from database', err.message || err);
+  }
+}
 
 const walletSchemaPath = path.join(__dirname, '../db/wallet.sql');
 let walletStatements = [];
@@ -265,7 +414,20 @@ pool.getConnection = async function (...args) {
   return conn;
 };
 
-ensureWalletSchema().catch(() => {});
+ensureWalletSchema()
+  .then(() => refreshStripeConfigFromDb())
+  .catch(() => {});
+
+const STRIPE_CONFIG_REFRESH_INTERVAL_MS = Math.max(
+  60_000,
+  Number(process.env.STRIPE_CONFIG_REFRESH_INTERVAL_MS || 5 * 60 * 1000)
+);
+const stripeRefreshTimer = setInterval(() => {
+  refreshStripeConfigFromDb();
+}, STRIPE_CONFIG_REFRESH_INTERVAL_MS);
+if (typeof stripeRefreshTimer.unref === 'function') {
+  stripeRefreshTimer.unref();
+}
 
 // start background scanner runner
 const startRunner = require('./background/runner');
@@ -892,14 +1054,14 @@ async function requireAdmin(req, { extend = true } = {}) {
 }
 
 app.post('/stripe/webhook', async (req, res) => {
-  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+  if (!stripe || !stripeWebhookSecret) {
     return res.status(503).send('Stripe unavailable');
   }
   const signature = req.headers['stripe-signature'];
   if (!signature) return res.status(400).send('Missing signature');
   let event;
   try {
-    event = stripe.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(req.body, signature, stripeWebhookSecret);
   } catch (err) {
     console.warn('[stripe] invalid webhook signature', err.message || err);
     return res.status(400).send(`Webhook Error: ${err.message}`);
@@ -960,7 +1122,7 @@ app.get('/fiat/stripe/rate', walletLimiter, async (req, res, next) => {
 });
 
 app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
-  if (!STRIPE_ENABLED) {
+  if (!isStripeEnabled()) {
     const status = getStripeStatusPayload('public');
     return next({
       status: 503,
@@ -1035,8 +1197,8 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
       payment_method_types: ['card'],
       client_reference_id: String(purchaseId),
       customer_email: userRow?.email || undefined,
-      success_url: STRIPE_SUCCESS_URL,
-      cancel_url: STRIPE_CANCEL_URL,
+      success_url: stripeSuccessUrl,
+      cancel_url: stripeCancelUrl,
       metadata: { purchaseId: String(purchaseId), userId: String(userId) },
       payment_intent_data: {
         metadata: { purchaseId: String(purchaseId), userId: String(userId) },
@@ -1059,7 +1221,7 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
     res.json({
       ok: true,
       sessionId: session.id,
-      publishableKey: STRIPE_PUBLISHABLE_KEY,
+      publishableKey: stripePublishableKey,
       limits: {
         min_usd: min.toFixed(2, Decimal.ROUND_UP),
         max_usd: max ? max.toFixed(2, Decimal.ROUND_DOWN) : null,
@@ -4006,7 +4168,9 @@ async function getStripePricing(conn = pool) {
     }
   }
 
-  let min = new Decimal(Number.isFinite(STRIPE_MIN_PURCHASE_USD) && STRIPE_MIN_PURCHASE_USD > 0 ? STRIPE_MIN_PURCHASE_USD : 10);
+  let min = new Decimal(
+    Number.isFinite(stripeMinPurchaseUsd) && stripeMinPurchaseUsd > 0 ? stripeMinPurchaseUsd : 10
+  );
   if (row?.min_amount !== undefined && row.min_amount !== null) {
     try {
       const dbMin = new Decimal(row.min_amount);
@@ -4015,9 +4179,9 @@ async function getStripePricing(conn = pool) {
   }
 
   let max = null;
-  if (Number.isFinite(STRIPE_MAX_PURCHASE_USD) && STRIPE_MAX_PURCHASE_USD > 0) {
+  if (Number.isFinite(stripeMaxPurchaseUsd) && stripeMaxPurchaseUsd > 0) {
     try {
-      max = new Decimal(STRIPE_MAX_PURCHASE_USD);
+      max = new Decimal(stripeMaxPurchaseUsd);
     } catch {}
   }
   if (row?.max_amount !== undefined && row.max_amount !== null) {
