@@ -97,9 +97,7 @@ export default function BuyPage() {
   const [rate, setRate] = useState<FiatRateResponse['pricing']>(null);
   const [loadingRate, setLoadingRate] = useState(true);
   const [stripeEnabled, setStripeEnabled] = useState(false);
-  const [stripeKey, setStripeKey] = useState<string | null>(
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || null
-  );
+  const [stripeKey, setStripeKey] = useState<string | null>(null);
   const [stripeIssue, setStripeIssue] = useState<string | null>(null);
   const [loadingCheckout, setLoadingCheckout] = useState(false);
   const [error, setError] = useState<string | null>(null);
