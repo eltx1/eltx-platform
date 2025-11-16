@@ -2,10 +2,11 @@
   "name": "eltx-next",
   "version": "0.1.1",
   "private": true,
+  "// IMPORTANT: Env is loaded from /home/dash/.env via dotenv. Do NOT enable 'export' or 'standalone', and do NOT modify scripts to remove '-r dotenv/config'.": "",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start -p 3000"
+    "dev": "DOTENV_CONFIG_PATH=/home/dash/.env node -r dotenv/config node_modules/next/dist/bin/next dev -p 3000",
+    "build": "DOTENV_CONFIG_PATH=/home/dash/.env node -r dotenv/config node_modules/next/dist/bin/next build",
+    "start": "DOTENV_CONFIG_PATH=/home/dash/.env node -r dotenv/config node_modules/next/dist/bin/next start -p 3000"
   },
   "dependencies": {
     "@stripe/stripe-js": "^3.4.0",
