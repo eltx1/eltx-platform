@@ -38,15 +38,54 @@ const STRIPE_SUCCESS_URL =
 const STRIPE_CANCEL_URL = process.env.STRIPE_CANCEL_URL || `${STRIPE_RETURN_BASE}/buy?status=cancelled`;
 
 let stripe = null;
+let stripeInitError = null;
 if (STRIPE_SECRET_KEY) {
   try {
     stripe = new Stripe(STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
   } catch (err) {
+    stripeInitError = err?.message || 'Unknown error';
     console.error('[stripe] init failed', err.message || err);
     stripe = null;
   }
 }
 const STRIPE_ENABLED = !!stripe && !!STRIPE_PUBLISHABLE_KEY;
+
+function getStripeIssues() {
+  const issues = [];
+  if (!STRIPE_SECRET_KEY) issues.push('STRIPE_SECRET_KEY is not set');
+  if (!STRIPE_PUBLISHABLE_KEY) issues.push('STRIPE_PUBLISHABLE_KEY is not set');
+  if (!STRIPE_WEBHOOK_SECRET) issues.push('STRIPE_WEBHOOK_SECRET is not set');
+  if (STRIPE_SECRET_KEY && !stripe) {
+    issues.push(
+      stripeInitError ? `Stripe SDK failed to initialize (${stripeInitError})` : 'Stripe SDK is not initialized'
+    );
+  }
+  return issues;
+}
+
+function getStripeStatusPayload(audience = 'public') {
+  const issues = getStripeIssues();
+  const reason = issues.length ? issues.join('; ') : null;
+  const base = {
+    enabled: STRIPE_ENABLED,
+    reason,
+    publishableKey: STRIPE_PUBLISHABLE_KEY,
+  };
+  if (audience === 'admin') {
+    return {
+      ...base,
+      secretKey: STRIPE_SECRET_KEY,
+      webhookSecret: STRIPE_WEBHOOK_SECRET,
+      returnUrlBase: STRIPE_RETURN_BASE,
+      successUrl: STRIPE_SUCCESS_URL,
+      cancelUrl: STRIPE_CANCEL_URL,
+      minPurchaseUsd: STRIPE_MIN_PURCHASE_USD,
+      maxPurchaseUsd: STRIPE_MAX_PURCHASE_USD,
+      sdkReady: !!stripe,
+    };
+  }
+  return base;
+}
 
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
@@ -913,10 +952,7 @@ app.get('/fiat/stripe/rate', walletLimiter, async (req, res, next) => {
         max_usd: max,
         updated_at: pricing.updatedAt,
       },
-      stripe: {
-        enabled: STRIPE_ENABLED,
-        publishableKey: STRIPE_PUBLISHABLE_KEY,
-      },
+      stripe: getStripeStatusPayload('public'),
     });
   } catch (err) {
     next(err);
@@ -925,7 +961,12 @@ app.get('/fiat/stripe/rate', walletLimiter, async (req, res, next) => {
 
 app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
   if (!STRIPE_ENABLED) {
-    return next({ status: 503, code: 'STRIPE_DISABLED', message: 'Card payments are not available right now.' });
+    const status = getStripeStatusPayload('public');
+    return next({
+      status: 503,
+      code: 'STRIPE_DISABLED',
+      message: status.reason || 'Card payments are not available right now.',
+    });
   }
   let conn;
   try {
@@ -1292,6 +1333,15 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
         confirmed_deposits: Number(depositRow?.confirmed_deposits || 0),
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/stripe/status', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    res.json({ ok: true, status: getStripeStatusPayload('admin') });
   } catch (err) {
     next(err);
   }
