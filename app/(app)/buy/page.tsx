@@ -24,6 +24,7 @@ type FiatRateResponse = {
   stripe: {
     enabled: boolean;
     publishableKey?: string | null;
+    reason?: string | null;
   };
 };
 
@@ -99,6 +100,7 @@ export default function BuyPage() {
   const [stripeKey, setStripeKey] = useState<string | null>(
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || null
   );
+  const [stripeIssue, setStripeIssue] = useState<string | null>(null);
   const [loadingCheckout, setLoadingCheckout] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [purchases, setPurchases] = useState<FiatPurchase[]>([]);
@@ -177,9 +179,11 @@ export default function BuyPage() {
       setStripeEnabled(res.data.stripe?.enabled ?? false);
       const incomingKey = res.data.stripe?.publishableKey || null;
       if (incomingKey) setStripeKey(incomingKey);
+      setStripeIssue(res.data.stripe?.reason || null);
     } else {
       setRate(null);
       setStripeEnabled(false);
+      setStripeIssue(res.error || null);
       setError(res.error || t.common.genericError);
     }
     setLoadingRate(false);
@@ -304,6 +308,7 @@ export default function BuyPage() {
   }
 
   const stripeReady = stripeEnabled && (stripeKey?.length ?? 0) > 0;
+  const showStripeNotice = !loadingRate && !stripeEnabled;
 
   return (
     <div className="space-y-8">
@@ -355,6 +360,16 @@ export default function BuyPage() {
         </div>
 
         <p className="text-xs text-white/50">{t.buy.feeNotice}</p>
+
+        {showStripeNotice && (
+          <div className="flex items-start gap-3 rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
+            <AlertCircle className="h-4 w-4 flex-shrink-0" />
+            <div>
+              <div className="font-medium">{t.buy.errors.stripeUnavailable}</div>
+              {stripeIssue && <div className="text-xs text-yellow-200/80">{stripeIssue}</div>}
+            </div>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">

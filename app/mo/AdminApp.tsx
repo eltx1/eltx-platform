@@ -66,6 +66,23 @@ interface UserDetailResponse {
   transfers: Array<{ id: number; asset: string; amount: string; from_user_id: number; to_user_id: number; created_at: string }>;
 }
 
+interface StripeStatusResponse {
+  ok: boolean;
+  status: {
+    enabled: boolean;
+    reason?: string | null;
+    publishableKey?: string | null;
+    secretKey?: string | null;
+    webhookSecret?: string | null;
+    returnUrlBase?: string | null;
+    successUrl?: string | null;
+    cancelUrl?: string | null;
+    minPurchaseUsd?: number;
+    maxPurchaseUsd?: number | null;
+    sdkReady?: boolean;
+  };
+}
+
 const sections: Array<{ id: Section; label: string; icon: ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
@@ -1249,33 +1266,99 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
 
 function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const [purchases, setPurchases] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingPurchases, setLoadingPurchases] = useState(true);
+  const [status, setStatus] = useState<StripeStatusResponse['status'] | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const loadPurchases = useCallback(async () => {
+    setLoadingPurchases(true);
     const res = await apiFetch<{ purchases: any[] }>('/admin/fiat/purchases');
     if (res.ok) setPurchases(res.data.purchases);
     else onNotify(res.error || 'Failed to load purchases', 'error');
-    setLoading(false);
+    setLoadingPurchases(false);
+  }, [onNotify]);
+
+  const loadStatus = useCallback(async () => {
+    setStatusLoading(true);
+    const res = await apiFetch<StripeStatusResponse>('/admin/stripe/status');
+    if (res.ok) setStatus(res.data.status);
+    else onNotify(res.error || 'Failed to load Stripe status', 'error');
+    setStatusLoading(false);
   }, [onNotify]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    loadPurchases();
+    loadStatus();
+  }, [loadPurchases, loadStatus]);
+
+  const refreshAll = useCallback(() => {
+    loadStatus();
+    loadPurchases();
+  }, [loadPurchases, loadStatus]);
+
+  const envRows = [
+    { label: 'STRIPE_PUBLISHABLE_KEY', value: status?.publishableKey || 'Not set' },
+    { label: 'STRIPE_SECRET_KEY', value: status?.secretKey || 'Not set' },
+    { label: 'STRIPE_WEBHOOK_SECRET', value: status?.webhookSecret || 'Not set' },
+    { label: 'RETURN URL BASE', value: status?.returnUrlBase || 'Not set' },
+    { label: 'SUCCESS URL', value: status?.successUrl || 'Not set' },
+    { label: 'CANCEL URL', value: status?.cancelUrl || 'Not set' },
+    {
+      label: 'LIMITS (USD)',
+      value: `${status?.minPurchaseUsd ?? '—'} - ${status?.maxPurchaseUsd ?? '∞'}`,
+    },
+  ];
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h3 className="text-lg font-semibold">Stripe conversions</h3>
         <button
-          onClick={load}
+          onClick={refreshAll}
           className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
         >
           <RefreshCw className="h-3 w-3" /> Refresh
         </button>
       </div>
+
       <div className="rounded-2xl border border-white/10 bg-white/5">
-        {loading ? (
+        <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">
+          Environment status
+        </div>
+        {statusLoading ? (
+          <div className="flex h-40 items-center justify-center">
+            <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+          </div>
+        ) : status ? (
+          <div className="space-y-4 p-4 text-sm">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 text-base font-semibold">
+                <span className={`h-2 w-2 rounded-full ${status.enabled ? 'bg-green-400' : 'bg-red-400'}`}></span>
+                {status.enabled ? 'Checkout enabled' : 'Checkout disabled'}
+              </div>
+              <div className="text-xs text-white/60">
+                {status.sdkReady ? 'Stripe SDK initialized' : 'Stripe SDK not initialized'}
+              </div>
+              {!status.enabled && status.reason && (
+                <div className="text-xs text-red-300">{status.reason}</div>
+              )}
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              {envRows.map((row) => (
+                <div key={row.label} className="rounded-xl border border-white/10 bg-black/40 p-3">
+                  <div className="text-[11px] uppercase tracking-wide text-white/50">{row.label}</div>
+                  <div className="mt-1 font-mono text-xs text-white/80 break-all">{row.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 text-sm text-white/70">Unable to read Stripe status.</div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5">
+        {loadingPurchases ? (
           <div className="flex h-60 items-center justify-center">
             <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
           </div>
