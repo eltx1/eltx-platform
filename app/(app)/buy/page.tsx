@@ -7,7 +7,7 @@ import ClientBuy from './ClientBuy';
 
 export default function BuyPage() {
   return (
-    <Suspense fallback="Loading…">
+    <Suspense fallback={<div>Loading…</div>}>
       <ClientBuy />
     </Suspense>
   );
