@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { formatUnits, parseUnits } from 'ethers';
 import {
   CreditCard,
   DollarSign,
@@ -92,6 +93,31 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
 ];
+
+function trimDecimalValue(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return '0';
+  const str = value.toString();
+  if (!str.includes('.')) return str;
+  const trimmed = str.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  const normalized = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
+  return normalized.length ? normalized : '0';
+}
+
+function formatReserve(wei: string | number | null | undefined, decimals = 18) {
+  try {
+    return trimDecimalValue(formatUnits(BigInt(String(wei ?? '0')), decimals));
+  } catch {
+    return '0';
+  }
+}
+
+function toWeiString(amount: string, decimals = 18) {
+  try {
+    return parseUnits(amount, decimals).toString();
+  } catch {
+    return null;
+  }
+}
 
 function SectionTabs({ active, onSelect }: { active: Section; onSelect: (section: Section) => void }) {
   return (
@@ -1126,8 +1152,8 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     setLoading(true);
     const res = await apiFetch<{ swap: any[]; spot: any[] }>('/admin/pricing');
     if (res.ok) {
-      setSwap(res.data.swap);
-      setSpot(res.data.spot);
+      setSwap(Array.isArray(res.data.swap) ? res.data.swap : []);
+      setSpot(Array.isArray(res.data.spot) ? res.data.spot : []);
     } else {
       onNotify(res.error || 'Failed to load pricing', 'error');
     }
@@ -1138,18 +1164,18 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     load();
   }, [load]);
 
-  const editSwap = async (asset: string) => {
-    const price = window.prompt(`Set new ELTX price for ${asset} (leave blank to skip)`);
-    const min = window.prompt('Set new minimum swap size');
-    const max = window.prompt('Set new maximum swap size (blank to clear)');
-    const spread = window.prompt('Spread (bps)');
+  const editSwap = async (row: any) => {
+    const price = window.prompt(`Set new ELTX price for ${row.asset} (leave blank to skip)`, row.price_eltx ?? '');
+    const min = window.prompt('Set new minimum swap size', row.min_amount ?? '');
+    const max = window.prompt('Set new maximum swap size (blank to clear)', row.max_amount ?? '');
+    const spread = window.prompt('Spread (bps)', row.spread_bps?.toString() ?? '');
     const body: Record<string, unknown> = {};
     if (price) body.price_eltx = price;
     if (min) body.min_amount = min;
     if (max !== null) body.max_amount = max.length ? max : null;
     if (spread) body.spread_bps = Number(spread);
     if (!Object.keys(body).length) return;
-    const res = await apiFetch(`/admin/pricing/swap/${asset}`, {
+    const res = await apiFetch(`/admin/pricing/swap/${row.asset}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
@@ -1158,6 +1184,40 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       load();
     } else {
       onNotify(res.error || 'Failed to update pricing', 'error');
+    }
+  };
+
+  const editSwapPool = async (row: any) => {
+    const assetDecimals = Number(row.asset_decimals || 18);
+    const currentAssetReserve = formatReserve(row.asset_reserve_wei, assetDecimals);
+    const currentEltxReserve = formatReserve(row.eltx_reserve_wei, 18);
+    const assetReserve = window.prompt(`Update ${row.asset} reserve`, currentAssetReserve);
+    const eltxReserve = window.prompt('Update ELTX reserve', currentEltxReserve);
+    const body: Record<string, unknown> = {};
+
+    if (assetReserve !== null && assetReserve !== '') {
+      const wei = toWeiString(assetReserve, assetDecimals);
+      if (wei === null) return onNotify('Invalid asset reserve value', 'error');
+      body.asset_reserve_wei = wei;
+    }
+
+    if (eltxReserve !== null && eltxReserve !== '') {
+      const wei = toWeiString(eltxReserve, 18);
+      if (wei === null) return onNotify('Invalid ELTX reserve value', 'error');
+      body.eltx_reserve_wei = wei;
+    }
+
+    if (!Object.keys(body).length) return;
+
+    const res = await apiFetch(`/admin/pricing/swap/${row.asset}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      onNotify('Pool balances updated', 'success');
+      load();
+    } else {
+      onNotify(res.error || 'Failed to update pool', 'error');
     }
   };
 
@@ -1204,6 +1264,10 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                   <tr>
                     <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Asset</th>
                     <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Min</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Max</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Spread</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Pool</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
@@ -1212,13 +1276,32 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                     <tr key={row.asset}>
                       <td className="px-3 py-2">{row.asset}</td>
                       <td className="px-3 py-2">{row.price_eltx}</td>
+                      <td className="px-3 py-2">{row.min_amount}</td>
+                      <td className="px-3 py-2">{row.max_amount ?? '—'}</td>
+                      <td className="px-3 py-2">{row.spread_bps} bps</td>
+                      <td className="px-3 py-2 text-xs text-white/70">
+                        <div className="flex flex-col">
+                          <span>
+                            {formatReserve(row.asset_reserve_wei, Number(row.asset_decimals || 18))} {row.asset}
+                          </span>
+                          <span>{formatReserve(row.eltx_reserve_wei, 18)} ELTX</span>
+                        </div>
+                      </td>
                       <td className="px-3 py-2 text-right">
-                        <button
-                          onClick={() => editSwap(row.asset)}
-                          className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => editSwap(row)}
+                            className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+                          >
+                            Edit pricing
+                          </button>
+                          <button
+                            onClick={() => editSwapPool(row)}
+                            className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+                          >
+                            Edit pool
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

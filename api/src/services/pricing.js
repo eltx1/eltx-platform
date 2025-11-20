@@ -55,17 +55,29 @@ async function fetchCoinGeckoPrices(ids) {
     vs_currencies: 'usd',
   });
   const url = `${COINGECKO_BASE_URL}?${searchParams.toString()}`;
-  const res = await fetch(url, {
-    headers: {
-      accept: 'application/json',
-    },
-  });
-  if (!res.ok) {
-    const error = new Error(`CoinGecko request failed with status ${res.status}`);
-    error.status = res.status;
-    throw error;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new Error('timeout')), 5000);
+  try {
+    const res = await fetch(url, {
+      headers: {
+        accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const error = new Error(`CoinGecko request failed with status ${res.status}`);
+      error.status = res.status;
+      throw error;
+    }
+    return res.json();
+  } catch (err) {
+    const isAbort = err?.name === 'AbortError' || err?.message === 'timeout';
+    const wrapped = new Error(isAbort ? 'CoinGecko request timed out' : err?.message || 'Failed to fetch prices');
+    wrapped.status = isAbort ? 504 : err?.status;
+    throw wrapped;
+  } finally {
+    clearTimeout(timeout);
   }
-  return res.json();
 }
 
 async function getUsdPrices() {
