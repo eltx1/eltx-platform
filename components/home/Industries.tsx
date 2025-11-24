@@ -23,9 +23,15 @@ const data = [
 
 export default function Industries() {
   return (
-    <section className="py-20 px-4 bg-gradient-to-b from-black via-purple-900/20 to-black">
-      <h2 className="text-3xl font-bold text-center mb-12">We serve</h2>
-      <div className="grid gap-8 sm:grid-cols-3 max-w-6xl mx-auto">
+    <section className="py-16 px-4 bg-gradient-to-b from-neutral-950 via-purple-950/20 to-neutral-950">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="text-center space-y-2">
+          <p className="text-xs uppercase tracking-[0.3em] text-purple-200/70">Reach</p>
+          <h2 className="text-3xl font-bold">We serve</h2>
+          <p className="text-white/70 text-sm md:text-base">Government rails، شركات تبحث عن الدفع العابر للحدود، وأفراد يريدون تحويلات سريعة.</p>
+        </div>
+      </div>
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto mt-8">
         {data.map((d, i) => {
           const Icon = d.icon;
           return (
@@ -36,18 +42,20 @@ export default function Industries() {
               viewport={{ once: true }}
               transition={{ delay: i * 0.1 }}
               whileHover={{ y: -4 }}
-              className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-600 to-cyan-600 shadow-lg"
+              className="p-[1px] rounded-2xl bg-gradient-to-br from-purple-600/70 to-cyan-600/70 shadow-lg"
             >
-              <div className="h-full p-6 rounded-2xl bg-black/60 text-center backdrop-blur-xl border border-white/10">
-                <div className="mx-auto mb-4 h-10 w-10 rounded-full bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center shadow">
+              <div className="h-full p-6 rounded-2xl bg-black/70 text-center backdrop-blur-xl border border-white/10 flex flex-col gap-3">
+                <div className="mx-auto h-12 w-12 rounded-xl bg-gradient-to-br from-purple-600 to-cyan-600 flex items-center justify-center shadow">
                   <Icon className="h-5 w-5" />
                 </div>
-                <h3 className="font-semibold mb-2">{d.title}</h3>
-                <ul className="text-sm opacity-80 space-y-1">
-                  {d.points.map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
+                <div className="space-y-2 flex-1">
+                  <h3 className="font-semibold text-lg">{d.title}</h3>
+                  <ul className="text-sm opacity-80 space-y-1">
+                    {d.points.map((p) => (
+                      <li key={p}>{p}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </motion.div>
           );
