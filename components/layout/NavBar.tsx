@@ -47,53 +47,61 @@ export default function NavBar() {
   const isActive = (href: string) => (pathname === href ? 'text-yellow-400' : '');
 
   return (
-    <header className="p-4 border-b border-white/10 flex items-center justify-between bg-black/40 backdrop-blur-sm sticky top-0 z-50">
-      <Link href="/" className="flex items-center font-bold" aria-label="ELTX Home">
-        {logoError ? (
-          <span>ELTX</span>
-        ) : (
-          <Image src="/assets/img/logo.jpeg" alt="ELTX Logo" width={32} height={32} onError={() => setLogoError(true)} />
-        )}
-      </Link>
-      <nav className="hidden sm:flex items-center gap-4">
-        {links.map((l) => (
-          <Link key={l.href} href={l.href} className={`hover:opacity-80 ${isActive(l.href)}`}>
-            {l.label}
-          </Link>
-        ))}
-        {!user && (
-          <>
-            <Link href="/login" className="hover:opacity-80">{t.nav.login}</Link>
-            <Link href="/signup" className="hover:opacity-80">{t.nav.signup}</Link>
-          </>
-        )}
-        {user && (
-          <>
-            <Link href="/dashboard" className="hover:opacity-80">{t.nav.dashboard}</Link>
-            <button
-              onClick={async () => {
-                await logout();
-              }}
-              className="hover:opacity-80"
-            >
-              {t.nav.logout}
-            </button>
-          </>
-        )}
+    <header className="sticky top-0 z-50 bg-neutral-950/80 backdrop-blur-xl border-b border-white/10">
+      <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
+        <Link href="/" className="flex items-center gap-3 font-bold" aria-label="ELTX Home">
+          {logoError ? (
+            <span className="text-lg">ELTX</span>
+          ) : (
+            <Image src="/assets/img/logo.jpeg" alt="ELTX Logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
+          )}
+          <span className="hidden sm:inline text-sm text-white/70">Enterprise crypto protocol</span>
+        </Link>
+        <nav className="hidden sm:flex items-center gap-4 text-sm">
+          {links.map((l) => (
+            <Link key={l.href} href={l.href} className={`hover:text-white/90 transition-colors ${isActive(l.href)}`}>
+              {l.label}
+            </Link>
+          ))}
+          {!user && (
+            <>
+              <Link href="/login" className="hover:text-white/90">{t.nav.login}</Link>
+              <Link
+                href="/signup"
+                className="px-3 py-2 rounded-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-500 text-white font-semibold shadow-lg shadow-purple-900/30 hover:opacity-90"
+              >
+                {t.nav.signup}
+              </Link>
+            </>
+          )}
+          {user && (
+            <>
+              <Link href="/dashboard" className="hover:text-white/90">{t.nav.dashboard}</Link>
+              <button
+                onClick={async () => {
+                  await logout();
+                }}
+                className="hover:text-white/90"
+              >
+                {t.nav.logout}
+              </button>
+            </>
+          )}
+          <button
+            onClick={() => setLang(lang === 'en' ? 'ar' : 'en')}
+            className="rounded-full border border-white/10 px-3 py-1 hover:bg-white/10"
+          >
+            {lang === 'en' ? 'AR' : 'EN'}
+          </button>
+        </nav>
         <button
-          onClick={() => setLang(lang === 'en' ? 'ar' : 'en')}
-          className="hover:opacity-80"
+          className="sm:hidden rounded-full border border-white/15 p-2 hover:bg-white/10"
+          onClick={() => setOpen(true)}
+          aria-label="Open Menu"
         >
-          {lang === 'en' ? 'AR' : 'EN'}
+          <Menu />
         </button>
-      </nav>
-      <button
-        className="sm:hidden hover:opacity-80"
-        onClick={() => setOpen(true)}
-        aria-label="Open Menu"
-      >
-        <Menu />
-      </button>
+      </div>
       <MobileMenu open={open} setOpen={setOpen} links={links} user={user} logout={logout} />
     </header>
   );
