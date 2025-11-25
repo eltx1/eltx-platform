@@ -3,7 +3,7 @@
 import { ArrowRightLeft, Link2 } from 'lucide-react';
 
 const UNISWAP_URL =
-  'https://app.uniswap.org/#/swap?outputCurrency=0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c&inputCurrency=ETH&chain=ethereum';
+  'https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency=0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c&chain=mainnet';
 
 export default function Swap() {
   return (
@@ -12,9 +12,9 @@ export default function Swap() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="space-y-2">
             <p className="text-xs uppercase tracking-[0.3em] text-cyan-200/80">Swap</p>
-            <h2 className="text-3xl font-extrabold">اشترِ ELTX الآن</h2>
+            <h2 className="text-3xl font-extrabold">Buy ELTX now</h2>
             <p className="text-white/80 text-sm md:text-base max-w-2xl">
-              بدّل ETH إلى ELTX مباشرة عبر Uniswap مع تعيين عقد ELTX كعملتك الخارجة بشكل افتراضي.
+              Swap ETH to ELTX directly through Uniswap with the ELTX contract pre-selected as the output token.
             </p>
           </div>
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">

@@ -28,7 +28,9 @@ export default function Industries() {
         <div className="text-center space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-purple-200/70">Reach</p>
           <h2 className="text-3xl font-bold">We serve</h2>
-          <p className="text-white/70 text-sm md:text-base">Government rails، شركات تبحث عن الدفع العابر للحدود، وأفراد يريدون تحويلات سريعة.</p>
+          <p className="text-white/70 text-sm md:text-base">
+            Government rails, companies needing cross-border payments, and individuals looking for fast remittances.
+          </p>
         </div>
       </div>
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 max-w-6xl mx-auto mt-8">
