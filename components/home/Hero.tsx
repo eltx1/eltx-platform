@@ -9,7 +9,7 @@ import { useAuth } from '../../app/lib/auth';
 export default function Hero() {
   const { user } = useAuth();
   const primaryHref = user ? '/dashboard' : '/signup';
-  const primaryLabel = user ? 'Dashboard' : 'افتح حساب / سجّل الدخول';
+  const primaryLabel = user ? 'Dashboard' : 'Create account / Sign in';
   const secondaryHref = '#swap-eltx';
   const [logoError, setLogoError] = useState(false);
   return (
@@ -75,7 +75,7 @@ export default function Hero() {
               href={secondaryHref}
               className="px-6 py-3 rounded-full border border-white/15 bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors"
             >
-              اشترِ ELTX الآن
+              Buy ELTX now
             </Link>
           </motion.div>
           <div className="flex flex-wrap justify-center md:justify-start gap-3 text-xs md:text-sm opacity-90">
@@ -85,23 +85,23 @@ export default function Hero() {
           </div>
         </div>
         <div className="rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 space-y-4 shadow-lg shadow-purple-900/20">
-          <h3 className="text-lg font-semibold text-left">ما الذي ستحصل عليه؟</h3>
+          <h3 className="text-lg font-semibold text-left">What you get</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-600/20 to-cyan-500/20 p-4">
               <p className="font-semibold">Dashboard</p>
-              <p className="text-white/80 mt-1">أداة موحدة لمراقبة الأصول والتحركات.</p>
+              <p className="text-white/80 mt-1">Unified control for tracking assets and moves.</p>
             </div>
             <div className="rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-600/20 to-cyan-500/20 p-4">
               <p className="font-semibold">Wallet</p>
-              <p className="text-white/80 mt-1">عمليات سريعة مع تجربة مبسطة للهاتف.</p>
+              <p className="text-white/80 mt-1">Fast actions with a streamlined mobile flow.</p>
             </div>
             <div className="rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-600/20 to-cyan-500/20 p-4">
               <p className="font-semibold">Staking</p>
-              <p className="text-white/80 mt-1">فرص نمو واضحة مع أدوات الحوكمة.</p>
+              <p className="text-white/80 mt-1">Clear growth paths with governance tools.</p>
             </div>
             <div className="rounded-xl border border-purple-500/30 bg-gradient-to-br from-purple-600/20 to-cyan-500/20 p-4">
               <p className="font-semibold">Support</p>
-              <p className="text-white/80 mt-1">دعم سريع لمساعدتك في كل خطوة.</p>
+              <p className="text-white/80 mt-1">Responsive help at every step.</p>
             </div>
           </div>
         </div>

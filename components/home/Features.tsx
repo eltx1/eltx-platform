@@ -18,7 +18,9 @@ export default function Features() {
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-200/80">Features</p>
           <h2 className="text-3xl font-bold">Why ELTX?</h2>
-          <p className="text-white/70 text-sm md:text-base">كل مزايا المنصة الحالية تظهر هنا لكن بتصميم أوضح وبطاقات سريعة.</p>
+          <p className="text-white/70 text-sm md:text-base">
+            All current platform benefits shown with cleaner design and quick-to-scan cards.
+          </p>
         </div>
       </div>
       <div className="grid gap-6 sm:grid-cols-2 max-w-6xl mx-auto mt-8">
@@ -42,7 +44,7 @@ export default function Features() {
                   <h3 className="font-semibold text-lg">{d.title}</h3>
                 </div>
                 <p className="text-sm opacity-80 leading-relaxed flex-1">{d.desc}</p>
-                <div className="text-xs text-white/70">Ready for dashboard، wallet، staking & swaps.</div>
+                <div className="text-xs text-white/70">Ready for dashboard, wallet, staking & swaps.</div>
               </div>
             </motion.div>
           );

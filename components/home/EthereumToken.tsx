@@ -27,10 +27,8 @@ export default function EthereumToken() {
               <Network className="h-4 w-4" />
               <span>ELTX on Ethereum</span>
             </div>
-            <h2 className="text-2xl md:text-3xl font-extrabold">ELTX Token على شبكة Ethereum</h2>
-            <p className="text-white/80 text-sm md:text-base leading-relaxed">
-              عنوان عقد ELTX على شبكة Ethereum:
-            </p>
+            <h2 className="text-2xl md:text-3xl font-extrabold">ELTX token on Ethereum network</h2>
+            <p className="text-white/80 text-sm md:text-base leading-relaxed">ELTX contract address on Ethereum:</p>
             <div className="flex flex-col gap-3 md:flex-row md:items-center">
               <div className="flex-1 rounded-xl border border-white/10 bg-neutral-950/60 px-4 py-3 font-mono text-sm break-all">
                 {CONTRACT_ADDRESS}
@@ -48,7 +46,7 @@ export default function EthereumToken() {
               rel="noreferrer"
               className="inline-flex items-center gap-2 text-sm text-cyan-200 hover:text-white underline-offset-4"
             >
-              <ExternalLink className="h-4 w-4" /> عرض على Etherscan
+              <ExternalLink className="h-4 w-4" /> View on Etherscan
             </a>
           </div>
           <div className="w-full md:w-auto">
