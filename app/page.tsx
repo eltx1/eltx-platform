@@ -6,6 +6,7 @@ import Roadmap from '../components/home/Roadmap';
 import About from '../components/home/About';
 import EthereumToken from '../components/home/EthereumToken';
 import Swap from '../components/home/Swap';
+import Partners from '../components/home/Partners';
 
 
 export default function Page(){
@@ -19,6 +20,7 @@ export default function Page(){
       <Swap />
       <Tokenomics />
       <Roadmap />
+      <Partners />
 
     </main>
   );
