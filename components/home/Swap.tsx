@@ -3,7 +3,7 @@
 import { ArrowRightLeft, Link2 } from 'lucide-react';
 
 const UNISWAP_URL =
-  'https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency=0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c&chain=mainnet';
+  'https://app.uniswap.org/swap?inputCurrency=ETH&outputCurrency=0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c&chain=mainnet&theme=dark';
 
 export default function Swap() {
   return (
@@ -27,17 +27,31 @@ export default function Swap() {
             <div className="flex items-center justify-between mb-4 text-sm text-white/70">
               <div className="flex items-center gap-2">
                 <Link2 className="h-4 w-4 text-cyan-300" />
-                <span>Uniswap widget below - owner can adjust settings in the iframe src.</span>
+                <span>Ready-to-swap Uniswap widget — ELTX contract preloaded for you.</span>
               </div>
             </div>
-            <div className="rounded-xl overflow-hidden border border-white/10 bg-black/60">
+            <div className="flex flex-col gap-4 rounded-xl overflow-hidden border border-white/10 bg-black/60 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-cyan-500/20 bg-white/5 px-3 py-2 text-[13px] text-white/80">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-[0.2em] text-cyan-200/80">ELTX contract</span>
+                  <span className="font-mono text-[13px] text-white">0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c</span>
+                </div>
+                <a
+                  href={UNISWAP_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-xs font-semibold text-cyan-100 transition hover:-translate-y-0.5 hover:border-cyan-300/60 hover:bg-cyan-500/20"
+                >
+                  فتح في تبويب جديد
+                  <ArrowRightLeft className="h-4 w-4" />
+                </a>
+              </div>
               {/* To adjust widget parameters, update the UNISWAP_URL string above. */}
               <iframe
                 src={UNISWAP_URL}
                 title="Swap ELTX"
-                className="w-full h-[520px] md:h-[620px]"
+                className="w-full h-[620px] md:h-[760px] rounded-lg"
                 allow="clipboard-read; clipboard-write; accelerometer; autoplay; gyroscope"
-                loading="lazy"
               />
             </div>
           </div>
