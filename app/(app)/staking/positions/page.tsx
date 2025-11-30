@@ -20,39 +20,92 @@ export default function PositionsPage() {
     }
   }, [user, router]);
 
+  const today = new Date();
+  const formatDate = (value: string) => new Date(value).toLocaleDateString('en-GB');
+  const toDateOnly = (value: string) => new Date(value).toISOString().slice(0, 10);
+
+  const enriched = positions.map((p) => {
+    const start = new Date(p.start_date);
+    const end = new Date(p.end_date);
+    const totalDays = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+    const elapsed = Math.min(
+      totalDays,
+      Math.max(0, Math.ceil((today.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1)
+    );
+    const progress = Math.min(100, Math.max(0, Math.round((elapsed / totalDays) * 100)));
+    return {
+      ...p,
+      asset: (p.stake_asset || 'ELTX').toUpperCase(),
+      totalDays,
+      elapsed,
+      progress,
+      isMatured: toDateOnly(p.end_date) <= toDateOnly(today.toISOString()),
+    };
+  });
+
   return (
     <div className="p-4 space-y-6 max-w-4xl mx-auto">
-      <h1 className="text-xl font-semibold">My Stakes</h1>
-      <div className="overflow-x-auto rounded-2xl shadow">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 bg-white/10">
-            <tr>
-              <th className="p-2 text-left">Plan</th>
-              <th className="p-2 text-left">Asset</th>
-              <th className="p-2 text-right">Amount</th>
-              <th className="p-2 text-right">Accrued</th>
-              <th className="p-2 text-left">End</th>
-              <th className="p-2 text-left">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {positions.map((p) => (
-              <tr key={p.id} className="border-b border-white/5 hover:bg-white/5">
-                <td className="p-2">{p.name}</td>
-                <td className="p-2">{(p.stake_asset || 'ELTX').toUpperCase()}</td>
-                <td className="p-2 text-right">
-                  {p.amount} {(p.stake_asset || 'ELTX').toUpperCase()}
-                </td>
-                <td className="p-2 text-right">
-                  {p.accrued_total} {(p.stake_asset || 'ELTX').toUpperCase()}
-                </td>
-                <td className="p-2">{p.end_date?.slice(0, 10)}</td>
-                <td className="p-2">{p.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">الاستاكينج بتاعي</h1>
+        <div className="text-xs text-white/60">يتم إضافة العائد يوميًا وإرجاع الأصل عند الاستحقاق تلقائيًا.</div>
       </div>
+
+      {enriched.length === 0 ? (
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-sm text-white/70">مافيش مراكز استاكينج حالياً.</div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {enriched.map((p) => (
+            <div key={p.id} className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold">{p.name}</div>
+                  <div className="text-xs text-white/60">{p.asset}</div>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold uppercase ${
+                    p.status === 'active'
+                      ? 'bg-emerald-500/15 text-emerald-200'
+                      : 'bg-blue-500/15 text-blue-200'
+                  }`}
+                >
+                  {p.status}
+                </span>
+              </div>
+
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">المبلغ المحجوز</span>
+                  <span className="font-semibold">{p.amount} {p.asset}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">العائد اليومي</span>
+                  <span className="font-semibold text-amber-200">{p.daily_reward} {p.asset}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/60">المتراكم</span>
+                  <span className="font-semibold">{p.accrued_total} {p.asset}</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-white/60">
+                  <span>ينتهي في {formatDate(p.end_date)}</span>
+                  <span>{p.elapsed}/{p.totalDays} يوم</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-blue-400 via-purple-400 to-emerald-400"
+                    style={{ width: `${p.progress}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/60">الأصل</span>
+                  <span className={p.principal_redeemed ? 'text-emerald-200' : 'text-white/80'}>
+                    {p.principal_redeemed ? 'اترد' : 'هيوصل أوتوماتيك عند الاستحقاق'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

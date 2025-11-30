@@ -911,6 +911,7 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   const [status, setStatus] = useState<'active' | 'matured' | 'cancelled' | 'all'>('active');
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [loadingPositions, setLoadingPositions] = useState(true);
+  const [settling, setSettling] = useState(false);
 
   const loadPlans = useCallback(async () => {
     setLoadingPlans(true);
@@ -930,6 +931,22 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     },
     [onNotify]
   );
+
+  const settleAll = useCallback(async () => {
+    setSettling(true);
+    const res = await apiFetch<{ summary: any[] }>('/admin/staking/settle', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    setSettling(false);
+    if (res.ok) {
+      const count = res.data.summary?.length || 0;
+      onNotify(`تمت تسوية ${count} مركز`, 'success');
+      loadPositions(status);
+    } else {
+      onNotify(res.error || 'فشل تشغيل التسوية', 'error');
+    }
+  }, [onNotify, status, loadPositions]);
 
   useEffect(() => {
     loadPlans();
@@ -983,6 +1000,22 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       loadPositions(status);
     } else {
       onNotify(res.error || 'Failed to update position', 'error');
+    }
+  };
+
+  const settlePosition = async (positionId: number) => {
+    setSettling(true);
+    const res = await apiFetch(`/admin/staking/settle`, {
+      method: 'POST',
+      body: JSON.stringify({ positionId }),
+    });
+    setSettling(false);
+    if (res.ok) {
+      const count = res.data.summary?.length || 0;
+      onNotify(count ? 'تمت تسوية المركز' : 'لا يوجد شيء لتسويته', 'success');
+      loadPositions(status);
+    } else {
+      onNotify(res.error || 'فشل التسوية', 'error');
     }
   };
 
@@ -1097,6 +1130,13 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
               <option value="all">All</option>
             </select>
             <button
+              onClick={settleAll}
+              disabled={settling}
+              className="flex items-center gap-2 rounded-full border border-emerald-200/40 px-3 py-1 text-xs text-emerald-100 transition hover:border-emerald-200 hover:text-white disabled:opacity-60"
+            >
+              {settling ? 'Running…' : 'Settle now'}
+            </button>
+            <button
               onClick={() => loadPositions(status)}
               className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
             >
@@ -1116,30 +1156,60 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">User</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Plan</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Amount</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Daily</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Accrued</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Ends</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Principal</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
-                {positions.map((position) => (
-                  <tr key={position.id}>
-                    <td className="px-3 py-2">#{position.user_id}</td>
-                    <td className="px-3 py-2">{position.plan_name}</td>
-                    <td className="px-3 py-2">{position.amount}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span className="rounded-full bg-white/10 px-2 py-1 text-xs uppercase text-white/70">{position.status}</span>
-                        {position.status === 'active' && (
-                          <button
-                            onClick={() => updatePositionStatus(position, 'cancelled')}
-                            className="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase text-white/60 transition hover:border-red-400 hover:text-red-200"
-                          >
-                            Force cancel
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {positions.map((position) => {
+                  const needsPayout =
+                    position.status !== 'cancelled' && !position.principal_redeemed &&
+                    new Date(position.end_date).getTime() <= Date.now();
+                  return (
+                    <tr key={position.id}>
+                      <td className="px-3 py-2">#{position.user_id}</td>
+                      <td className="px-3 py-2">{position.plan_name}</td>
+                      <td className="px-3 py-2">{position.amount}</td>
+                      <td className="px-3 py-2">{position.daily_reward}</td>
+                      <td className="px-3 py-2">{position.accrued_total}</td>
+                      <td className="px-3 py-2">{position.end_date?.slice(0, 10)}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                            position.principal_redeemed ? 'bg-emerald-500/10 text-emerald-200' : 'bg-white/10 text-white/70'
+                          }`}
+                        >
+                          {position.principal_redeemed ? 'Paid' : 'Pending'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <span className="rounded-full bg-white/10 px-2 py-1 text-xs uppercase text-white/70">{position.status}</span>
+                          {position.status === 'active' && (
+                            <button
+                              onClick={() => updatePositionStatus(position, 'cancelled')}
+                              className="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase text-white/60 transition hover:border-red-400 hover:text-red-200"
+                            >
+                              Force cancel
+                            </button>
+                          )}
+                          {needsPayout && (
+                            <button
+                              onClick={() => settlePosition(position.id)}
+                              className="rounded-full border border-emerald-300/30 px-2 py-1 text-[10px] uppercase text-emerald-100 transition hover:border-emerald-300 hover:text-white"
+                              disabled={settling}
+                            >
+                              {settling ? 'Processing…' : 'Settle'}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
