@@ -396,7 +396,9 @@ ALTER TABLE spot_markets
 INSERT IGNORE INTO spot_markets (symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount)
 VALUES
   ('ELTX/USDT', 'ELTX', 18, 'USDT', 18, 0.0001, 0.1),
-  ('ELTX/USDC', 'ELTX', 18, 'USDC', 18, 0.0001, 0.1);
+  ('ELTX/USDC', 'ELTX', 18, 'USDC', 18, 0.0001, 0.1),
+  ('ELTX/BNB', 'ELTX', 18, 'BNB', 18, 0.0001, 0.0001),
+  ('ELTX/ETH', 'ELTX', 18, 'ETH', 18, 0.0001, 0.0001);
 
 -- spot order book
 CREATE TABLE IF NOT EXISTS spot_orders (
@@ -494,8 +496,8 @@ CREATE TABLE IF NOT EXISTS platform_settings (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('transfer_fee_bps', '0');
-INSERT IGNORE INTO platform_settings (name, value) VALUES ('swap_fee_bps', '0');
-INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_trade_fee_bps', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('swap_fee_bps', '50');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_trade_fee_bps', '50');
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

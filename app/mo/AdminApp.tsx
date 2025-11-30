@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'r
 import { formatUnits, parseUnits } from 'ethers';
 import {
   CreditCard,
+  Coins,
   DollarSign,
   KeyRound,
   Layers,
@@ -29,7 +30,7 @@ interface Admin {
   last_login_at?: string | null;
 }
 
-type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'stripe';
+type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'fees' | 'stripe';
 
 interface SummaryResponse {
   summary: {
@@ -84,12 +85,17 @@ interface StripeStatusResponse {
   };
 }
 
+type FeeSettings = { swap_fee_bps: number; spot_trade_fee_bps: number };
+
+type FeeBalanceRow = { fee_type: 'swap' | 'spot'; asset: string; amount: string; amount_wei: string; entries: number };
+
 const sections: Array<{ id: Section; label: string; icon: ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
   { id: 'users', label: 'Customers', icon: Wallet },
   { id: 'transactions', label: 'Transactions', icon: LineChart },
   { id: 'staking', label: 'Staking', icon: Layers },
+   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
 ];
@@ -1143,6 +1149,217 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   );
 }
 
+function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<FeeSettings>({ swap_fee_bps: 0, spot_trade_fee_bps: 0 });
+  const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
+  const [form, setForm] = useState({ swap: '0.50', spot: '0.50' });
+
+  const syncFormWithSettings = useCallback((next: FeeSettings) => {
+    setForm({
+      swap: (next.swap_fee_bps / 100).toFixed(2),
+      spot: (next.spot_trade_fee_bps / 100).toFixed(2),
+    });
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<{ settings: FeeSettings; balances: FeeBalanceRow[] }>('/admin/fees');
+    if (res.ok) {
+      setSettings(res.data.settings);
+      setBalances(Array.isArray(res.data.balances) ? res.data.balances : []);
+      syncFormWithSettings(res.data.settings);
+    } else {
+      onNotify(res.error || 'Failed to load fee settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify, syncFormWithSettings]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const parsePercentToBps = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized.length) return null;
+    const num = Number(normalized);
+    if (!Number.isFinite(num) || num < 0 || num > 100) return null;
+    return Math.round(num * 100);
+  };
+
+  const groupedBalances = useMemo(() => {
+    return balances.reduce(
+      (acc, row) => {
+        const key = row.fee_type === 'swap' ? 'swap' : 'spot';
+        acc[key].push(row);
+        return acc;
+      },
+      { swap: [] as FeeBalanceRow[], spot: [] as FeeBalanceRow[] }
+    );
+  }, [balances]);
+
+  const updateFees = async () => {
+    const payload: Record<string, unknown> = {};
+    const swapBps = parsePercentToBps(form.swap);
+    const spotBps = parsePercentToBps(form.spot);
+
+    if (swapBps === null || spotBps === null) {
+      onNotify('Enter valid percentage values between 0 and 100', 'error');
+      return;
+    }
+
+    if (swapBps !== settings.swap_fee_bps) payload.swap_fee_bps = swapBps;
+    if (spotBps !== settings.spot_trade_fee_bps) payload.spot_trade_fee_bps = spotBps;
+    if (!Object.keys(payload).length) {
+      onNotify('No fee changes to save');
+      return;
+    }
+
+    setSaving(true);
+    const res = await apiFetch<{ settings: FeeSettings; balances: FeeBalanceRow[] }>('/admin/fees', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+
+    if (res.ok) {
+      setSettings(res.data.settings);
+      setBalances(Array.isArray(res.data.balances) ? res.data.balances : []);
+      syncFormWithSettings(res.data.settings);
+      onNotify('Fee settings updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update fee settings', 'error');
+    }
+  };
+
+  const renderBalanceTable = (label: string, rows: FeeBalanceRow[]) => {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/5">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">
+          <span>{label}</span>
+          <span className="text-[11px] text-white/50">{rows.length ? `${rows.length} assets` : 'No entries yet'}</span>
+        </div>
+        {rows.length ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-white/10 text-sm">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Asset</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Total</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Entries</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {rows.map((row) => (
+                  <tr key={`${row.fee_type}-${row.asset}`}>
+                    <td className="px-3 py-2">{row.asset}</td>
+                    <td className="px-3 py-2">{row.amount}</td>
+                    <td className="px-3 py-2">{row.entries.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-4 text-sm text-white/60">No commissions have been collected yet.</div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold">Platform commissions</h3>
+          <p className="text-sm text-white/60">Control swap and spot maker/taker fees and audit collected balances.</p>
+        </div>
+        <button
+          onClick={load}
+          className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" /> Refresh
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex h-48 items-center justify-center">
+          <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+        </div>
+      ) : (
+        <div className="space-y-6">
+          <div className="grid gap-4 md:grid-cols-2">
+            <StatCard
+              title="Swap commission"
+              value={`${(settings.swap_fee_bps / 100).toFixed(2)}%`}
+              subtitle="Applied to every swap execution"
+              icon={Coins}
+            />
+            <StatCard
+              title="Spot maker & taker"
+              value={`${(settings.spot_trade_fee_bps / 100).toFixed(2)}%`}
+              subtitle="Flat fee for both sides of each trade"
+              icon={DollarSign}
+            />
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <h4 className="text-md font-semibold">Update fees</h4>
+            <p className="mt-1 text-sm text-white/60">Values are percentages; 0.50% equals 50 bps.</p>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-xs uppercase text-white/60">Swap fee (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={form.swap}
+                  onChange={(e) => setForm((prev) => ({ ...prev, swap: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Spot maker/taker fee (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={form.spot}
+                  onChange={(e) => setForm((prev) => ({ ...prev, spot: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                onClick={updateFees}
+                disabled={saving}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium transition hover:bg-blue-500 disabled:opacity-60"
+              >
+                <ShieldCheck className="h-4 w-4" /> {saving ? 'Saving…' : 'Save fees'}
+              </button>
+              <button
+                onClick={() => syncFormWithSettings(settings)}
+                className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/30 hover:text-white"
+              >
+                <RefreshCw className="h-4 w-4" /> Reset to current
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            {renderBalanceTable('Swap fees collected', groupedBalances.swap)}
+            {renderBalanceTable('Spot fees collected', groupedBalances.spot)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const [swap, setSwap] = useState<any[]>([]);
   const [spot, setSpot] = useState<any[]>([]);
@@ -1570,6 +1787,7 @@ export default function AdminApp() {
           {active === 'users' && <UsersPanel onNotify={notify} />}
           {active === 'transactions' && <TransactionsPanel onNotify={notify} />}
           {active === 'staking' && <StakingPanel onNotify={notify} />}
+          {active === 'fees' && <FeesPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
           {active === 'stripe' && <StripePanel onNotify={notify} />}
         </div>

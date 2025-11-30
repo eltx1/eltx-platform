@@ -30,6 +30,10 @@ mysql -u <user> -p <database> < docs/sql/manual_swap_seed.sql
 
 > لو محتاج تصفّي الرصيد القديم، فك التعليق عن أمر الـ `DELETE` الموجود **قبل** أوامر الإدراج مباشرة علشان مايمسحش القيم الجديدة.
 
+### Platform fees & new spot pairs
+- العمولة الافتراضية بقت 0.50% (50 bps) للسواب وللسبوت (ميكر وتيكر)، وتقدر تعدلها أو تراجع رصيد العمولات من تبويب **Fees** في لوحة `/mo`.
+- تم إضافة أزواج سبوت جديدة ELTX/BNB و ELTX/ETH. شغّل ترحيل `db/migrations/202503300000_platform_fees_and_pairs.sql` أو حدّث `db/wallet.sql` علشان تتسجل عندك.
+
 ### ENV required (names only)
 ```
 CHAIN

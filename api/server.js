@@ -533,6 +533,15 @@ const AdminTransactionsQuerySchema = PaginationSchema.extend({
   type: z.enum(['deposits', 'transfers', 'swaps', 'spot', 'fiat']).default('deposits'),
 });
 
+const AdminFeeUpdateSchema = z
+  .object({
+    swap_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    spot_trade_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+  })
+  .refine((data) => data.swap_fee_bps !== undefined || data.spot_trade_fee_bps !== undefined, {
+    message: 'At least one fee field must be provided',
+  });
+
 const AdminStakingPlanCreateSchema = z.object({
   name: z.string().min(2).max(32),
   duration_days: z.coerce.number().int().min(1).max(3650),
@@ -738,6 +747,47 @@ async function getPlatformSettingValue(name, defaultValue = '0', conn = pool) {
   const [rows] = await executor.query('SELECT value FROM platform_settings WHERE name=?', [name]);
   if (!rows.length || rows[0].value === undefined || rows[0].value === null) return defaultValue;
   return rows[0].value.toString();
+}
+
+async function setPlatformSettingValue(name, value, conn = pool) {
+  const executor = conn.query ? conn : pool;
+  await executor.query(
+    'INSERT INTO platform_settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
+    [name, value]
+  );
+}
+
+async function readPlatformFeeSettings(conn = pool) {
+  const swapVal = await getPlatformSettingValue('swap_fee_bps', '50', conn);
+  const spotVal = await getPlatformSettingValue('spot_trade_fee_bps', '50', conn);
+  const swapFeeBps = clampBps(BigInt(Number.parseInt(swapVal, 10) || 0));
+  const spotFeeBps = clampBps(BigInt(Number.parseInt(spotVal, 10) || 0));
+  return {
+    swap_fee_bps: Number(swapFeeBps),
+    spot_trade_fee_bps: Number(spotFeeBps),
+  };
+}
+
+async function readPlatformFeeBalances(conn = pool) {
+  const executor = conn.query ? conn : pool;
+  const [rows] = await executor.query(
+    `SELECT fee_type, asset, COUNT(*) AS entries, COALESCE(SUM(amount_wei), 0) AS total_wei
+     FROM platform_fees
+     GROUP BY fee_type, asset
+     ORDER BY fee_type, asset`
+  );
+  return rows.map((row) => {
+    const asset = (row.asset || ELTX_SYMBOL).toUpperCase();
+    const decimals = getSymbolDecimals(asset);
+    const totalWei = bigIntFromValue(row.total_wei || 0);
+    return {
+      fee_type: row.fee_type,
+      asset,
+      entries: Number(row.entries || 0),
+      amount_wei: totalWei.toString(),
+      amount: trimDecimal(formatUnitsStr(totalWei.toString(), decimals)),
+    };
+  });
 }
 
 async function getSwapPoolRow(conn, asset, { forUpdate = false } = {}) {
@@ -1496,6 +1546,35 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
       },
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/fees', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [settings, balances] = await Promise.all([readPlatformFeeSettings(), readPlatformFeeBalances()]);
+    res.json({ ok: true, settings, balances });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/fees', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const updates = AdminFeeUpdateSchema.parse(req.body || {});
+    const tasks = [];
+    if (updates.swap_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('swap_fee_bps', updates.swap_fee_bps.toString()));
+    if (updates.spot_trade_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('spot_trade_fee_bps', updates.spot_trade_fee_bps.toString()));
+    await Promise.all(tasks);
+    const [settings, balances] = await Promise.all([readPlatformFeeSettings(), readPlatformFeeBalances()]);
+    res.json({ ok: true, settings, balances });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: err.message || 'Invalid input', details: err.flatten() });
     next(err);
   }
 });
@@ -3026,7 +3105,7 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
 
     let swapFeeBps = 0n;
     try {
-      const feeVal = await getPlatformSettingValue('swap_fee_bps', '0');
+      const feeVal = await getPlatformSettingValue('swap_fee_bps', '50');
       swapFeeBps = BigInt(Number.parseInt(feeVal, 10) || 0);
       if (swapFeeBps < 0n) swapFeeBps = 0n;
       if (swapFeeBps > 10000n) swapFeeBps = 10000n;
@@ -3250,9 +3329,9 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
        WHERE sm.active = 1
        ORDER BY sm.symbol`
     );
-    let feeSetting = '0';
+    let feeSetting = '50';
     try {
-      feeSetting = await getPlatformSettingValue('spot_trade_fee_bps', '0');
+      feeSetting = await getPlatformSettingValue('spot_trade_fee_bps', '50');
     } catch {}
     const feeBps = Number.parseInt(feeSetting, 10);
     const normalizedFeeBps = Number.isFinite(feeBps) ? feeBps : 0;
@@ -3632,7 +3711,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     let feeBps = 0n;
     try {
-      const feeVal = await getPlatformSettingValue('spot_trade_fee_bps', '0', conn);
+      const feeVal = await getPlatformSettingValue('spot_trade_fee_bps', '50', conn);
       feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
     } catch {}
 
