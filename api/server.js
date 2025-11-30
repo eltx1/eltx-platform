@@ -658,6 +658,26 @@ function isZeroDecimal(value) {
   return ZERO_DECIMAL_REGEX.test(value.toString());
 }
 
+function toDateOnlyString(value) {
+  if (!value) return null;
+  try {
+    if (typeof value === 'string') return value.slice(0, 10);
+    return value.toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}
+
+function addDays(dateStr, days) {
+  try {
+    const date = new Date(`${dateStr}T00:00:00Z`);
+    date.setUTCDate(date.getUTCDate() + days);
+    return date.toISOString().slice(0, 10);
+  } catch {
+    return null;
+  }
+}
+
 const ELTX_SYMBOL = 'ELTX';
 
 function getSymbolDecimals(symbol) {
@@ -672,6 +692,7 @@ const QUOTE_TTL_MS = Number(process.env.TRADE_QUOTE_TTL_MS || 60_000);
 const PRICE_SCALE = 10n ** 18n;
 Decimal.set({ precision: 60, toExpNeg: -40, toExpPos: 40 });
 const DECIMAL_TEN = new Decimal(10);
+const STAKING_SWEEP_INTERVAL_MS = Number(process.env.STAKING_SWEEP_INTERVAL_MS || 15 * 60 * 1000);
 
 function decimalFromWei(value, decimals) {
   if (value === null || value === undefined) return new Decimal(0);
@@ -2314,7 +2335,7 @@ app.get('/admin/staking/positions', async (req, res, next) => {
     const params = [];
     let sql =
       `SELECT sp.id, sp.user_id, sp.plan_id, sp.amount_wei, sp.apr_bps_snapshot, sp.status, sp.start_date, sp.end_date, sp.daily_reward,
-              sp.accrued_total, sp.created_at, sp.updated_at, sp.stake_asset, sp.stake_decimals,
+              sp.accrued_total, sp.created_at, sp.updated_at, sp.stake_asset, sp.stake_decimals, sp.principal_redeemed,
               p.name AS plan_name
          FROM staking_positions sp
          LEFT JOIN staking_plans p ON p.id = sp.plan_id`;
@@ -2341,6 +2362,7 @@ app.get('/admin/staking/positions', async (req, res, next) => {
         end_date: row.end_date,
         daily_reward: trimDecimal(row.daily_reward),
         accrued_total: trimDecimal(row.accrued_total),
+        principal_redeemed: !!row.principal_redeemed,
         created_at: row.created_at,
         updated_at: row.updated_at,
       };
@@ -2377,6 +2399,17 @@ app.patch('/admin/staking/positions/:id', async (req, res, next) => {
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
     }
+    next(err);
+  }
+});
+
+app.post('/admin/staking/settle', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { positionId } = req.body || {};
+    const summary = await settleStakingPositions({ positionId });
+    res.json({ ok: true, summary });
+  } catch (err) {
     next(err);
   }
 });
@@ -4057,6 +4090,120 @@ app.get('/staking/plans', async (req, res, next) => {
 
 const CreatePosSchema = z.object({ planId: z.coerce.number().int(), amount: z.string() });
 
+async function settleStakingPositions({ positionId, asOfDate = new Date() } = {}) {
+  const today = toDateOnlyString(asOfDate);
+  const conn = await pool.getConnection();
+  const results = [];
+  try {
+    await conn.beginTransaction();
+    const params = [today];
+    let idClause = '';
+    if (positionId) {
+      idClause = ' AND sp.id = ?';
+      params.push(positionId);
+    }
+
+    const [rows] = await conn.query(
+      `SELECT sp.id, sp.user_id, sp.plan_id, sp.amount_wei, sp.daily_reward, sp.accrued_total, sp.stake_asset, sp.stake_decimals,
+              sp.status, sp.start_date, sp.end_date, sp.principal_redeemed,
+              COALESCE(sa.last_accrual, DATE_SUB(sp.start_date, INTERVAL 1 DAY)) AS last_accrual
+         FROM staking_positions sp
+         LEFT JOIN (SELECT position_id, MAX(accrual_date) AS last_accrual FROM staking_accruals GROUP BY position_id) sa
+           ON sa.position_id = sp.id
+        WHERE sp.start_date <= ?
+          AND (sp.status = 'active' OR (sp.status = 'matured' AND sp.principal_redeemed = 0))${idClause}
+        FOR UPDATE`,
+      params
+    );
+
+    for (const row of rows) {
+      const asset = (row.stake_asset || 'ELTX').toUpperCase();
+      const decimals = Number(row.stake_decimals || getSymbolDecimals(asset));
+      const startDate = toDateOnlyString(row.start_date);
+      const endDate = toDateOnlyString(row.end_date);
+      const lastAccrual = toDateOnlyString(row.last_accrual) || addDays(startDate, -1);
+      const firstPendingAccrual = addDays(lastAccrual, 1);
+      const accrueUntil = today < endDate ? today : endDate;
+      const accrualDates = [];
+      if (firstPendingAccrual && accrueUntil && firstPendingAccrual <= accrueUntil) {
+        let cursor = firstPendingAccrual;
+        while (cursor && cursor <= accrueUntil) {
+          accrualDates.push(cursor);
+          cursor = addDays(cursor, 1);
+        }
+      }
+
+      const dailyReward = new Decimal(row.daily_reward || 0);
+      const rewardDecimal = dailyReward.mul(accrualDates.length);
+      const rewardWeiStr = decimalToWeiString(rewardDecimal, decimals) || '0';
+      const rewardWei = bigIntFromValue(rewardWeiStr);
+      const rewardFormatted = formatDecimalValue(rewardDecimal, Math.min(decimals, 8));
+
+      if (rewardWei > 0n) {
+        for (const dateStr of accrualDates) {
+          await conn.query('INSERT IGNORE INTO staking_accruals (position_id, accrual_date, amount) VALUES (?, ?, ?)', [
+            row.id,
+            dateStr,
+            dailyReward.toFixed(Math.min(decimals, 18), Decimal.ROUND_DOWN),
+          ]);
+        }
+
+        await conn.query(
+          `INSERT INTO user_balances (user_id, asset, balance_wei, created_at)
+             VALUES (?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+          [row.user_id, asset, rewardWei.toString()]
+        );
+      }
+
+      const shouldMature = today >= endDate;
+      const principalWei = shouldMature && !row.principal_redeemed ? bigIntFromValue(row.amount_wei) : 0n;
+      if (principalWei > 0n) {
+        await conn.query(
+          `INSERT INTO user_balances (user_id, asset, balance_wei, created_at)
+             VALUES (?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+          [row.user_id, asset, principalWei.toString()]
+        );
+      }
+
+      const updates = [];
+      const paramsUpdate = [];
+      if (rewardDecimal.gt(0)) {
+        updates.push('accrued_total = accrued_total + ?');
+        paramsUpdate.push(rewardDecimal.toFixed(Math.min(decimals, 18), Decimal.ROUND_DOWN));
+      }
+      if (shouldMature && row.status !== 'matured') updates.push("status='matured'");
+      if (principalWei > 0n && !updates.includes("status='matured'")) updates.push("status='matured'");
+      if (principalWei > 0n) updates.push('principal_redeemed=1');
+      if (updates.length) {
+        paramsUpdate.push(row.id);
+        await conn.query(`UPDATE staking_positions SET ${updates.join(', ')}, updated_at=NOW() WHERE id=?`, paramsUpdate);
+      }
+
+      results.push({
+        id: row.id,
+        user_id: row.user_id,
+        asset,
+        reward_days: accrualDates.length,
+        reward_wei: rewardWei.toString(),
+        reward: rewardFormatted,
+        principal_wei: principalWei.toString(),
+        principal: principalWei > 0n ? trimDecimal(formatUnitsStr(principalWei.toString(), decimals)) : '0',
+        matured: shouldMature,
+      });
+    }
+
+    await conn.commit();
+    return results;
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
+}
+
 app.post('/staking/positions', async (req, res, next) => {
   let conn;
   try {
@@ -4149,7 +4296,7 @@ app.get('/staking/positions', async (req, res, next) => {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
       `SELECT sp.id, sp.amount, sp.amount_wei, sp.stake_asset, sp.stake_decimals, sp.start_date, sp.end_date, sp.daily_reward,
-              sp.accrued_total, sp.status, pl.name
+              sp.accrued_total, sp.status, sp.principal_redeemed, pl.name
          FROM staking_positions sp
          JOIN staking_plans pl ON sp.plan_id=pl.id
         WHERE sp.user_id=?
@@ -4177,6 +4324,7 @@ app.get('/staking/positions', async (req, res, next) => {
         start_date: row.start_date,
         end_date: row.end_date,
         status: row.status,
+        principal_redeemed: !!row.principal_redeemed,
       };
     });
     res.json({ ok: true, positions });
@@ -4190,16 +4338,24 @@ app.post('/staking/positions/:id/close', async (req, res, next) => {
     const userId = await requireUser(req);
     const id = Number(req.params.id);
     const [[pos]] = await pool.query(
-      'SELECT id, amount, accrued_total, end_date, status FROM staking_positions WHERE id=? AND user_id=?',
+      'SELECT id, amount, amount_wei, accrued_total, end_date, status, principal_redeemed, stake_asset, stake_decimals FROM staking_positions WHERE id=? AND user_id=?',
       [id, userId]
     );
     if (!pos) return next({ status: 404, code: 'NOT_FOUND', message: 'Position not found' });
-    if (pos.status !== 'active') return next({ status: 400, code: 'INVALID_STATE', message: 'Already closed' });
-    const today = new Date().toISOString().slice(0, 10);
-    if (today < pos.end_date.toISOString().slice(0, 10))
-      return next({ status: 400, code: 'TOO_SOON', message: 'Cannot close before maturity' });
-    await pool.query('UPDATE staking_positions SET status="matured" WHERE id=?', [id]);
-    res.json({ ok: true, principal: pos.amount, reward: pos.accrued_total });
+    if (pos.status === 'cancelled') return next({ status: 400, code: 'INVALID_STATE', message: 'Cancelled position' });
+    const today = toDateOnlyString(new Date());
+    const endDate = toDateOnlyString(pos.end_date);
+    if (today < endDate) return next({ status: 400, code: 'TOO_SOON', message: 'Cannot close before maturity' });
+
+    const summary = await settleStakingPositions({ positionId: id });
+    const settlement = summary.find((s) => s.id === id);
+    const decimals = Number(pos.stake_decimals || getSymbolDecimals(pos.stake_asset || 'ELTX'));
+    const principal =
+      settlement?.principal || trimDecimal(formatUnitsStr(pos.amount_wei?.toString() || '0', decimals));
+    const reward =
+      settlement?.reward ||
+      formatDecimalValue(pos.accrued_total || 0, Math.min(decimals, 8));
+    res.json({ ok: true, principal, reward, matured: true });
   } catch (err) {
     next(err);
   }
@@ -4452,6 +4608,21 @@ async function handleStripeRefund(charge) {
     console.error('[stripe] failed to mark purchase refunded', err);
   }
 }
+
+async function runStakingSweep() {
+  try {
+    const summary = await settleStakingPositions();
+    if (summary.length) {
+      const matured = summary.filter((s) => s.matured).length;
+      console.log(`[staking] settled ${summary.length} positions (matured ${matured})`);
+    }
+  } catch (err) {
+    console.error('[staking] sweep failed', err?.message || err);
+  }
+}
+
+setTimeout(runStakingSweep, 5_000);
+setInterval(runStakingSweep, STAKING_SWEEP_INTERVAL_MS);
 
 app.use((err, req, res, next) => {
   const id = req.requestId || crypto.randomUUID();
