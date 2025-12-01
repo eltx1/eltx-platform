@@ -13,6 +13,7 @@ const { z } = require('zod');
 const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
 const Stripe = require('stripe');
+const OpenAI = require('openai');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 const {
   syncSwapAssetPrices,
@@ -91,6 +92,8 @@ function initializeStripeSdk() {
 }
 
 initializeStripeSdk();
+
+const openaiClient = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 function isStripeEnabled() {
   return !!stripe && !!stripePublishableKey;
@@ -679,6 +682,10 @@ function addDays(dateStr, days) {
 }
 
 const ELTX_SYMBOL = 'ELTX';
+const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
+const AI_PRICE_SETTING = 'ai_message_price_eltx';
+const DEFAULT_AI_DAILY_FREE = 10;
+const DEFAULT_AI_PRICE = '1';
 
 function getSymbolDecimals(symbol) {
   const meta = tokenMetaBySymbol[symbol];
@@ -776,6 +783,76 @@ async function setPlatformSettingValue(name, value, conn = pool) {
     'INSERT INTO platform_settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
     [name, value]
   );
+}
+
+async function readAiSettings(conn = pool) {
+  const dailyVal = await getPlatformSettingValue(AI_DAILY_FREE_SETTING, DEFAULT_AI_DAILY_FREE.toString(), conn);
+  const priceVal = await getPlatformSettingValue(AI_PRICE_SETTING, DEFAULT_AI_PRICE, conn);
+  const dailyParsed = Number.parseInt(dailyVal, 10);
+  const dailyFree = Number.isFinite(dailyParsed) && dailyParsed >= 0 ? dailyParsed : DEFAULT_AI_DAILY_FREE;
+  const normalizedPrice = normalizePositiveDecimal(priceVal, 18) || '0';
+  return { daily_free_messages: dailyFree, message_price_eltx: normalizedPrice };
+}
+
+async function getAiUsageRow(conn, userId, usageDate, { forUpdate = false } = {}) {
+  const executor = conn.query ? conn : pool;
+  const [rows] = await executor.query(
+    `SELECT user_id, usage_date, messages_used, paid_messages, eltx_spent_wei, last_message_at
+       FROM ai_daily_usage WHERE user_id=? AND usage_date=?${forUpdate ? ' FOR UPDATE' : ''}`,
+    [userId, usageDate]
+  );
+  if (!rows.length) return null;
+  const row = rows[0];
+  return {
+    user_id: Number(row.user_id),
+    usage_date: toDateOnlyString(row.usage_date),
+    messages_used: Number(row.messages_used || 0),
+    paid_messages: Number(row.paid_messages || 0),
+    eltx_spent_wei: bigIntFromValue(row.eltx_spent_wei || 0),
+    last_message_at: row.last_message_at || null,
+  };
+}
+
+function presentAiUsageRow(usage, settings, decimals) {
+  const used = usage?.messages_used || 0;
+  const paid = usage?.paid_messages || 0;
+  const spentWei = usage?.eltx_spent_wei || 0n;
+  return {
+    daily_free_messages: settings.daily_free_messages,
+    messages_used: used,
+    paid_messages: paid,
+    free_remaining: Math.max(settings.daily_free_messages - used, 0),
+    eltx_spent_wei: spentWei.toString(),
+    eltx_spent: trimDecimal(formatUnitsStr(spentWei.toString(), decimals)),
+    last_message_at: usage?.last_message_at || null,
+  };
+}
+
+function getTodayDateString() {
+  return toDateOnlyString(new Date()) || new Date().toISOString().slice(0, 10);
+}
+
+async function readAiUsageSummary(date, conn = pool) {
+  const executor = conn.query ? conn : pool;
+  const [rows] = await executor.query(
+    `SELECT COALESCE(SUM(messages_used),0) AS messages_used,
+            COALESCE(SUM(paid_messages),0) AS paid_messages,
+            COALESCE(SUM(eltx_spent_wei),0) AS eltx_spent_wei
+       FROM ai_daily_usage WHERE usage_date=?`,
+    [date]
+  );
+  const row = rows[0] || {};
+  const decimals = getSymbolDecimals(ELTX_SYMBOL);
+  const spentWei = bigIntFromValue(row.eltx_spent_wei || 0);
+  const total = Number(row.messages_used || 0);
+  const paid = Number(row.paid_messages || 0);
+  return {
+    messages_used: total,
+    paid_messages: paid,
+    free_messages: Math.max(total - paid, 0),
+    eltx_spent_wei: spentWei.toString(),
+    eltx_spent: trimDecimal(formatUnitsStr(spentWei.toString(), decimals)),
+  };
 }
 
 async function readPlatformFeeSettings(conn = pool) {
@@ -1161,6 +1238,22 @@ const SpotCandlesQuerySchema = z.object({
 const StripeSessionSchema = z.object({
   amount_usd: z.union([z.string(), z.number()]),
   expected_price_eltx: z.string().optional(),
+});
+
+const AiChatSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(['user', 'assistant']),
+        content: z.string().min(1),
+      })
+    )
+    .min(1),
+});
+
+const AiSettingsSchema = z.object({
+  daily_free_messages: z.number().int().min(0),
+  message_price_eltx: z.union([z.string(), z.number()]),
 });
 
 const CANDLE_INTERVALS = {
@@ -1674,6 +1767,38 @@ app.patch('/admin/fees', async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: err.message || 'Invalid input', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.get('/admin/ai/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const today = getTodayDateString();
+    const [settings, stats] = await Promise.all([readAiSettings(), readAiUsageSummary(today)]);
+    res.json({ ok: true, settings, stats, today });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/ai/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = AiSettingsSchema.parse(req.body || {});
+    const price = normalizePositiveDecimal(payload.message_price_eltx, 18);
+    if (price === null)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid AI message price' });
+    await Promise.all([
+      setPlatformSettingValue(AI_DAILY_FREE_SETTING, payload.daily_free_messages.toString()),
+      setPlatformSettingValue(AI_PRICE_SETTING, price),
+    ]);
+    const today = getTodayDateString();
+    const [settings, stats] = await Promise.all([readAiSettings(), readAiUsageSummary(today)]);
+    res.json({ ok: true, settings, stats, today });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid AI settings', details: err.flatten() });
     next(err);
   }
 });
@@ -2742,6 +2867,159 @@ app.get('/admin/fiat/purchases', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
     }
     next(err);
+  }
+});
+
+app.get('/ai/status', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const today = getTodayDateString();
+    const [settings, usageRow, balanceRows] = await Promise.all([
+      readAiSettings(),
+      getAiUsageRow(pool, userId, today),
+      pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, ELTX_SYMBOL]),
+    ]);
+    const decimals = getSymbolDecimals(ELTX_SYMBOL);
+    const [[balanceRaw]] = balanceRows;
+    const balanceWei = bigIntFromValue(balanceRaw?.balance_wei || 0);
+    const priceWei = bigIntFromValue(decimalToWeiString(settings.message_price_eltx, decimals) || 0);
+    const usage = presentAiUsageRow(usageRow, settings, decimals);
+    const balance = trimDecimal(formatUnitsStr(balanceWei.toString(), decimals));
+    const canAffordPaid = priceWei > 0n && balanceWei >= priceWei;
+    const canMessage = usage.free_remaining > 0 || canAffordPaid;
+    res.json({
+      ok: true,
+      settings,
+      usage,
+      balance: { eltx_balance_wei: balanceWei.toString(), eltx_balance: balance },
+      pricing: { message_price_eltx: settings.message_price_eltx, message_price_wei: priceWei.toString() },
+      can_message: canMessage,
+      can_afford_paid: canAffordPaid,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/ai/chat', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    if (!openaiClient)
+      return next({ status: 503, code: 'AI_DISABLED', message: 'AI service is not configured' });
+    const payload = AiChatSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const today = getTodayDateString();
+    const settings = await readAiSettings(conn);
+    const decimals = getSymbolDecimals(ELTX_SYMBOL);
+    const priceWei = bigIntFromValue(decimalToWeiString(settings.message_price_eltx, decimals) || 0);
+    let usageRow = await getAiUsageRow(conn, userId, today, { forUpdate: true });
+    if (!usageRow) {
+      await conn.query('INSERT INTO ai_daily_usage (user_id, usage_date) VALUES (?, ?) ON DUPLICATE KEY UPDATE usage_date=usage_date', [
+        userId,
+        today,
+      ]);
+      usageRow = await getAiUsageRow(conn, userId, today, { forUpdate: true });
+    }
+
+    let chargeType = 'free';
+    let balanceWei = 0n;
+    if (usageRow.messages_used >= settings.daily_free_messages) {
+      if (priceWei <= 0n) {
+        await conn.rollback();
+        return next({ status: 400, code: 'AI_PRICE_REQUIRED', message: 'Message price must be set above zero.' });
+      }
+      const [[balanceRaw]] = await conn.query(
+        'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+        [userId, ELTX_SYMBOL]
+      );
+      balanceWei = bigIntFromValue(balanceRaw?.balance_wei || 0);
+      if (balanceWei < priceWei) {
+        await conn.rollback();
+        return next({
+          status: 402,
+          code: 'INSUFFICIENT_ELTX',
+          message: 'Insufficient ELTX balance for AI message',
+          details: {
+            balance: trimDecimal(formatUnitsStr(balanceWei.toString(), decimals)),
+            required: trimDecimal(formatUnitsStr(priceWei.toString(), decimals)),
+          },
+        });
+      }
+      chargeType = 'eltx';
+    }
+
+    const completion = await openaiClient.chat.completions.create({
+      model: 'gpt-3.5-turbo',
+      messages: payload.messages,
+    });
+    const message = completion.choices?.[0]?.message;
+    if (!message || !message.content) {
+      await conn.rollback();
+      return next({ status: 502, code: 'AI_EMPTY_RESPONSE', message: 'AI did not return a message' });
+    }
+
+    if (chargeType === 'free') {
+      await conn.query(
+        'UPDATE ai_daily_usage SET messages_used = messages_used + 1, last_message_at = NOW() WHERE user_id=? AND usage_date=?',
+        [userId, today]
+      );
+      await conn.query('INSERT INTO ai_message_ledger (user_id, usage_date, charge_type, asset, amount_wei) VALUES (?,?,?,?,?)', [
+        userId,
+        today,
+        'free',
+        ELTX_SYMBOL,
+        0,
+      ]);
+    } else {
+      const newBalanceWei = balanceWei - priceWei;
+      await conn.query('UPDATE user_balances SET balance_wei = ? WHERE user_id=? AND UPPER(asset)=?', [
+        newBalanceWei.toString(),
+        userId,
+        ELTX_SYMBOL,
+      ]);
+      await conn.query(
+        'UPDATE ai_daily_usage SET messages_used = messages_used + 1, paid_messages = paid_messages + 1, eltx_spent_wei = eltx_spent_wei + ?, last_message_at = NOW() WHERE user_id=? AND usage_date=?',
+        [priceWei.toString(), userId, today]
+      );
+      await conn.query('INSERT INTO ai_message_ledger (user_id, usage_date, charge_type, asset, amount_wei) VALUES (?,?,?,?,?)', [
+        userId,
+        today,
+        'eltx',
+        ELTX_SYMBOL,
+        priceWei.toString(),
+      ]);
+    }
+
+    await conn.commit();
+
+    const [usageRowUpdated, balanceRows] = await Promise.all([
+      getAiUsageRow(pool, userId, today),
+      pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, ELTX_SYMBOL]),
+    ]);
+    const [[balanceRaw]] = balanceRows;
+    const balanceUpdatedWei = bigIntFromValue(balanceRaw?.balance_wei || 0);
+    const usage = presentAiUsageRow(usageRowUpdated, settings, decimals);
+    res.json({
+      ok: true,
+      message,
+      usage,
+      charge_type: chargeType,
+      pricing: { message_price_eltx: settings.message_price_eltx, message_price_wei: priceWei.toString() },
+      balance: {
+        eltx_balance_wei: balanceUpdatedWei.toString(),
+        eltx_balance: trimDecimal(formatUnitsStr(balanceUpdatedWei.toString(), decimals)),
+      },
+    });
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid messages payload', details: err.flatten() });
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 
