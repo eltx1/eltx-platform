@@ -143,7 +143,17 @@ export default function DashboardPage() {
           {t.common.deposit}
         </a>
       </div>
-      <AICard />
+      <section className="space-y-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs uppercase text-white/60">AI</p>
+            <h2 className="text-lg font-semibold">EliteX AI Agent</h2>
+            <p className="text-sm text-white/60">مساعد ذكاء اصطناعي لأسئلة التداول والرصيد وكل استفساراتك.</p>
+          </div>
+          <a href="/ai" className="btn btn-primary">ابدأ الدردشة</a>
+        </div>
+        <AICard />
+      </section>
       <div className="space-y-8">
         <div>
           <h2 className="mb-4 text-sm font-semibold opacity-80">Payments</h2>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
 import { formatUnits, parseUnits } from 'ethers';
 import {
   CreditCard,
@@ -8,10 +8,12 @@ import {
   DollarSign,
   KeyRound,
   Layers,
+  Loader2,
   LineChart,
   LogOut,
   RefreshCw,
   ShieldCheck,
+  Sparkles,
   UserPlus,
   Users,
   Wallet,
@@ -30,7 +32,7 @@ interface Admin {
   last_login_at?: string | null;
 }
 
-type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'fees' | 'stripe';
+type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'fees' | 'ai' | 'stripe';
 
 interface SummaryResponse {
   summary: {
@@ -89,6 +91,10 @@ type FeeSettings = { swap_fee_bps: number; spot_trade_fee_bps: number };
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot'; asset: string; amount: string; amount_wei: string; entries: number };
 
+type AiSettings = { daily_free_messages: number; message_price_eltx: string };
+type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
+type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
+
 type SwapPricingRow = {
   asset: string;
   price_eltx: string;
@@ -123,7 +129,8 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'users', label: 'Customers', icon: Wallet },
   { id: 'transactions', label: 'Transactions', icon: LineChart },
   { id: 'staking', label: 'Staking', icon: Layers },
-   { id: 'fees', label: 'Fees', icon: Coins },
+  { id: 'fees', label: 'Fees', icon: Coins },
+  { id: 'ai', label: 'AI', icon: Sparkles },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
 ];
@@ -174,6 +181,133 @@ function SectionTabs({ active, onSelect }: { active: Section; onSelect: (section
         );
       })}
     </nav>
+  );
+}
+
+function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<AiSettings | null>(null);
+  const [stats, setStats] = useState<AiStats | null>(null);
+  const [today, setToday] = useState<string>('');
+  const [form, setForm] = useState<AiSettings>({ daily_free_messages: 10, message_price_eltx: '1' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<AiSettingsResponse>('/admin/ai/settings');
+    if (res.ok) {
+      setSettings(res.data.settings);
+      setStats(res.data.stats);
+      setForm(res.data.settings);
+      setToday(res.data.today || '');
+    } else {
+      onNotify(res.error || 'Failed to load AI settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const res = await apiFetch<AiSettingsResponse>('/admin/ai/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setSettings(res.data.settings);
+      setStats(res.data.stats);
+      setForm(res.data.settings);
+      setToday(res.data.today || '');
+      onNotify('AI settings updated');
+    } else {
+      onNotify(res.error || 'Failed to update AI settings', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-white/60">AI configuration</p>
+          <h2 className="text-xl font-semibold">Daily credits & billing</h2>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={load}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Sync
+          </button>
+          {today && <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/60">{today}</span>}
+        </div>
+      </div>
+
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner shadow-black/30"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="space-y-2 text-sm text-white/70">
+            <span>Free messages per day</span>
+            <input
+              type="number"
+              min={0}
+              value={form.daily_free_messages}
+              onChange={(e) => setForm({ ...form, daily_free_messages: Number(e.target.value) || 0 })}
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+            />
+          </label>
+          <label className="space-y-2 text-sm text-white/70">
+            <span>Price per extra message (ELTX)</span>
+            <input
+              type="text"
+              value={form.message_price_eltx}
+              onChange={(e) => setForm({ ...form, message_price_eltx: e.target.value })}
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+            />
+          </label>
+        </div>
+        <div className="flex items-center justify-between text-xs text-white/60">
+          <div className="space-y-1">
+            <p>اضبط الكريدت اليومي المجاني وسعر الرسالة بعد نفاد المجاني.</p>
+            <p>الأسعار تقبل أرقام عشرية (مثال 0.5 ELTX).</p>
+          </div>
+          <button
+            type="submit"
+            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+            disabled={saving}
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            احفظ التغييرات
+          </button>
+        </div>
+      </form>
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs uppercase text-white/60">Messages used today</p>
+          <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : stats.messages_used}</p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs uppercase text-white/60">Paid messages</p>
+          <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : stats.paid_messages}</p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs uppercase text-white/60">Free messages (used)</p>
+          <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : stats.free_messages}</p>
+        </div>
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          <p className="text-xs uppercase text-white/60">ELTX spent today</p>
+          <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : `${stats.eltx_spent} ELTX`}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1930,6 +2064,7 @@ export default function AdminApp() {
           {active === 'transactions' && <TransactionsPanel onNotify={notify} />}
           {active === 'staking' && <StakingPanel onNotify={notify} />}
           {active === 'fees' && <FeesPanel onNotify={notify} />}
+          {active === 'ai' && <AiPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
           {active === 'stripe' && <StripePanel onNotify={notify} />}
         </div>
