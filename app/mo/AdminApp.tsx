@@ -89,6 +89,34 @@ type FeeSettings = { swap_fee_bps: number; spot_trade_fee_bps: number };
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot'; asset: string; amount: string; amount_wei: string; entries: number };
 
+type SwapPricingRow = {
+  asset: string;
+  price_eltx: string;
+  min_amount: string;
+  max_amount: string | null;
+  spread_bps: number;
+  asset_reserve_wei: string;
+  eltx_reserve_wei: string;
+  asset_decimals: number;
+  updated_at?: string | null;
+};
+
+type SpotMarketRow = {
+  id: number;
+  symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  base_decimals: number;
+  quote_decimals: number;
+  min_base_amount: string;
+  min_quote_amount: string;
+  price_precision: number;
+  amount_precision: number;
+  active: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
 const sections: Array<{ id: Section; label: string; icon: ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
@@ -1431,13 +1459,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
 }
 
 function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
-  const [swap, setSwap] = useState<any[]>([]);
-  const [spot, setSpot] = useState<any[]>([]);
+  const [swap, setSwap] = useState<SwapPricingRow[]>([]);
+  const [spot, setSpot] = useState<SpotMarketRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await apiFetch<{ swap: any[]; spot: any[] }>('/admin/pricing');
+    const res = await apiFetch<{ swap: SwapPricingRow[]; spot: SpotMarketRow[] }>('/admin/pricing');
     if (res.ok) {
       setSwap(Array.isArray(res.data.swap) ? res.data.swap : []);
       setSpot(Array.isArray(res.data.spot) ? res.data.spot : []);
@@ -1451,16 +1479,20 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     load();
   }, [load]);
 
-  const editSwap = async (row: any) => {
+  const editSwap = async (row: SwapPricingRow) => {
     const price = window.prompt(`Set new ELTX price for ${row.asset} (leave blank to skip)`, row.price_eltx ?? '');
     const min = window.prompt('Set new minimum swap size', row.min_amount ?? '');
     const max = window.prompt('Set new maximum swap size (blank to clear)', row.max_amount ?? '');
     const spread = window.prompt('Spread (bps)', row.spread_bps?.toString() ?? '');
     const body: Record<string, unknown> = {};
-    if (price) body.price_eltx = price;
-    if (min) body.min_amount = min;
+    if (price !== null && price !== '') body.price_eltx = price;
+    if (min !== null && min !== '') body.min_amount = min;
     if (max !== null) body.max_amount = max.length ? max : null;
-    if (spread) body.spread_bps = Number(spread);
+    if (spread !== null && spread !== '') {
+      const parsed = Number(spread);
+      if (!Number.isFinite(parsed)) return onNotify('Invalid spread value', 'error');
+      body.spread_bps = parsed;
+    }
     if (!Object.keys(body).length) return;
     const res = await apiFetch(`/admin/pricing/swap/${row.asset}`, {
       method: 'PATCH',
@@ -1474,7 +1506,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     }
   };
 
-  const editSwapPool = async (row: any) => {
+  const editSwapPool = async (row: SwapPricingRow) => {
     const assetDecimals = Number(row.asset_decimals || 18);
     const currentAssetReserve = formatReserve(row.asset_reserve_wei, assetDecimals);
     const currentEltxReserve = formatReserve(row.eltx_reserve_wei, 18);
@@ -1508,15 +1540,41 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     }
   };
 
-  const editSpot = async (symbol: string) => {
-    const minBase = window.prompt('Minimum base amount');
-    const minQuote = window.prompt('Minimum quote amount');
-    const res = await apiFetch(`/admin/pricing/spot/${symbol}`, {
+  const editSpot = async (row: SpotMarketRow) => {
+    const minBase = window.prompt('Minimum base amount', row.min_base_amount ?? '');
+    const minQuote = window.prompt('Minimum quote amount', row.min_quote_amount ?? '');
+    const pricePrecision = window.prompt('Price precision (0-18)', row.price_precision?.toString() ?? '');
+    const amountPrecision = window.prompt('Amount precision (0-18)', row.amount_precision?.toString() ?? '');
+    const activeInput = window.prompt('Market status (active/inactive)', row.active ? 'active' : 'inactive');
+    const body: Record<string, unknown> = {};
+
+    if (minBase !== null && minBase.trim() !== '') body.min_base_amount = minBase.trim();
+    if (minQuote !== null && minQuote.trim() !== '') body.min_quote_amount = minQuote.trim();
+
+    if (pricePrecision !== null && pricePrecision.trim() !== '') {
+      const parsed = Number(pricePrecision);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 18) return onNotify('Invalid price precision', 'error');
+      body.price_precision = parsed;
+    }
+
+    if (amountPrecision !== null && amountPrecision.trim() !== '') {
+      const parsed = Number(amountPrecision);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 18) return onNotify('Invalid amount precision', 'error');
+      body.amount_precision = parsed;
+    }
+
+    if (activeInput !== null && activeInput.trim() !== '') {
+      const normalized = activeInput.trim().toLowerCase();
+      if (['active', 'yes', 'true', 'y', '1'].includes(normalized)) body.active = true;
+      else if (['inactive', 'no', 'false', 'n', '0', 'off'].includes(normalized)) body.active = false;
+      else return onNotify('Invalid market status', 'error');
+    }
+
+    if (!Object.keys(body).length) return;
+
+    const res = await apiFetch(`/admin/pricing/spot/${row.symbol}`, {
       method: 'PATCH',
-      body: JSON.stringify({
-        ...(minBase ? { min_base_amount: minBase } : {}),
-        ...(minQuote ? { min_quote_amount: minQuote } : {}),
-      }),
+      body: JSON.stringify(body),
     });
     if (res.ok) {
       onNotify('Spot market updated', 'success');
@@ -1605,6 +1663,9 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                     <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Market</th>
                     <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Base min</th>
                     <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Quote min</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price precision</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Amount precision</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
@@ -1614,9 +1675,20 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                       <td className="px-3 py-2">{row.symbol}</td>
                       <td className="px-3 py-2">{row.min_base_amount}</td>
                       <td className="px-3 py-2">{row.min_quote_amount}</td>
+                      <td className="px-3 py-2">{row.price_precision}</td>
+                      <td className="px-3 py-2">{row.amount_precision}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                            row.active ? 'bg-emerald-500/10 text-emerald-200' : 'bg-red-500/10 text-red-200'
+                          }`}
+                        >
+                          {row.active ? 'Active' : 'Disabled'}
+                        </span>
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <button
-                          onClick={() => editSpot(row.symbol)}
+                          onClick={() => editSpot(row)}
                           className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
                         >
                           Edit
