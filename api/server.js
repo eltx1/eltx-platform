@@ -447,22 +447,24 @@ const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
 const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
+const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
+const IS_PROD = process.env.NODE_ENV === 'production';
+const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || undefined;
 const sessionCookie = {
   httpOnly: true,
-  sameSite: 'none',
-  secure: true,
-  domain: process.env.SESSION_COOKIE_DOMAIN || '.eltx.online',
+  sameSite: IS_PROD ? 'none' : 'lax',
+  secure: IS_PROD,
+  domain: COOKIE_DOMAIN,
   path: '/',
   maxAge: 1000 * 60 * 60,
 };
 
-const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 2));
 const adminSessionCookie = {
   httpOnly: true,
-  sameSite: 'strict',
-  secure: true,
-  domain: process.env.SESSION_COOKIE_DOMAIN || '.eltx.online',
+  sameSite: IS_PROD ? 'strict' : 'lax',
+  secure: IS_PROD,
+  domain: COOKIE_DOMAIN,
   path: '/',
   maxAge: ADMIN_SESSION_TTL_SECONDS * 1000,
 };
