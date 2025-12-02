@@ -180,9 +180,16 @@ function getStripeStatusPayload(audience = 'public') {
   return base;
 }
 
+const MASTER_MNEMONIC = (process.env.MASTER_MNEMONIC || '').trim();
+process.env.MASTER_MNEMONIC = MASTER_MNEMONIC;
+
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
 });
+
+if (!ethers.Mnemonic.isValidMnemonic(MASTER_MNEMONIC)) {
+  throw new Error('MASTER_MNEMONIC is invalid; please set a valid BIP-39 phrase');
+}
 
 const app = express();
 app.set('trust proxy', 1);
