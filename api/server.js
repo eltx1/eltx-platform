@@ -449,7 +449,7 @@ const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const IS_PROD = process.env.NODE_ENV === 'production';
-const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || undefined;
+const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || (IS_PROD ? '.eltx.online' : undefined);
 const sessionCookie = {
   httpOnly: true,
   sameSite: IS_PROD ? 'none' : 'lax',
