@@ -1,9 +1,23 @@
 const { ethers } = require('ethers');
 
-async function provisionUserAddress(db, userId, chainId = Number(process.env.CHAIN_ID || 56)) {
-  if (!process.env.MASTER_MNEMONIC) {
-    throw new Error('MASTER_MNEMONIC not set');
+const MASTER_MNEMONIC = (process.env.MASTER_MNEMONIC || '').trim();
+
+function getMasterMnemonic() {
+  if (!MASTER_MNEMONIC) {
+    const err = new Error('MASTER_MNEMONIC not set');
+    err.code = 'MASTER_MNEMONIC_MISSING';
+    throw err;
   }
+  if (!ethers.Mnemonic.isValidMnemonic(MASTER_MNEMONIC)) {
+    const err = new Error('MASTER_MNEMONIC is invalid; replace it with a valid BIP-39 phrase');
+    err.code = 'MASTER_MNEMONIC_INVALID';
+    throw err;
+  }
+  return MASTER_MNEMONIC;
+}
+
+async function provisionUserAddress(db, userId, chainId = Number(process.env.CHAIN_ID || 56)) {
+  const masterMnemonic = getMasterMnemonic();
   const isConn = !db.getConnection; // if passed connection
   const conn = isConn ? db : await db.getConnection();
   try {
@@ -23,10 +37,7 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
       );
       const nextIndex = rows[0].next_index;
       await conn.query('UPDATE wallet_index SET next_index=? WHERE chain_id=?', [nextIndex + 1, chainId]);
-      const wallet = ethers.Wallet.fromPhrase(
-        process.env.MASTER_MNEMONIC,
-        `m/44'/60'/0'/0/${nextIndex}`
-      );
+      const wallet = ethers.Wallet.fromPhrase(masterMnemonic, `m/44'/60'/0'/0/${nextIndex}`);
       const address = wallet.address.toLowerCase();
       try {
         await conn.query(
