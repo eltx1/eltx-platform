@@ -1,7 +1,11 @@
 const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+const fs = require('fs');
+const primaryEnvPath = '/home/dash/.env';
+const fallbackEnvPath = path.join(__dirname, '../../.env');
+const envPath = fs.existsSync(primaryEnvPath) ? primaryEnvPath : fallbackEnvPath;
+require('dotenv').config({ path: envPath });
 const { resolveUserId } = require('./depositRecorder');
 const { preRecordSweep, finalizeSweep } = require('./recordAndCredit');
 
@@ -14,6 +18,14 @@ if (!RPC_HTTP) throw new Error('RPC_HTTP is required');
 const OMNIBUS_ADDRESS = (process.env.OMNIBUS_ADDRESS || '').toLowerCase();
 const OMNIBUS_PK = process.env.OMNIBUS_PK;
 if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK required');
+
+const MASTER_MNEMONIC = (process.env.MASTER_MNEMONIC || '').trim();
+process.env.MASTER_MNEMONIC = MASTER_MNEMONIC;
+
+if (!MASTER_MNEMONIC) throw new Error('MASTER_MNEMONIC not set');
+if (!ethers.Mnemonic.isValidMnemonic(MASTER_MNEMONIC)) {
+  throw new Error('MASTER_MNEMONIC is invalid; please set a valid BIP-39 phrase');
+}
 
 const NATIVE_SYMBOL = process.env.NATIVE_SYMBOL || 'BNB';
 
@@ -118,8 +130,7 @@ async function initDb() {
 }
 
 function deriveWallet(index, provider) {
-  if (!process.env.MASTER_MNEMONIC) throw new Error('MASTER_MNEMONIC not set');
-  return ethers.Wallet.fromPhrase(process.env.MASTER_MNEMONIC, `m/44'/60'/0'/0/${index}`).connect(provider);
+  return ethers.Wallet.fromPhrase(MASTER_MNEMONIC, `m/44'/60'/0'/0/${index}`).connect(provider);
 }
 
 // ---- sweeper ----
