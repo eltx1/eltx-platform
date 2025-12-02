@@ -3,7 +3,10 @@
 // ADDR_REFRESH_MINUTES, SCAN_INTERVAL_MS_2, HEAD_RANGE, TOKENS_JSON
 
 const path = require('path');
-require('dotenv').config({ path: path.resolve(__dirname, '../../.env') });
+const primaryEnv = '/home/dash/.env';
+const fallbackEnv = path.resolve(__dirname, '../../.env');
+require('dotenv').config({ path: primaryEnv });
+require('dotenv').config({ path: fallbackEnv, override: false });
 
 const mysql = require('mysql2/promise');
 const { ethers } = require('ethers');

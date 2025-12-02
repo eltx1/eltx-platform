@@ -4,7 +4,9 @@ import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv({ path: resolve(__dirname, '../.env') });
+const primaryEnv = '/home/dash/.env';
+dotenv({ path: primaryEnv });
+dotenv({ path: resolve(__dirname, '../.env'), override: false });
 dotenv({ path: resolve(__dirname, '../../../.env'), override: false });
 
 if (!process.env.DATABASE_URL) {

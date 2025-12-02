@@ -2,7 +2,10 @@ import { createPool, Pool } from "mysql2/promise";
 import { config as dotenv } from "dotenv";
 import path from "path";
 
-dotenv({ path: path.join(__dirname, "../../.env") });
+const primaryEnv = "/home/dash/.env";
+const fallbackEnv = path.join(__dirname, "../../.env");
+dotenv({ path: primaryEnv });
+dotenv({ path: fallbackEnv, override: false });
 
 let pool: Pool | null = null;
 
