@@ -1,6 +1,9 @@
 const { createPool } = require("mysql2/promise");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "../../.env") });
+const primaryEnv = "/home/dash/.env";
+const fallbackEnv = path.join(__dirname, "../../.env");
+require("dotenv").config({ path: primaryEnv });
+require("dotenv").config({ path: fallbackEnv, override: false });
 
 let pool;
 

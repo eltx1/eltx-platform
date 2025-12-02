@@ -5,9 +5,11 @@ import { readFileSync } from 'fs';
 import { execSync } from 'child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const primaryEnv = '/home/dash/.env';
 const workerEnv = resolve(__dirname, '.env');
 const rootEnv = resolve(__dirname, '../../.env');
-dotenv({ path: workerEnv });
+dotenv({ path: primaryEnv });
+dotenv({ path: workerEnv, override: false });
 dotenv({ path: rootEnv, override: false });
 
 import { getAllDepositAddresses } from './services/addresses.ts';
@@ -16,7 +18,7 @@ import { getLatestBlockNumber } from './services/bscRpc.ts';
 import { logger, envPaths, SAMPLE_RATE, HEARTBEAT_MS, shortAddr } from './services/logger.ts';
 import { rpcCall } from './services/rpc.ts';
 
-const ENV_PATHS = [workerEnv, rootEnv];
+const ENV_PATHS = [primaryEnv, workerEnv, rootEnv];
 
 function assertRequiredEnv() {
   const required = ['RPC_HTTP', 'CONFIRMATIONS', 'DATABASE_URL', 'CHAIN_ID'];

@@ -1,5 +1,8 @@
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+const primaryEnv = '/home/dash/.env';
+const fallbackEnv = path.join(__dirname, '../../.env');
+require('dotenv').config({ path: primaryEnv });
+require('dotenv').config({ path: fallbackEnv, override: false });
 
 process.env.CHAIN_ID = process.env.ETH_CHAIN_ID || '1';
 process.env.RPC_HTTP = process.env.ETH_RPC_HTTP || process.env.ETH_RPC_URL;
