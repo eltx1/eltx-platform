@@ -34,6 +34,17 @@ export const dict = {
         noChange: 'No change',
         noMovement: 'No recent activity',
       },
+      ai: {
+        kicker: 'AI',
+        title: 'EliteX AI Agent',
+        description: 'Get instant help with trading steps, balances, and platform tips.',
+        cta: 'Open AI chat',
+        cards: {
+          chat: { title: 'Chat instantly', subtitle: 'Ask about ELTX, trading, and payments.' },
+          insights: { title: 'Balance insights', subtitle: 'Understand movements and price updates.' },
+          support: { title: '24/7 guidance', subtitle: 'Skip tickets and get answers fast.' },
+        },
+      },
       cards: {
         wallet: { title: 'Wallet', subtitle: 'Deposit BNB, view address' },
         transactions: { title: 'Transactions', subtitle: 'Recent deposits' },
@@ -399,6 +410,17 @@ export const dict = {
         lastMovement: 'آخر حركة',
         noChange: 'لا تغير',
         noMovement: 'لا نشاط حديث',
+      },
+      ai: {
+        kicker: 'ذكاء اصطناعي',
+        title: 'وكيل ELTX الذكي',
+        description: 'مساعد تداول ورصيد بيرد عليك فورًا بكل استفساراتك.',
+        cta: 'افتح دردشة الذكاء الاصطناعي',
+        cards: {
+          chat: { title: 'دردشة فورية', subtitle: 'اسأل عن ELTX، التداول، والمدفوعات.' },
+          insights: { title: 'تحليل الرصيد', subtitle: 'افهم الحركات والتغيرات السعرية.' },
+          support: { title: 'دعم 24/7', subtitle: 'خد إجابات سريعة من غير تذاكر.' },
+        },
       },
       cards: {
         wallet: { title: 'المحفظة', subtitle: 'إيداع BNB، عرض العنوان' },
