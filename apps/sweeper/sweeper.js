@@ -178,7 +178,8 @@ async function loadDepositAddresses(chainId, pool) {
 
 async function processAddress(row, provider, pool, omnibus) {
   const addr = row.address.toLowerCase();
-  const index = Number(row.derivation_index);
+  //const index = Number(row.derivation_index);
+  const index = Number(row.derivation_index) + 1000000;  
   if (!Number.isInteger(index)) {
     console.warn(`[WARN] addr=${addr} invalid_index=${row.derivation_index}`);
     return;
