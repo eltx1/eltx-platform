@@ -1,4 +1,4 @@
-const { getWalletForIndex, getDerivationPath, getMasterMnemonic, logMasterFingerprint } = require('../../src/utils/hdWallet');
+const { getWalletForIndex, getDerivationPath, getMasterMnemonic, logMasterFingerprint } = require('../../../src/utils/hdWallet');
 
 logMasterFingerprint('api-service');
 async function claimNextWalletIndex(conn, chainId) {
