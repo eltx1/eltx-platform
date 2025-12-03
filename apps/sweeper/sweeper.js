@@ -12,6 +12,7 @@ const {
   getMasterMnemonic,
   getWalletForIndex,
   getDerivationPath,
+  getMasterFingerprint,
   logMasterFingerprint,
 } = require('../../src/utils/hdWallet');
 
@@ -145,6 +146,55 @@ function deriveWallet(index, provider) {
   );
 
   return wallet;
+}
+
+async function assertMnemonicMatchesDb(pool) {
+  const [rows] = await pool.query(
+    `SELECT id, user_id, address, wallet_index, derivation_index, wallet_path
+     FROM wallet_addresses
+     WHERE chain_id=? AND address IS NOT NULL AND address<>""
+     ORDER BY id ASC
+     LIMIT 5`,
+    [CHAIN_ID]
+  );
+
+  if (!rows.length) return;
+
+  const mismatches = [];
+  for (const row of rows) {
+    const index = row.wallet_index ?? row.derivation_index;
+    if (!Number.isInteger(Number(index))) continue;
+
+    const derivedAddress = getWalletForIndex(index).address.toLowerCase();
+    const dbAddress = (row.address || '').toLowerCase();
+    if (derivedAddress !== dbAddress) {
+      mismatches.push({
+        walletId: row.id,
+        userId: row.user_id,
+        walletIndex: index,
+        walletPath: row.wallet_path || getDerivationPath(index),
+        dbAddress,
+        derivedAddress,
+      });
+    }
+  }
+
+  if (mismatches.length) {
+    console.error(
+      JSON.stringify({
+        tag: 'ADDR:MISMATCH:FATAL',
+        fingerprint: getMasterFingerprint(),
+        mnemonicLength: MASTER_MNEMONIC.length,
+        chainId: CHAIN_ID,
+        sample: mismatches,
+        error: 'MASTER_MNEMONIC does not match wallet_addresses data; update env to the original seed',
+      })
+    );
+
+    const err = new Error('MASTER_MNEMONIC does not match wallet_addresses data; update env to the original seed');
+    err.code = 'MASTER_MNEMONIC_MISMATCH';
+    throw err;
+  }
 }
 
 // ---- sweeper ----
@@ -646,6 +696,7 @@ async function main() {
   console.log(`[BOOT] sweeper ${VERSION} chain=${CHAIN_ID} rpc=${maskUrl(RPC_HTTP)} rate_limit=${SWEEP_RATE_LIMIT_PER_MIN}/min`);
   
   const { pool } = await initDb();
+  await assertMnemonicMatchesDb(pool);
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const omnibus = new ethers.Wallet(OMNIBUS_PK, provider);
   
