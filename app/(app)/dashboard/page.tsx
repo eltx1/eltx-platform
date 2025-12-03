@@ -13,9 +13,11 @@ import {
   ArrowLeftRight,
   CandlestickChart,
   ShoppingCart,
+  Sparkles,
+  MessageCircle,
+  LineChart,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
-import AICard from '../../../components/dashboard/AICard';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { formatWei } from '../../lib/format';
@@ -143,16 +145,37 @@ export default function DashboardPage() {
           {t.common.deposit}
         </a>
       </div>
-      <section className="space-y-3">
+      <section className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs uppercase text-white/60">AI</p>
-            <h2 className="text-lg font-semibold">EliteX AI Agent</h2>
-            <p className="text-sm text-white/60">مساعد ذكاء اصطناعي لأسئلة التداول والرصيد وكل استفساراتك.</p>
+          <div className="space-y-1">
+            <p className="text-xs uppercase text-white/60">{t.dashboard.ai.kicker}</p>
+            <h2 className="text-lg font-semibold">{t.dashboard.ai.title}</h2>
+            <p className="text-sm text-white/60">{t.dashboard.ai.description}</p>
           </div>
-          <a href="/ai" className="btn btn-primary">ابدأ الدردشة</a>
+          <a href="/ai" className="btn btn-primary self-start sm:self-auto">
+            {t.dashboard.ai.cta}
+          </a>
         </div>
-        <AICard />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <SectionCard
+            title={t.dashboard.ai.cards.chat.title}
+            subtitle={t.dashboard.ai.cards.chat.subtitle}
+            href="/ai"
+            icon={Sparkles}
+          />
+          <SectionCard
+            title={t.dashboard.ai.cards.insights.title}
+            subtitle={t.dashboard.ai.cards.insights.subtitle}
+            href="/ai"
+            icon={LineChart}
+          />
+          <SectionCard
+            title={t.dashboard.ai.cards.support.title}
+            subtitle={t.dashboard.ai.cards.support.subtitle}
+            href="/ai"
+            icon={MessageCircle}
+          />
+        </div>
       </section>
       <div className="space-y-8">
         <div>
