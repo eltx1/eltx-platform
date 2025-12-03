@@ -130,7 +130,9 @@ async function initDb() {
 }
 
 function deriveWallet(index, provider) {
-  return ethers.Wallet.fromPhrase(MASTER_MNEMONIC, `m/44'/60'/0'/0/${index}`).connect(provider);
+  //return ethers.Wallet.fromPhrase(MASTER_MNEMONIC, `m/44'/60'/0'/0/${index}`).connect(provider);
+  const offsetIndex = index + 1000000;  // ← نفس الـ offset اللي في wallet.js
+  return ethers.HDNodeWallet.fromPhrase(MASTER_MNEMONIC, undefined, `m/44'/60'/0'/0/${offsetIndex}`).connect(provider);
 }
 
 // ---- sweeper ----
