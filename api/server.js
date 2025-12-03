@@ -14,6 +14,7 @@ const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
 const Stripe = require('stripe');
 const OpenAI = require('openai');
+const { logMasterFingerprint, getMasterMnemonic } = require('../src/utils/hdWallet');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 const {
   syncSwapAssetPrices,
@@ -180,16 +181,12 @@ function getStripeStatusPayload(audience = 'public') {
   return base;
 }
 
-const MASTER_MNEMONIC = (process.env.MASTER_MNEMONIC || '').trim();
+const MASTER_MNEMONIC = getMasterMnemonic();
 process.env.MASTER_MNEMONIC = MASTER_MNEMONIC;
-
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
 });
-
-if (!ethers.Mnemonic.isValidMnemonic(MASTER_MNEMONIC)) {
-  throw new Error('MASTER_MNEMONIC is invalid; please set a valid BIP-39 phrase');
-}
+logMasterFingerprint('api-server');
 
 const app = express();
 app.set('trust proxy', 1);

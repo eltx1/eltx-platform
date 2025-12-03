@@ -50,6 +50,13 @@ SESSION_COOKIE_DOMAIN
 SESSION_COOKIE_NAME
 ```
 
+### HD wallet guardrails
+- The platform uses a single `MASTER_MNEMONIC` per environment; do **not** rotate it once user
+  addresses have been generated.
+- Derivation follows `m/44'/60'/0'/0/<index>` for every user wallet. The helper at
+  `src/utils/hdWallet.js` must be the only place that derives paths/keys so the API and sweepers
+  stay in sync.
+
 `CORS_ORIGIN` accepts a comma-separated list of allowed origins, e.g. `https://eltx.online`.
 
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.

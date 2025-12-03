@@ -8,6 +8,12 @@ const envPath = fs.existsSync(primaryEnvPath) ? primaryEnvPath : fallbackEnvPath
 require('dotenv').config({ path: envPath });
 const { resolveUserId } = require('./depositRecorder');
 const { preRecordSweep, finalizeSweep } = require('./recordAndCredit');
+const {
+  getMasterMnemonic,
+  getWalletForIndex,
+  getDerivationPath,
+  logMasterFingerprint,
+} = require('../../src/utils/hdWallet');
 
 // ---- env ----
 const VERSION = 'v1';
@@ -19,13 +25,9 @@ const OMNIBUS_ADDRESS = (process.env.OMNIBUS_ADDRESS || '').toLowerCase();
 const OMNIBUS_PK = process.env.OMNIBUS_PK;
 if (!OMNIBUS_ADDRESS || !OMNIBUS_PK) throw new Error('OMNIBUS_ADDRESS/PK required');
 
-const MASTER_MNEMONIC = (process.env.MASTER_MNEMONIC || '').trim();
+const MASTER_MNEMONIC = getMasterMnemonic();
 process.env.MASTER_MNEMONIC = MASTER_MNEMONIC;
-
-if (!MASTER_MNEMONIC) throw new Error('MASTER_MNEMONIC not set');
-if (!ethers.Mnemonic.isValidMnemonic(MASTER_MNEMONIC)) {
-  throw new Error('MASTER_MNEMONIC is invalid; please set a valid BIP-39 phrase');
-}
+logMasterFingerprint('sweeper');
 
 const NATIVE_SYMBOL = process.env.NATIVE_SYMBOL || 'BNB';
 
@@ -131,33 +133,18 @@ async function initDb() {
 
 // FIXED: دالة deriveWallet المعدلة
 function deriveWallet(index, provider) {
-  try {
-    // التحقق من صحة الـ index
-    const realIndex = Number(index);
-    if (isNaN(realIndex) || realIndex < 0) {
-      throw new Error(`Invalid derivation index: ${index}`);
-    }
-    
-    // استخدام derivation path ثابت
-    const path = `m/44'/60'/0'/0/${realIndex}`;
-    
-    // استخدام نفس الطريقة المستخدمة عند إنشاء العناوين
-    const wallet = ethers.Wallet.fromPhrase(MASTER_MNEMONIC, path);
-    
-    // تسجيل الاشتقاق للتحقق
-    console.log(JSON.stringify({
+  const wallet = getWalletForIndex(index, provider);
+  console.log(
+    JSON.stringify({
       tag: 'DERIVATION',
-      index: realIndex,
-      path: path,
+      index: Number(index),
+      path: getDerivationPath(index),
       derivedAddress: wallet.address,
-      mnemonicLength: MASTER_MNEMONIC.length
-    }));
-    
-    return wallet.connect(provider);
-  } catch (error) {
-    console.error(`[DERIVE_ERROR] index=${index}:`, error.message);
-    throw error;
-  }
+      mnemonicLength: MASTER_MNEMONIC.length,
+    })
+  );
+
+  return wallet;
 }
 
 // ---- sweeper ----
@@ -183,14 +170,17 @@ function releaseLock(key) {
 async function loadDepositAddresses(chainId, pool) {
   console.log(JSON.stringify({ tag: 'ADDR:LOAD:BEGIN', chainId }));
   const [rows] = await pool.query(
-    'SELECT address, derivation_index, user_id FROM wallet_addresses WHERE chain_id=? AND address IS NOT NULL AND address<>""',
+    'SELECT id, user_id, address, wallet_index, wallet_path, derivation_index FROM wallet_addresses WHERE chain_id=? AND address IS NOT NULL AND address<>""',
     [chainId]
   );
-  
-  const list = rows.map((r) => ({ 
-    address: r.address.toLowerCase(), 
-    derivation_index: r.derivation_index, 
-    user_id: r.user_id 
+
+  const list = rows.map((r) => ({
+    id: r.id,
+    address: r.address.toLowerCase(),
+    wallet_index: r.wallet_index ?? r.derivation_index,
+    wallet_path: r.wallet_path,
+    derivation_index: r.derivation_index,
+    user_id: r.user_id,
   }));
   
   if (list.length === 0) {
@@ -198,12 +188,12 @@ async function loadDepositAddresses(chainId, pool) {
   } else {
     console.log(
       JSON.stringify({ 
-        tag: 'ADDR:LOAD:OK', 
-        rows: list.length, 
+        tag: 'ADDR:LOAD:OK',
+        rows: list.length,
         sample: list.slice(0, 3).map((r) => ({
           address: r.address,
-          index: r.derivation_index
-        })) 
+          index: r.wallet_index
+        }))
       })
     );
   }
@@ -212,55 +202,36 @@ async function loadDepositAddresses(chainId, pool) {
 
 async function processAddress(row, provider, pool, omnibus) {
   const addr = row.address.toLowerCase();
-  const index = Number(row.derivation_index);
-  
+  const index = Number(row.wallet_index);
+
   if (!Number.isInteger(index) || index < 0) {
-    console.warn(`[WARN] addr=${addr} invalid_index=${row.derivation_index}`);
+    console.warn(`[WARN] addr=${addr} invalid_index=${row.wallet_index}`);
     return;
   }
   
-  let wallet;
-  try {
-    wallet = deriveWallet(index, provider);
-  } catch (e) {
-    console.error(`[ERR][WALLET] addr=${addr}`, e);
-    errorCount++;
-    return;
-  }
-  
+  const wallet = deriveWallet(index, provider);
+
   // التحقق من تطابق العنوان مع التحسينات
   const derivedAddr = wallet.address.toLowerCase();
   const dbAddr = addr.toLowerCase();
-  
+
   if (derivedAddr !== dbAddr) {
-    console.warn(`[WARN] addr_mismatch db=${dbAddr} derived=${derivedAddr} index=${index}`);
-    
-    // محاولة الإصلاح التلقائي إذا كان الفرق في checksum فقط
-    try {
-      const checksumDerived = ethers.getAddress(derivedAddr);
-      const checksumDb = ethers.getAddress(dbAddr);
-      
-      if (checksumDerived === checksumDb) {
-        console.log(`[INFO] addresses match after checksum: ${checksumDerived}`);
-        // استمر في المعالجة
-      } else {
-        // تسجيل الخطأ مع تفاصيل إضافية
-        console.error(JSON.stringify({
-          tag: 'ADDR_MISMATCH_DETAIL',
-          dbAddress: dbAddr,
-          derivedAddress: derivedAddr,
-          index: index,
-          mnemonicLength: MASTER_MNEMONIC.length,
-          error: 'Address mismatch, skipping'
-        }));
-        return;
-      }
-    } catch (checksumError) {
-      console.error(`[ERR] Checksum validation failed: ${checksumError.message}`);
-      return;
-    }
+    console.error(
+      JSON.stringify({
+        tag: 'ADDR_MISMATCH_DETAIL',
+        walletId: row.id,
+        userId: row.user_id,
+        walletIndex: index,
+        walletPath: row.wallet_path || getDerivationPath(index),
+        dbAddress: dbAddr,
+        derivedAddress: derivedAddr,
+        mnemonicLength: MASTER_MNEMONIC.length,
+        error: 'Address mismatch, skipping',
+      })
+    );
+    return;
   }
-  
+
   const userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
   if (!userId) {
     console.log(`[POST][SKIP] no user for address=${addr}`);
@@ -696,13 +667,13 @@ async function main() {
         console.log(JSON.stringify({ tag: 'SWEEP:START', addresses: list.length }));
         
         for (const row of list) {
-          console.log(JSON.stringify({ 
-            tag: 'SWEEP:ADDR', 
-            user_id: row.user_id, 
+          console.log(JSON.stringify({
+            tag: 'SWEEP:ADDR',
+            user_id: row.user_id,
             address: row.address,
-            index: row.derivation_index
+            index: row.wallet_index
           }));
-          
+
           await processAddress(row, provider, pool, omnibus);
         }
       }

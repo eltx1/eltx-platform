@@ -22,21 +22,5 @@ process.env.SWEEP_RATE_LIMIT_PER_MIN = process.env.ETH_SWEEP_RATE_LIMIT_PER_MIN 
 process.env.CONFIRMATIONS = process.env.ETH_CONFIRMATIONS || process.env.CONFIRMATIONS || '5';
 process.env.GAS_PRICE_MIN_GWEI = process.env.ETH_GAS_PRICE_MIN_GWEI || process.env.GAS_PRICE_MIN_GWEI || '3';
 process.env.NATIVE_SYMBOL = 'ETH';
-
-// أهم حاجة: نجبر الـ offset للإيثيريوم زي BNB بالظبط
-process.env.FORCE_OFFSET = '1000000';
-
-// نعدل الـ deriveWallet داخليًا قبل ما نشغل الكود الأساسي
-const originalRequire = require;
-global.deriveWalletOverride = function (index, provider) {
-  const realIndex = Number(index) + 1000000;
-  const ethers = originalRequire('ethers');
-  return ethers.HDNodeWallet.fromPhrase(
-    process.env.MASTER_MNEMONIC,
-    undefined,
-    `m/44'/60'/0'/0/${realIndex}`
-  ).connect(provider);
-};
-
 // نشغل الكود الأساسي (sweeper.js)
 require('../sweeper/sweeper.js');

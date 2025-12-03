@@ -1,18 +1,6 @@
-const { ethers } = require('ethers');
-const MASTER_MNEMONIC = (process.env.MASTER_MNEMONIC || '').trim();
-function getMasterMnemonic() {
-  if (!MASTER_MNEMONIC) {
-    const err = new Error('MASTER_MNEMONIC not set');
-    err.code = 'MASTER_MNEMONIC_MISSING';
-    throw err;
-  }
-  if (!ethers.Mnemonic.isValidMnemonic(MASTER_MNEMONIC)) {
-    const err = new Error('MASTER_MNEMONIC is invalid; replace it with a valid BIP-39 phrase');
-    err.code = 'MASTER_MNEMONIC_INVALID';
-    throw err;
-  }
-  return MASTER_MNEMONIC;
-}
+const { getWalletForIndex, getDerivationPath, getMasterMnemonic, logMasterFingerprint } = require('../../src/utils/hdWallet');
+
+logMasterFingerprint('api-service');
 async function claimNextWalletIndex(conn, chainId) {
   await conn.query(
     'INSERT INTO wallet_index (chain_id, next_index) VALUES (?, 1) ON DUPLICATE KEY UPDATE next_index=LAST_INSERT_ID(next_index + 1)',
@@ -26,10 +14,10 @@ async function claimNextWalletIndex(conn, chainId) {
 }
 async function realignWalletIndex(conn, chainId) {
   const [[row]] = await conn.query(
-    'SELECT COALESCE(MAX(derivation_index), 999999) AS maxIndex FROM wallet_addresses WHERE chain_id=?',
+    'SELECT GREATEST(COALESCE(MAX(wallet_index), -1), COALESCE(MAX(derivation_index), -1)) AS maxIndex FROM wallet_addresses WHERE chain_id=?',
     [chainId]
   );
-  const nextIndex = Number(row?.maxIndex ?? 999999) + 1;
+  const nextIndex = Number(row?.maxIndex ?? -1) + 1;
   await conn.query(
     'INSERT INTO wallet_index (chain_id, next_index) VALUES (?, ?) ON DUPLICATE KEY UPDATE next_index=GREATEST(next_index, VALUES(next_index))',
     [chainId, nextIndex]
@@ -38,12 +26,12 @@ async function realignWalletIndex(conn, chainId) {
   return nextIndex;
 }
 async function provisionUserAddress(db, userId, chainId = Number(process.env.CHAIN_ID || 56)) {
-  const masterMnemonic = getMasterMnemonic();
+  getMasterMnemonic();
   const shouldManageConn = !!db.getConnection;
   const conn = shouldManageConn ? await db.getConnection() : db;
   try {
     const [existing] = await conn.query(
-      'SELECT chain_id, address, derivation_index FROM wallet_addresses WHERE user_id=? AND chain_id=?',
+      'SELECT chain_id, address, wallet_index, wallet_path FROM wallet_addresses WHERE user_id=? AND chain_id=?',
       [userId, chainId]
     );
     if (existing.length) {
@@ -52,18 +40,17 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
     for (let attempt = 0; attempt < 20; attempt++) {
       if (shouldManageConn) await conn.beginTransaction();
       try {
-        const nextIndex = await claimNextWalletIndex(conn, chainId);
-        const offsetIndex = nextIndex + 1000000; // ابدأ من مليون – آمن لـ 1M+ يوزر
-        // تغيير: استخدم HDNodeWallet بدل Wallet عشان يطبق الـ path صح
-        const hdWallet = ethers.HDNodeWallet.fromPhrase(masterMnemonic, undefined, `m/44'/60'/0'/0/${offsetIndex}`);
+        const walletIndex = await claimNextWalletIndex(conn, chainId);
+        const walletPath = getDerivationPath(walletIndex);
+        const hdWallet = getWalletForIndex(walletIndex);
         const address = hdWallet.address.toLowerCase();
-        
-        console.log(`Provision attempt ${attempt}: nextIndex=${nextIndex}, offsetIndex=${offsetIndex}, userId=${userId}`);
-        console.log(`Generated address for index ${offsetIndex}: ${address}`);
-        
+
+        console.log(`Provision attempt ${attempt}: walletIndex=${walletIndex}, userId=${userId}`);
+        console.log(`Generated address for index ${walletIndex} (path=${walletPath}): ${address}`);
+
         await conn.query(
-          'INSERT INTO wallet_addresses (user_id, chain_id, derivation_index, address) VALUES (?,?,?,?)',
-          [userId, chainId, offsetIndex, address] // استخدم offsetIndex في derivation_index
+          'INSERT INTO wallet_addresses (user_id, chain_id, wallet_index, wallet_path, derivation_index, address) VALUES (?,?,?,?,?,?)',
+          [userId, chainId, walletIndex, walletPath, walletIndex, address]
         );
         if (shouldManageConn) await conn.commit();
         return { chain_id: chainId, address };

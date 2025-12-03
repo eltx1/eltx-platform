@@ -50,10 +50,13 @@ CREATE TABLE IF NOT EXISTS wallet_addresses (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   chain_id INT UNSIGNED NOT NULL,
+  wallet_index INT UNSIGNED NOT NULL,
+  wallet_path VARCHAR(128) DEFAULT NULL,
   address VARCHAR(64) NOT NULL,
   derivation_index INT UNSIGNED NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_user_chain (user_id, chain_id),
+  UNIQUE KEY uniq_wallet_index (chain_id, wallet_index),
   UNIQUE KEY uniq_addr (chain_id, address),
   INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -66,11 +69,18 @@ ALTER TABLE wallet_addresses
   DROP COLUMN IF EXISTS status;
 ALTER TABLE wallet_addresses
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS wallet_index INT UNSIGNED NULL AFTER chain_id,
+  ADD COLUMN IF NOT EXISTS wallet_path VARCHAR(128) NULL AFTER wallet_index,
   ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
   ADD UNIQUE KEY uniq_user_chain (user_id, chain_id),
+  ADD UNIQUE KEY uniq_wallet_index (chain_id, wallet_index),
   ADD UNIQUE KEY uniq_addr (chain_id, address),
   ADD INDEX idx_user (user_id),
   MODIFY COLUMN user_id INT NOT NULL;
+
+UPDATE wallet_addresses SET wallet_index = derivation_index WHERE wallet_index IS NULL;
+UPDATE wallet_addresses SET wallet_path = CONCAT("m/44'/60'/0'/0/", wallet_index) WHERE wallet_path IS NULL AND wallet_index IS NOT NULL;
+ALTER TABLE wallet_addresses MODIFY wallet_index INT UNSIGNED NOT NULL;
 
 -- deposits
 CREATE TABLE IF NOT EXISTS wallet_deposits (
