@@ -37,8 +37,8 @@ export const dict = {
       ai: {
         kicker: 'AI',
         title: 'EliteX AI Agent',
-        description: 'Get instant help with trading steps, balances, and platform tips.',
-        cta: 'Chat with ELTX AI Agent',
+        description: 'Get instant answers from your ELTX assistant.',
+        cta: 'Ask ELTX AI Agent',
         cards: {
           chat: { title: 'Chat instantly', subtitle: 'Ask about ELTX, trading, and payments.' },
           insights: { title: 'Balance insights', subtitle: 'Understand movements and price updates.' },
@@ -438,8 +438,8 @@ export const dict = {
       ai: {
         kicker: 'ذكاء اصطناعي',
         title: 'وكيل ELTX الذكي',
-        description: 'مساعد تداول ورصيد بيرد عليك فورًا بكل استفساراتك.',
-        cta: 'دردشة مع وكيل ELTX الذكي',
+        description: 'مساعد ELTX الذكي بيرد عليك فورًا.',
+        cta: 'اسأل وكيل ELTX الذكي',
         cards: {
           chat: { title: 'دردشة فورية', subtitle: 'اسأل عن ELTX، التداول، والمدفوعات.' },
           insights: { title: 'تحليل الرصيد', subtitle: 'افهم الحركات والتغيرات السعرية.' },

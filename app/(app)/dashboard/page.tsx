@@ -13,9 +13,6 @@ import {
   ArrowLeftRight,
   CandlestickChart,
   ShoppingCart,
-  Sparkles,
-  MessageCircle,
-  LineChart,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { apiFetch } from '../../lib/api';
@@ -146,36 +143,16 @@ export default function DashboardPage() {
         </a>
       </div>
       <div className="space-y-8 pt-2">
-        <div>
-          <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30 sm:p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
               <p className="text-xs uppercase text-white/60">{t.dashboard.ai.kicker}</p>
               <h2 className="text-lg font-semibold">{t.dashboard.ai.title}</h2>
               <p className="text-sm text-white/60">{t.dashboard.ai.description}</p>
             </div>
-            <a href="/ai" className="btn btn-primary self-start md:self-auto">
+            <a href="/ai" className="btn btn-primary self-start sm:self-auto">
               {t.dashboard.ai.cta}
             </a>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <SectionCard
-              title={t.dashboard.ai.cards.chat.title}
-              subtitle={t.dashboard.ai.cards.chat.subtitle}
-              href="/ai"
-              icon={Sparkles}
-            />
-            <SectionCard
-              title={t.dashboard.ai.cards.insights.title}
-              subtitle={t.dashboard.ai.cards.insights.subtitle}
-              href="/ai"
-              icon={LineChart}
-            />
-            <SectionCard
-              title={t.dashboard.ai.cards.support.title}
-              subtitle={t.dashboard.ai.cards.support.subtitle}
-              href="/ai"
-              icon={MessageCircle}
-            />
           </div>
         </div>
 
