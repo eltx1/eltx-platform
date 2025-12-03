@@ -26,7 +26,7 @@ async function claimNextWalletIndex(conn, chainId) {
 }
 async function realignWalletIndex(conn, chainId) {
   const [[row]] = await conn.query(
-    'SELECT COALESCE(MAX(derivation_index), 999999) AS maxIndex FROM wallet_addresses WHERE chain_id=?',  // تغيير: بدء من 999999 بدل -1 عشان high start
+    'SELECT COALESCE(MAX(derivation_index), 999999) AS maxIndex FROM wallet_addresses WHERE chain_id=?',
     [chainId]
   );
   const nextIndex = Number(row?.maxIndex ?? 999999) + 1;
@@ -34,7 +34,7 @@ async function realignWalletIndex(conn, chainId) {
     'INSERT INTO wallet_index (chain_id, next_index) VALUES (?, ?) ON DUPLICATE KEY UPDATE next_index=GREATEST(next_index, VALUES(next_index))',
     [chainId, nextIndex]
   );
-  console.log(`Realigned index for chainId ${chainId} to ${nextIndex}`);  // log مضاف للـ debugging
+  console.log(`Realigned index for chainId ${chainId} to ${nextIndex}`);
   return nextIndex;
 }
 async function provisionUserAddress(db, userId, chainId = Number(process.env.CHAIN_ID || 56)) {
@@ -54,23 +54,23 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
       try {
         const nextIndex = await claimNextWalletIndex(conn, chainId);
         const offsetIndex = nextIndex + 1000000; // ابدأ من مليون – آمن لـ 1M+ يوزر
-        const wallet = ethers.Wallet.fromPhrase(masterMnemonic, `m/44'/60'/0'/0/${offsetIndex}`);
-        const address = wallet.address.toLowerCase();
+        // تغيير: استخدم HDNodeWallet بدل Wallet عشان يطبق الـ path صح
+        const hdWallet = ethers.HDNodeWallet.fromPhrase(masterMnemonic, undefined, `m/44'/60'/0'/0/${offsetIndex}`);
+        const address = hdWallet.address.toLowerCase();
         
-        console.log(`Provision attempt ${attempt}: nextIndex=${nextIndex}, offsetIndex=${offsetIndex}, userId=${userId}`);  // log مضاف
-        console.log(`Generated address for index ${offsetIndex}: ${address}`);  // log مضاف
+        console.log(`Provision attempt ${attempt}: nextIndex=${nextIndex}, offsetIndex=${offsetIndex}, userId=${userId}`);
+        console.log(`Generated address for index ${offsetIndex}: ${address}`);
         
         await conn.query(
           'INSERT INTO wallet_addresses (user_id, chain_id, derivation_index, address) VALUES (?,?,?,?)',
-          [userId, chainId, offsetIndex, address]  // تغيير: استخدم offsetIndex في derivation_index
+          [userId, chainId, offsetIndex, address] // استخدم offsetIndex في derivation_index
         );
         if (shouldManageConn) await conn.commit();
         return { chain_id: chainId, address };
       } catch (err) {
         if (shouldManageConn) await conn.rollback();
-        console.error(`Error on provision attempt ${attempt} for userId ${userId}: ${err.message} (code: ${err.code})`);  // log مضاف
+        console.error(`Error on provision attempt ${attempt} for userId ${userId}: ${err.message} (code: ${err.code})`);
         if (err.code === 'ER_DUP_ENTRY') {
-          // address belongs to another user, re-align cursor and try the next index
           await realignWalletIndex(conn, chainId);
           continue;
         }
