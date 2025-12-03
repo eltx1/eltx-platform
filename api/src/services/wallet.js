@@ -58,7 +58,11 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
       if (shouldManageConn) await conn.beginTransaction();
       try {
         const nextIndex = await claimNextWalletIndex(conn, chainId);
-        const wallet = ethers.Wallet.fromPhrase(masterMnemonic, `m/44'/60'/0'/0/${nextIndex}`);
+        //const wallet = ethers.Wallet.fromPhrase(masterMnemonic, `m/44'/60'/0'/0/${nextIndex}`);
+        // أضف offset كبير عشان نتجنب collisions مع الـ low indices (زي عنوان Trust Wallet)
+const offsetIndex = nextIndex + 1000000;  // ابدأ من مليون – آمن لـ 1M+ يوزر
+const wallet = ethers.Wallet.fromPhrase(masterMnemonic, `m/44'/60'/0'/0/${offsetIndex}`);
+        
         const address = wallet.address.toLowerCase();
         await conn.query(
           'INSERT INTO wallet_addresses (user_id, chain_id, derivation_index, address) VALUES (?,?,?,?)',
