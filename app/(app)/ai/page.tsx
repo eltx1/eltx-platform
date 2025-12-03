@@ -65,7 +65,7 @@ function AIPageInner() {
   const searchParams = useSearchParams();
   const initialQ = searchParams.get('q');
   const { lang } = useLang();
-  const t = dict[lang].aiChat;
+  const t = dict[lang].dashboard.aiChat;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
