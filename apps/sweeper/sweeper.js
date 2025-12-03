@@ -129,14 +129,35 @@ async function initDb() {
   return { pool, dbName };
 }
 
+// FIXED: دالة deriveWallet المعدلة
 function deriveWallet(index, provider) {
-  //return ethers.Wallet.fromPhrase(MASTER_MNEMONIC, `m/44'/60'/0'/0/${index}`).connect(provider);
-const realIndex = Number(index) + 1000000;   // ← أهم سطر في حياتك
-  return ethers.HDNodeWallet.fromPhrase(
-    MASTER_MNEMONIC,
-    undefined,
-    `m/44'/60'/0'/0/${realIndex}`
-  ).connect(provider);
+  try {
+    // التحقق من صحة الـ index
+    const realIndex = Number(index);
+    if (isNaN(realIndex) || realIndex < 0) {
+      throw new Error(`Invalid derivation index: ${index}`);
+    }
+    
+    // استخدام derivation path ثابت
+    const path = `m/44'/60'/0'/0/${realIndex}`;
+    
+    // استخدام نفس الطريقة المستخدمة عند إنشاء العناوين
+    const wallet = ethers.Wallet.fromPhrase(MASTER_MNEMONIC, path);
+    
+    // تسجيل الاشتقاق للتحقق
+    console.log(JSON.stringify({
+      tag: 'DERIVATION',
+      index: realIndex,
+      path: path,
+      derivedAddress: wallet.address,
+      mnemonicLength: MASTER_MNEMONIC.length
+    }));
+    
+    return wallet.connect(provider);
+  } catch (error) {
+    console.error(`[DERIVE_ERROR] index=${index}:`, error.message);
+    throw error;
+  }
 }
 
 // ---- sweeper ----
@@ -165,12 +186,25 @@ async function loadDepositAddresses(chainId, pool) {
     'SELECT address, derivation_index, user_id FROM wallet_addresses WHERE chain_id=? AND address IS NOT NULL AND address<>""',
     [chainId]
   );
-  const list = rows.map((r) => ({ address: r.address.toLowerCase(), derivation_index: r.derivation_index, user_id: r.user_id }));
+  
+  const list = rows.map((r) => ({ 
+    address: r.address.toLowerCase(), 
+    derivation_index: r.derivation_index, 
+    user_id: r.user_id 
+  }));
+  
   if (list.length === 0) {
     console.log(JSON.stringify({ tag: 'ADDR:LOAD:ZERO' }));
   } else {
     console.log(
-      JSON.stringify({ tag: 'ADDR:LOAD:OK', rows: list.length, sample: list.slice(0, 3).map((r) => r.address) })
+      JSON.stringify({ 
+        tag: 'ADDR:LOAD:OK', 
+        rows: list.length, 
+        sample: list.slice(0, 3).map((r) => ({
+          address: r.address,
+          index: r.derivation_index
+        })) 
+      })
     );
   }
   return list;
@@ -178,12 +212,13 @@ async function loadDepositAddresses(chainId, pool) {
 
 async function processAddress(row, provider, pool, omnibus) {
   const addr = row.address.toLowerCase();
-  //const index = Number(row.derivation_index);
-  const index = Number(row.derivation_index) + 1000000;  
-  if (!Number.isInteger(index)) {
+  const index = Number(row.derivation_index);
+  
+  if (!Number.isInteger(index) || index < 0) {
     console.warn(`[WARN] addr=${addr} invalid_index=${row.derivation_index}`);
     return;
   }
+  
   let wallet;
   try {
     wallet = deriveWallet(index, provider);
@@ -192,28 +227,62 @@ async function processAddress(row, provider, pool, omnibus) {
     errorCount++;
     return;
   }
-  if (wallet.address.toLowerCase() !== addr) {
-    console.warn(`[WARN] addr_mismatch db=${addr} derived=${wallet.address}`);
-    return;
+  
+  // التحقق من تطابق العنوان مع التحسينات
+  const derivedAddr = wallet.address.toLowerCase();
+  const dbAddr = addr.toLowerCase();
+  
+  if (derivedAddr !== dbAddr) {
+    console.warn(`[WARN] addr_mismatch db=${dbAddr} derived=${derivedAddr} index=${index}`);
+    
+    // محاولة الإصلاح التلقائي إذا كان الفرق في checksum فقط
+    try {
+      const checksumDerived = ethers.getAddress(derivedAddr);
+      const checksumDb = ethers.getAddress(dbAddr);
+      
+      if (checksumDerived === checksumDb) {
+        console.log(`[INFO] addresses match after checksum: ${checksumDerived}`);
+        // استمر في المعالجة
+      } else {
+        // تسجيل الخطأ مع تفاصيل إضافية
+        console.error(JSON.stringify({
+          tag: 'ADDR_MISMATCH_DETAIL',
+          dbAddress: dbAddr,
+          derivedAddress: derivedAddr,
+          index: index,
+          mnemonicLength: MASTER_MNEMONIC.length,
+          error: 'Address mismatch, skipping'
+        }));
+        return;
+      }
+    } catch (checksumError) {
+      console.error(`[ERR] Checksum validation failed: ${checksumError.message}`);
+      return;
+    }
   }
+  
   const userId = await resolveUserId(pool, { chainId: CHAIN_ID, addressLc: addr });
   if (!userId) {
     console.log(`[POST][SKIP] no user for address=${addr}`);
   }
+  
   let balBNB = await provider.getBalance(addr);
   let gasPrice = await resolveGasPriceWei(provider);
 
   for (const token of TOKENS) {
     const symbol = token.symbol.toUpperCase();
     const key = addr + '-' + symbol;
+    
     if (sweepCount >= SWEEP_RATE_LIMIT_PER_MIN) break;
     if (!acquireLock(key)) continue;
+    
     try {
       const reg = TOKEN_REGISTRY[symbol];
       const signerAddress = wallet.address;
       let contractDefined = false;
       let reason = '';
       let contract;
+      
       if (!reg) {
         reason = 'missing_token_in_registry';
       } else {
@@ -224,6 +293,7 @@ async function processAddress(row, provider, pool, omnibus) {
           reason = 'signer_missing';
         }
       }
+      
       console.log(
         JSON.stringify({
           tag: 'ERC20:BUILD_CONTRACT',
@@ -233,6 +303,7 @@ async function processAddress(row, provider, pool, omnibus) {
           contractDefined,
         })
       );
+      
       if (!contractDefined) {
         if (userId) {
           try {
@@ -244,6 +315,7 @@ async function processAddress(row, provider, pool, omnibus) {
               tokenAddress: reg ? reg.address.toLowerCase() : undefined,
               amountWei: '0',
             });
+            
             await finalizeSweep({
               id: pre.id,
               userId,
@@ -258,30 +330,41 @@ async function processAddress(row, provider, pool, omnibus) {
               forced: true,
               error: 'cannot_build_contract',
             });
-          } catch {}
+          } catch (innerError) {
+            console.error(`[ERR] Failed to record sweep error: ${innerError.message}`);
+          }
         }
         releaseLock(key);
         continue;
       }
+      
       let decimals = reg.decimals;
       if (decimals == null) {
         try {
           decimals = Number(await contract.decimals());
-        } catch {}
+        } catch (decimalsError) {
+          console.warn(`[WARN] Failed to get decimals for ${symbol}: ${decimalsError.message}`);
+        }
       }
       if (decimals == null) decimals = 18;
+      
       const bal = await contract.balanceOf(addr);
       const tokenEligible = bal > 0n;
+      
       console.log(`[ERC20] sym=${symbol} bal=${bal} eligible=${tokenEligible}`);
+      
       if (!tokenEligible) {
         releaseLock(key);
         continue;
       }
+      
       if (!userId) {
         console.log(`[POST][SKIP] no user for address=${addr}`);
       }
+      
       const amountDb = bal.toString();
       const amountCredit = bal.toString();
+      
       console.log(
         JSON.stringify({
           tag: 'ERC20:UNITS',
@@ -291,6 +374,7 @@ async function processAddress(row, provider, pool, omnibus) {
           amount_credit_integer: amountCredit,
         })
       );
+      
       let pre;
       try {
         pre = await preRecordSweep({
@@ -301,13 +385,16 @@ async function processAddress(row, provider, pool, omnibus) {
           tokenAddress: reg.address.toLowerCase(),
           amountWei: amountDb,
         });
-      } catch (e) {
+      } catch (preError) {
+        console.error(`[ERR] Failed to pre-record sweep: ${preError.message}`);
         releaseLock(key);
         continue;
       }
+      
       balBNB = await provider.getBalance(addr);
       let gasLimit = await contract.transfer.estimateGas(OMNIBUS_ADDRESS, bal, { gasPrice });
       let needed = gasPrice * gasLimit;
+      
       if (balBNB < needed) {
         console.log(
           JSON.stringify({
@@ -317,27 +404,40 @@ async function processAddress(row, provider, pool, omnibus) {
             topupWei: GAS_DRIP_WEI.toString(),
           })
         );
+        
         try {
           const dripTx = await withRetry(() =>
-            omnibus.sendTransaction({ to: addr, value: GAS_DRIP_WEI, gasPrice, gasLimit: 21000 })
+            omnibus.sendTransaction({ 
+              to: addr, 
+              value: GAS_DRIP_WEI, 
+              gasPrice, 
+              gasLimit: 21000 
+            })
           );
+          
           console.log(JSON.stringify({ tag: 'DRIP:OK', txHash: dripTx.hash }));
           await dripTx.wait(1);
           dripCount++;
           balBNB += GAS_DRIP_WEI;
           gasPrice = await resolveGasPriceWei(provider);
           gasLimit = await contract.transfer.estimateGas(OMNIBUS_ADDRESS, bal, { gasPrice });
-        } catch (e) {
+        } catch (dripError) {
           console.log(
-            JSON.stringify({ tag: 'DRIP:ERR', providerCode: e.code, message: e.message })
+            JSON.stringify({ 
+              tag: 'DRIP:ERR', 
+              providerCode: dripError.code, 
+              message: dripError.message 
+            })
           );
           errorCount++;
         }
+        
         needed = gasPrice * gasLimit;
         if (balBNB < needed) {
           console.log(
             `[SKIP] addr=${addr} asset=${symbol} reason=insufficient_gas have=${balBNB} needed=${needed}`
           );
+          
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -358,17 +458,27 @@ async function processAddress(row, provider, pool, omnibus) {
           continue;
         }
       }
+      
       try {
         console.log(
-          JSON.stringify({ tag: 'SEND:BEGIN', symbol, amount: amountCredit, tx_hash: pre.txHash })
+          JSON.stringify({ 
+            tag: 'SEND:BEGIN', 
+            symbol, 
+            amount: amountCredit, 
+            tx_hash: pre.txHash 
+          })
         );
+        
         const tx = await withRetry(() =>
           contract.transfer(OMNIBUS_ADDRESS, BigInt(amountCredit), { gasPrice, gasLimit })
         );
+        
         console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
+        
         try {
           const receipt = await tx.wait(CONFIRMATIONS);
           console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
+          
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -383,12 +493,15 @@ async function processAddress(row, provider, pool, omnibus) {
               confirmations: CONFIRMATIONS,
             });
           }
+          
           if (receipt.status !== 1) {
             console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
           }
+          
           sweepCount++;
-        } catch (e) {
-          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: e.message }));
+        } catch (waitError) {
+          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: waitError.message }));
+          
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -402,12 +515,13 @@ async function processAddress(row, provider, pool, omnibus) {
               status: 'wait_error',
               confirmations: 0,
               forced: true,
-              error: e.message,
+              error: waitError.message,
             });
           }
         }
-      } catch (e) {
-        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
+      } catch (sendError) {
+        console.log(JSON.stringify({ tag: 'SEND:ERR', message: sendError.message }));
+        
         if (userId) {
           await finalizeSweep({
             id: pre.id,
@@ -421,7 +535,7 @@ async function processAddress(row, provider, pool, omnibus) {
             status: 'send_error',
             confirmations: 0,
             forced: true,
-            error: e.message,
+            error: sendError.message,
           });
         }
         errorCount++;
@@ -444,13 +558,16 @@ async function processAddress(row, provider, pool, omnibus) {
   const gasBuffer = txCost * 2n;
   const sendAmount = originalSendAmount - gasBuffer;
   let eligibleBNB = sendAmount > 0n && balBNB > MIN_SWEEP_WEI_BNB;
+  
   if (!eligibleBNB) {
     console.log('BNB:SKIP below_min');
   } else {
     const keyBNB = addr + '-BNB';
+    
     if (acquireLock(keyBNB) && sweepCount < SWEEP_RATE_LIMIT_PER_MIN) {
       const amountWei = sendAmount;
       let pre;
+      
       try {
         pre = await preRecordSweep({
           userId,
@@ -459,19 +576,35 @@ async function processAddress(row, provider, pool, omnibus) {
           assetSymbol: NATIVE_SYMBOL,
           amountWei: amountWei.toString(),
         });
-      } catch (e) {
+      } catch (preError) {
+        console.error(`[ERR] Failed to pre-record BNB sweep: ${preError.message}`);
         releaseLock(keyBNB);
         return;
       }
+      
       try {
-        console.log(JSON.stringify({ tag: 'SEND:BEGIN', symbol: NATIVE_SYMBOL, amount: amountWei.toString(), tx_hash: pre.txHash }));
+        console.log(JSON.stringify({ 
+          tag: 'SEND:BEGIN', 
+          symbol: NATIVE_SYMBOL, 
+          amount: amountWei.toString(), 
+          tx_hash: pre.txHash 
+        }));
+        
         const tx = await withRetry(() =>
-          wallet.sendTransaction({ to: OMNIBUS_ADDRESS, value: amountWei, gasPrice, gasLimit: 21000 })
+          wallet.sendTransaction({ 
+            to: OMNIBUS_ADDRESS, 
+            value: amountWei, 
+            gasPrice, 
+            gasLimit: 21000 
+          })
         );
+        
         console.log(JSON.stringify({ tag: 'SEND:OK', tx_hash: tx.hash }));
+        
         try {
           const receipt = await tx.wait(CONFIRMATIONS);
           console.log(JSON.stringify({ tag: 'WAIT:OK', confirmations: CONFIRMATIONS }));
+          
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -486,11 +619,13 @@ async function processAddress(row, provider, pool, omnibus) {
               confirmations: CONFIRMATIONS,
             });
           }
+          
           if (receipt.status !== 1) {
             console.log(`[POST][SKIP] reason=receipt_status tx=${tx.hash} status=${receipt.status}`);
           }
-        } catch (e) {
-          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: e.message }));
+        } catch (waitError) {
+          console.log(JSON.stringify({ tag: 'WAIT:ERR', message: waitError.message }));
+          
           if (userId) {
             await finalizeSweep({
               id: pre.id,
@@ -504,12 +639,13 @@ async function processAddress(row, provider, pool, omnibus) {
               status: 'wait_error',
               confirmations: 0,
               forced: true,
-              error: e.message,
+              error: waitError.message,
             });
           }
         }
-      } catch (e) {
-        console.log(JSON.stringify({ tag: 'SEND:ERR', message: e.message }));
+      } catch (sendError) {
+        console.log(JSON.stringify({ tag: 'SEND:ERR', message: sendError.message }));
+        
         if (userId) {
           await finalizeSweep({
             id: pre.id,
@@ -523,7 +659,7 @@ async function processAddress(row, provider, pool, omnibus) {
             status: 'send_error',
             confirmations: 0,
             forced: true,
-            error: e.message,
+            error: sendError.message,
           });
         }
         errorCount++;
@@ -537,26 +673,44 @@ async function processAddress(row, provider, pool, omnibus) {
 
 async function main() {
   console.log(`[BOOT] sweeper ${VERSION} chain=${CHAIN_ID} rpc=${maskUrl(RPC_HTTP)} rate_limit=${SWEEP_RATE_LIMIT_PER_MIN}/min`);
+  
   const { pool } = await initDb();
   const provider = new ethers.JsonRpcProvider(RPC_HTTP, CHAIN_ID);
   const omnibus = new ethers.Wallet(OMNIBUS_PK, provider);
-  console.log(JSON.stringify({ tag: 'RPC:READY', chainId: CHAIN_ID, tip: await provider.getBlockNumber() }));
+  
+  console.log(JSON.stringify({ 
+    tag: 'RPC:READY', 
+    chainId: CHAIN_ID, 
+    tip: await provider.getBlockNumber(),
+    omnibus: omnibus.address,
+    tokens: TOKENS.length
+  }));
 
   async function loop() {
     try {
       const list = await loadDepositAddresses(CHAIN_ID, pool);
+      
       if (list.length === 0) {
         console.log(JSON.stringify({ tag: 'SWEEP:SKIP', reason: 'no_addresses' }));
       } else {
         console.log(JSON.stringify({ tag: 'SWEEP:START', addresses: list.length }));
+        
         for (const row of list) {
-          console.log(JSON.stringify({ tag: 'SWEEP:ADDR', user_id: row.user_id, address: row.address }));
+          console.log(JSON.stringify({ 
+            tag: 'SWEEP:ADDR', 
+            user_id: row.user_id, 
+            address: row.address,
+            index: row.derivation_index
+          }));
+          
           await processAddress(row, provider, pool, omnibus);
         }
       }
     } catch (e) {
       console.error('[ERR][LOOP]', e?.code || e?.name || 'ERR', e?.message || e, (e?.stack || '').split('\n')[0]);
+      errorCount++;
     }
+    
     setTimeout(loop, 30 * 1000);
   }
 
@@ -567,4 +721,17 @@ async function main() {
   }, 60 * 1000);
 }
 
-main().catch((e) => console.error('[ERR][BOOT]', e));
+// معالجة الأخطاء غير الملتقطة
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED_REJECTION]', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[UNCAUGHT_EXCEPTION]', error);
+  process.exit(1);
+});
+
+main().catch((e) => {
+  console.error('[ERR][BOOT]', e);
+  process.exit(1);
+});
