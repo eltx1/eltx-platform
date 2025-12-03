@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, ShieldCheck, Sparkles, Wallet } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
+import { dict, useLang } from '../../lib/i18n';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 type AiUsage = {
@@ -63,6 +64,8 @@ function AIPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialQ = searchParams.get('q');
+  const { lang } = useLang();
+  const t = dict[lang].aiChat;
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -89,10 +92,10 @@ function AIPageInner() {
     if (res.ok) {
       setStatus(res.data);
     } else {
-      setError(res.error || 'تعذر تحميل حالة رصيد الذكاء الاصطناعي');
+      setError(res.error || t.errors.status);
     }
     setStatusLoading(false);
-  }, []);
+  }, [t.errors.status]);
 
   useEffect(() => {
     if (user) refreshStatus();
@@ -129,7 +132,7 @@ function AIPageInner() {
       }
     } else {
       setMessages((prev) => prev.slice(0, -1));
-      setError(res.error || 'حصلت مشكلة أثناء إرسال الرسالة');
+      setError(res.error || t.errors.send);
     }
 
     setLoading(false);
@@ -147,43 +150,49 @@ function AIPageInner() {
     e.preventDefault();
     if (!input.trim()) return;
     if (status && !status.can_message) {
-      setError('رصيد الرسائل أو عملة ELTX غير كافي لإرسال رسالة جديدة');
+      setError(t.errors.insufficient);
       return;
     }
     send(input);
   };
 
   const creditLine = useMemo(() => {
-    if (!status) return 'جاري حساب الرصيد...';
-    return `متبقي مجاني اليوم: ${status.usage.free_remaining}/${status.settings.daily_free_messages}`;
-  }, [status]);
+    if (!status) return t.loadingBalance;
+    return t.dailyUsage(status.usage.free_remaining, status.settings.daily_free_messages);
+  }, [status, t]);
 
   const priceLine = useMemo(() => {
     if (!status) return '...';
-    return `تكلفة الرسالة بعد نفاد المجاني: ${status.pricing.message_price_eltx || '0'} ELTX`;
-  }, [status]);
+    return t.pricedUsage(status.pricing.message_price_eltx || '0');
+  }, [status, t]);
 
   return (
-    <div className="min-h-[calc(100vh-120px)] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
-      <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6">
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-lg shadow-indigo-900/20">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-2">
+    <div className="min-h-[calc(100vh-120px)] bg-gradient-to-b from-slate-950 via-indigo-950/60 to-slate-950 text-white">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-xl shadow-indigo-900/30">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-3">
               <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs uppercase tracking-wide text-white/70">
-                <Sparkles className="h-4 w-4" /> EliteX AI Agent
+                <Sparkles className="h-4 w-4" /> {t.badge}
               </div>
-              <h1 className="text-2xl font-semibold">دردش مع الذكاء الاصطناعي</h1>
-              <p className="text-sm text-white/70">رصيدك المجاني يتحدث أولاً، وبعدها يتم الخصم من عملة ELTX تلقائيًا.</p>
+              <div>
+                <h1 className="text-3xl font-semibold leading-tight">{t.title}</h1>
+                <p className="mt-2 text-sm text-white/70">{t.description}</p>
+              </div>
             </div>
-            <div className="flex flex-col gap-2 text-sm text-white/70">
-              <span>{creditLine}</span>
-              <span>{priceLine}</span>
+            <div className="flex flex-col gap-2 rounded-2xl bg-black/40 px-4 py-3 text-sm text-white/80 shadow-inner shadow-black/50">
+              <span className="font-semibold text-white">{creditLine}</span>
+              <span className="text-white/70">{priceLine}</span>
             </div>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <StatPill label="الرصيد المجاني" value={status ? `${status.usage.free_remaining} / ${status.settings.daily_free_messages}` : '...'} icon={ShieldCheck} />
-            <StatPill label="سعر الرسالة" value={status ? `${status.pricing.message_price_eltx} ELTX` : '...'} icon={Sparkles} />
-            <StatPill label="رصيد ELTX" value={status ? `${status.balance.eltx_balance} ELTX` : '...'} icon={Wallet} />
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <StatPill
+              label={t.stats.free}
+              value={status ? `${status.usage.free_remaining} / ${status.settings.daily_free_messages}` : '...'}
+              icon={ShieldCheck}
+            />
+            <StatPill label={t.stats.price} value={status ? `${status.pricing.message_price_eltx} ELTX` : '...'} icon={Sparkles} />
+            <StatPill label={t.stats.balance} value={status ? `${status.balance.eltx_balance} ELTX` : '...'} icon={Wallet} />
           </div>
         </div>
 
@@ -194,27 +203,25 @@ function AIPageInner() {
         )}
 
         <div className="flex flex-1 flex-col gap-4">
-          <div className="flex-1 space-y-3 rounded-3xl border border-white/10 bg-black/40 p-4 shadow-inner shadow-black/50">
+          <div className="flex-1 space-y-3 rounded-3xl border border-white/10 bg-black/30 p-5 shadow-inner shadow-black/50">
             <div className="flex items-center justify-between text-xs text-white/60">
-              <span>المحادثة</span>
+              <span className="font-semibold uppercase tracking-wide text-white/70">{t.conversation}</span>
               {statusLoading && (
-                <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-wide">
+                <span className="inline-flex items-center gap-2 rounded-full bg-white/5 px-2 py-1 text-[11px] uppercase tracking-wide">
                   <Loader2 className="h-3 w-3 animate-spin" />
-                  تحديث الرصيد
+                  {t.thinking}
                 </span>
               )}
             </div>
-            <div className="max-h-[50vh] space-y-3 overflow-y-auto rounded-2xl bg-white/5 p-4">
-              {messages.length === 0 && (
-                <div className="text-center text-sm text-white/60">ابدأ برسالة، واحنا هنرد عليك فورًا.</div>
-              )}
+            <div className="max-h-[55vh] space-y-3 overflow-y-auto rounded-2xl bg-white/5 p-4">
+              {messages.length === 0 && <div className="text-center text-sm text-white/60">{t.empty}</div>}
               {messages.map((m, i) => (
                 <div key={`${m.role}-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   <div
                     className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm shadow-lg ${
                       m.role === 'user'
-                        ? 'bg-indigo-600 text-white shadow-indigo-900/40'
-                        : 'bg-white/10 text-white/90 shadow-black/40'
+                        ? 'bg-indigo-500 text-white shadow-indigo-900/40'
+                        : 'bg-white/10 text-white/90 shadow-black/40 backdrop-blur'
                     }`}
                   >
                     {m.content}
@@ -225,25 +232,28 @@ function AIPageInner() {
                 <div className="flex justify-start">
                   <div className="flex items-center gap-2 rounded-2xl bg-white/10 px-3 py-2 text-sm text-white/70">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    جاري التفكير...
+                    {t.typing}
                   </div>
                 </div>
               )}
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg shadow-indigo-900/10">
-            <div className="flex flex-wrap items-center gap-3 text-xs text-white/60">
+          <form
+            onSubmit={handleSubmit}
+            className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-indigo-900/10"
+          >
+            <div className="flex flex-wrap items-center gap-3 text-xs text-white/70">
               <span>{creditLine}</span>
               <span className="h-1 w-1 rounded-full bg-white/30" />
               <span>{priceLine}</span>
             </div>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <input
-                className="flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white focus:border-indigo-300 focus:outline-none"
+                className="flex-1 rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:border-indigo-300 focus:outline-none"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="اكتب سؤالك..."
+                placeholder={t.placeholder}
                 disabled={loading}
               />
               <button
@@ -252,12 +262,10 @@ function AIPageInner() {
                 type="submit"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                ابعت
+                {t.send}
               </button>
             </div>
-            {status && !status.can_message && (
-              <p className="text-xs text-red-200">رصيدك المجاني خلص ومفيش ELTX كفاية، زوّد رصيدك علشان تكمل محادثة.</p>
-            )}
+            {status && !status.can_message && <p className="text-xs text-red-200">{t.errors.insufficient}</p>}
           </form>
         </div>
       </div>
