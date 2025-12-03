@@ -28,6 +28,19 @@ async function claimNextWalletIndex(conn, chainId) {
   return Number(row.nextIndex) - 1;
 }
 
+async function realignWalletIndex(conn, chainId) {
+  const [[row]] = await conn.query(
+    'SELECT COALESCE(MAX(derivation_index), -1) AS maxIndex FROM wallet_addresses WHERE chain_id=?',
+    [chainId]
+  );
+  const nextIndex = Number(row?.maxIndex ?? -1) + 1;
+  await conn.query(
+    'INSERT INTO wallet_index (chain_id, next_index) VALUES (?, ?) ON DUPLICATE KEY UPDATE next_index=GREATEST(next_index, VALUES(next_index))',
+    [chainId, nextIndex]
+  );
+  return nextIndex;
+}
+
 async function provisionUserAddress(db, userId, chainId = Number(process.env.CHAIN_ID || 56)) {
   const masterMnemonic = getMasterMnemonic();
   const shouldManageConn = !!db.getConnection;
@@ -41,7 +54,7 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
       return { chain_id: existing[0].chain_id, address: existing[0].address };
     }
 
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       if (shouldManageConn) await conn.beginTransaction();
       try {
         const nextIndex = await claimNextWalletIndex(conn, chainId);
@@ -56,7 +69,8 @@ async function provisionUserAddress(db, userId, chainId = Number(process.env.CHA
       } catch (err) {
         if (shouldManageConn) await conn.rollback();
         if (err.code === 'ER_DUP_ENTRY') {
-          // address belongs to another user, try the next index
+          // address belongs to another user, re-align cursor and try the next index
+          await realignWalletIndex(conn, chainId);
           continue;
         }
         throw err;
