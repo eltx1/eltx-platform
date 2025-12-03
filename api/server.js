@@ -470,16 +470,16 @@ const adminSessionCookie = {
 };
 
 const SignupSchema = z.object({
-  email: z.string().email(),
+  email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
-  username: z.string().min(3),
-  language: z.string().optional(),
+  username: z.string().trim().min(3),
+  language: z.string().trim().optional(),
 });
 
 const LoginSchema = z
   .object({
-    email: z.string().email().optional(),
-    username: z.string().min(3).optional(),
+    email: z.string().trim().toLowerCase().email().optional(),
+    username: z.string().trim().min(3).optional(),
     password: z.string().min(8),
   })
   .refine((d) => d.email || d.username, {
@@ -1563,10 +1563,16 @@ app.post('/auth/signup', async (req, res, next) => {
   } catch (err) {
     if (conn) await conn.rollback();
     if (err instanceof z.ZodError) {
+      const issues = err.errors.map((e) => ({
+        path: e.path.join('.'),
+        message: e.message,
+        code: e.code,
+      }));
       const missing = err.errors
         .filter((e) => e.code === 'invalid_type' && e.received === 'undefined')
         .map((e) => e.path[0]);
-      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: { missing } });
+      const message = issues.find((i) => i.message)?.message || 'Invalid input';
+      return next({ status: 400, code: 'BAD_INPUT', message, details: { missing, issues } });
     }
     if (err.code === 'ER_DUP_ENTRY') {
       return next({ status: 409, code: 'USER_EXISTS', message: 'Email or username already exists' });
