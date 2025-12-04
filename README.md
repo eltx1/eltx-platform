@@ -86,7 +86,9 @@ The API polls these rows periodically (and at startup) so you can rotate keys wi
 the frontend.
 
 After configuring the keys, register the webhook endpoint at
-`https://<api-domain>/stripe/webhook` inside your Stripe dashboard.
+`https://<api-domain>/stripe/webhook` inside your Stripe dashboard. Use the same host you expose as
+`NEXT_PUBLIC_API_BASE` (for production that is `https://api.eltx.online`, **not** the public
+frontend domain) to avoid 404 responses from the website server.
 
 #### Database migration
 
