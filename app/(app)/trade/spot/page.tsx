@@ -193,6 +193,7 @@ export default function SpotTradePage() {
   const [trades, setTrades] = useState<OrderbookResponse['trades']>([]);
   const [orders, setOrders] = useState<SpotOrder[]>([]);
   const [balances, setBalances] = useState<Record<string, WalletAsset>>({});
+  const [streamConnected, setStreamConnected] = useState(false);
   const [loadingMarkets, setLoadingMarkets] = useState(true);
   const [loadingBook, setLoadingBook] = useState(false);
   const [placing, setPlacing] = useState(false);
@@ -313,21 +314,54 @@ export default function SpotTradePage() {
   }, [selectedMarket, loadOrderbook, loadOrders, loadBalances]);
 
   useEffect(() => {
-    if (!selectedMarket) return;
+    if (!selectedMarket || streamConnected) return;
     const interval = window.setInterval(() => {
       loadOrderbook(selectedMarket);
     }, 2000);
     return () => window.clearInterval(interval);
-  }, [selectedMarket, loadOrderbook]);
+  }, [selectedMarket, loadOrderbook, streamConnected]);
 
   useEffect(() => {
-    if (!selectedMarket) return;
+    if (!selectedMarket || streamConnected) return;
     const interval = window.setInterval(() => {
       loadOrders(selectedMarket);
       loadBalances();
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [selectedMarket, loadOrders, loadBalances]);
+  }, [selectedMarket, loadOrders, loadBalances, streamConnected]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!selectedMarket) return;
+    const base = process.env.NEXT_PUBLIC_API_BASE;
+    if (!base) return;
+    const url = `${base}/spot/stream?market=${encodeURIComponent(selectedMarket)}`;
+    const source = new EventSource(url, { withCredentials: true });
+    setStreamConnected(false);
+    source.addEventListener('update', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data);
+        if (payload.orderbook) setOrderbook(payload.orderbook);
+        if (payload.trades) setTrades(payload.trades);
+        if (payload.orders) setOrders(payload.orders);
+        if (payload.balances) setBalances(payload.balances);
+        if (payload.fees)
+          setFees({ maker: Number(payload.fees.maker_bps || 0), taker: Number(payload.fees.taker_bps || 0) });
+        setStreamConnected(true);
+      } catch (err) {
+        console.error('Failed to parse spot stream payload', err);
+      }
+    });
+    source.addEventListener('ping', () => setStreamConnected(true));
+    source.addEventListener('error', () => {
+      setStreamConnected(false);
+      source.close();
+    });
+    return () => {
+      setStreamConnected(false);
+      source.close();
+    };
+  }, [selectedMarket]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
