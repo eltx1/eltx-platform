@@ -95,12 +95,6 @@ type FeeSettings = {
   transfer_fee_bps: number;
 };
 
-type SpotProtectionSettings = {
-  max_slippage_bps: number;
-  max_deviation_bps: number;
-  candle_fetch_cap: number;
-};
-
 type FeeBalanceRow = { fee_type: 'swap' | 'spot'; asset: string; amount: string; amount_wei: string; entries: number };
 
 type AiSettings = { daily_free_messages: number; message_price_eltx: string };
@@ -1396,7 +1390,6 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
 function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [savingProtection, setSavingProtection] = useState(false);
   const [settings, setSettings] = useState<FeeSettings>({
     swap_fee_bps: 0,
     spot_maker_fee_bps: 0,
@@ -1405,16 +1398,6 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
   });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
   const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00' });
-  const [protection, setProtection] = useState<SpotProtectionSettings>({
-    max_slippage_bps: 300,
-    max_deviation_bps: 800,
-    candle_fetch_cap: 1500,
-  });
-  const [protectionForm, setProtectionForm] = useState({
-    maxSlippagePct: '3.00',
-    maxDeviationPct: '8.00',
-    candleFetchCap: '1500',
-  });
 
   const syncFormWithSettings = useCallback((next: FeeSettings) => {
     const makerBps = next.spot_maker_fee_bps ?? next.spot_trade_fee_bps ?? 0;
