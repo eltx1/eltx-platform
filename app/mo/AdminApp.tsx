@@ -6,14 +6,19 @@ import {
   CreditCard,
   Coins,
   DollarSign,
+  HelpCircle,
   KeyRound,
   Layers,
   Loader2,
   LineChart,
   LogOut,
+  Pencil,
+  Plus,
   RefreshCw,
+  Save,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UserPlus,
   Users,
   Wallet,
@@ -32,7 +37,7 @@ interface Admin {
   last_login_at?: string | null;
 }
 
-type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'fees' | 'ai' | 'stripe';
+type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'fees' | 'ai' | 'faq' | 'stripe';
 
 interface SummaryResponse {
   summary: {
@@ -143,6 +148,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'staking', label: 'Staking', icon: Layers },
   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'ai', label: 'AI', icon: Sparkles },
+  { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
 ];
@@ -319,6 +325,195 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
           <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : `${stats.eltx_spent} ELTX`}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+type FaqRow = { id: number; question: string; answer: string; createdAt?: string };
+
+function FaqPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [faqs, setFaqs] = useState<FaqRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState<FaqRow | null>(null);
+  const [form, setForm] = useState({ question: '', answer: '' });
+
+  const resetForm = () => {
+    setEditing(null);
+    setForm({ question: '', answer: '' });
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<{ faqs: FaqRow[] }>('/api/faqs');
+    if (res.ok) {
+      setFaqs(res.data.faqs || []);
+    } else {
+      onNotify(res.error || 'Failed to load FAQs', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!form.question.trim() || !form.answer.trim()) {
+      onNotify('Question and answer are required', 'error');
+      return;
+    }
+    setSaving(true);
+    const res = await apiFetch<{ faq: FaqRow }>(`/api/faqs`, {
+      method: editing ? 'PUT' : 'POST',
+      body: JSON.stringify({ ...form, id: editing?.id }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      const saved = (res.data as any).faq as FaqRow;
+      setFaqs((prev) => {
+        if (editing) return prev.map((faq) => (faq.id === saved.id ? saved : faq));
+        return [...prev, saved];
+      });
+      onNotify(editing ? 'FAQ updated' : 'FAQ added');
+      resetForm();
+    } else {
+      onNotify(res.error || 'Failed to save FAQ', 'error');
+    }
+  };
+
+  const handleDelete = async (faq: FaqRow) => {
+    if (!window.confirm('Delete this FAQ?')) return;
+    const res = await apiFetch(`/api/faqs`, {
+      method: 'DELETE',
+      body: JSON.stringify({ id: faq.id }),
+    });
+    if (res.ok) {
+      setFaqs((prev) => prev.filter((row) => row.id !== faq.id));
+      if (editing?.id === faq.id) resetForm();
+      onNotify('FAQ removed');
+    } else {
+      onNotify(res.error || 'Failed to delete FAQ', 'error');
+    }
+  };
+
+  return (
+    <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-white/60">Knowledge base</p>
+            <h3 className="text-xl font-semibold text-white">Frequently asked questions</h3>
+          </div>
+          <button
+            onClick={load}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Refresh
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5">
+          {loading ? (
+            <div className="flex h-48 items-center justify-center gap-2 text-sm text-white/60">
+              <Loader2 className="h-5 w-5 animate-spin" /> Loading FAQs...
+            </div>
+          ) : faqs.length ? (
+            <ul className="divide-y divide-white/10">
+              {faqs.map((faq) => (
+                <li key={faq.id} className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs uppercase text-white/50">
+                      <HelpCircle className="h-3.5 w-3.5" /> #{faq.id}
+                      {faq.createdAt && <span className="text-[11px] text-white/40">{new Date(faq.createdAt).toLocaleDateString()}</span>}
+                    </div>
+                    <p className="font-semibold text-white">{faq.question}</p>
+                    <p className="text-sm text-white/70">{faq.answer}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setEditing(faq);
+                        setForm({ question: faq.question, answer: faq.answer });
+                      }}
+                      className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(faq)}
+                      className="inline-flex items-center gap-1 rounded-full border border-red-500/40 px-3 py-1 text-xs text-red-200 transition hover:border-red-300"
+                    >
+                      <Trash2 className="h-3 w-3" /> Delete
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="p-6 text-center text-sm text-white/60">No FAQs yet. Add the first one using the form.</div>
+          )}
+        </div>
+      </div>
+
+      <form
+        onSubmit={submit}
+        className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner shadow-blue-900/20"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-white/60">{editing ? 'Update entry' : 'New entry'}</p>
+            <h3 className="text-lg font-semibold text-white">{editing ? 'Edit FAQ' : 'Add FAQ'}</h3>
+          </div>
+          {editing && (
+            <button
+              type="button"
+              onClick={resetForm}
+              className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+
+        <label className="space-y-2 text-sm text-white/70">
+          <span>Question</span>
+          <input
+            value={form.question}
+            onChange={(e) => setForm({ ...form, question: e.target.value })}
+            placeholder="How do I deposit?"
+            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+          />
+        </label>
+
+        <label className="space-y-2 text-sm text-white/70">
+          <span>Answer</span>
+          <textarea
+            value={form.answer}
+            onChange={(e) => setForm({ ...form, answer: e.target.value })}
+            placeholder="Copy your wallet address from the dashboard and send BNB to it."
+            rows={5}
+            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+          />
+        </label>
+
+        <div className="flex items-center justify-between text-xs text-white/60">
+          <div className="flex items-center gap-2 text-white/70">
+            <Plus className="h-4 w-4" />
+            {editing ? 'Save your changes to update the FAQ instantly.' : 'Add a new FAQ to sync it to the public page.'}
+          </div>
+          <button
+            type="submit"
+            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {editing ? 'Save changes' : 'Add FAQ'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -2484,6 +2679,7 @@ export default function AdminApp() {
           {active === 'staking' && <StakingPanel onNotify={notify} />}
           {active === 'fees' && <FeesPanel onNotify={notify} />}
           {active === 'ai' && <AiPanel onNotify={notify} />}
+          {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
           {active === 'stripe' && <StripePanel onNotify={notify} />}
         </div>

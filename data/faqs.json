@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "question": "What is ELTX?",
+    "answer": "ELTX is the utility token that powers trading, staking, and the secure wallet experience across the platform.",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  },
+  {
+    "id": 2,
+    "question": "How do I deposit?",
+    "answer": "Copy your personal BNB wallet address from the app and send BNB or supported tokens. Funds are detected automatically after network confirmations.",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  },
+  {
+    "id": 3,
+    "question": "When will staking launch?",
+    "answer": "Staking is rolling out gradually. You will see available plans inside the app as soon as your region is enabled.",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  },
+  {
+    "id": 4,
+    "question": "Is there a mobile app?",
+    "answer": "A dedicated mobile experience is in active development. Join our newsletter inside the app to get an early invite.",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  },
+  {
+    "id": 5,
+    "question": "Who can I contact for support?",
+    "answer": "Email support@eltx.online or open a ticket from the help center for priority assistance from the team.",
+    "createdAt": "2024-01-01T00:00:00.000Z"
+  }
+]
