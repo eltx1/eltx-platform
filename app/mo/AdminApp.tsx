@@ -1543,44 +1543,6 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     }
   };
 
-  const updateProtection = async () => {
-    const maxSlippage = parsePercentToBps(protectionForm.maxSlippagePct);
-    const maxDeviation = parsePercentToBps(protectionForm.maxDeviationPct);
-    const cap = parsePositiveInt(protectionForm.candleFetchCap);
-
-    if (maxSlippage === null || maxDeviation === null) {
-      onNotify('Enter valid % values for slippage and deviation', 'error');
-      return;
-    }
-    if (cap === null) {
-      onNotify('Enter a valid positive number for candle fetch cap', 'error');
-      return;
-    }
-
-    setSavingProtection(true);
-    const res = await apiFetch<{ settings: SpotProtectionSettings }>('/admin/spot/protection', {
-      method: 'PATCH',
-      body: JSON.stringify({
-        max_slippage_bps: maxSlippage,
-        max_deviation_bps: maxDeviation,
-        candle_fetch_cap: cap,
-      }),
-    });
-    setSavingProtection(false);
-
-    if (res.ok) {
-      setProtection(res.data.settings);
-      setProtectionForm({
-        maxSlippagePct: (res.data.settings.max_slippage_bps / 100).toFixed(2),
-        maxDeviationPct: (res.data.settings.max_deviation_bps / 100).toFixed(2),
-        candleFetchCap: String(res.data.settings.candle_fetch_cap),
-      });
-      onNotify('Spot protection updated', 'success');
-    } else {
-      onNotify(res.error || 'Failed to update spot protection', 'error');
-    }
-  };
-
   const renderBalanceTable = (label: string, rows: FeeBalanceRow[]) => {
     return (
       <div className="rounded-2xl border border-white/10 bg-white/5">
