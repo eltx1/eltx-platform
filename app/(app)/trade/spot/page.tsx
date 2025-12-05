@@ -203,6 +203,7 @@ export default function SpotTradePage() {
   const [errorBanner, setErrorBanner] = useState('');
   const [slippageBps, setSlippageBps] = useState(getDefaultSpotSlippageBps());
   const [chartActive, setChartActive] = useState(false);
+  const [lastBalanceError, setLastBalanceError] = useState<string | null>(null);
 
   const amountInputRef = useRef<HTMLInputElement | null>(null);
   const lastStatusesRef = useRef<Map<number, SpotOrder['status']>>(new Map());
@@ -276,15 +277,21 @@ export default function SpotTradePage() {
   const loadBalances = useCallback(async () => {
     const res = await apiFetch<WalletAssetsResponse>('/wallet/assets');
     if (!res.ok) {
-      toast({ message: `${res.error || t.common.genericError}${res.data ? ` (${(res.data as any)?.error?.code || ''})` : ''}`.trim(), variant: 'error' });
+      const message = `${res.error || t.common.genericError}${res.data ? ` (${(res.data as any)?.error?.code || ''})` : ''}`.trim();
+      setErrorBanner(message);
+      setLastBalanceError(message);
       return;
+    }
+    if (lastBalanceError) {
+      setLastBalanceError(null);
+      setErrorBanner('');
     }
     const map: Record<string, WalletAsset> = {};
     res.data.assets.forEach((asset) => {
       map[(asset.symbol || '').toUpperCase()] = asset;
     });
     setBalances(map);
-  }, [t.common.genericError, toast]);
+  }, [lastBalanceError, t.common.genericError]);
 
   useEffect(() => {
     loadMarkets();
@@ -600,7 +607,14 @@ export default function SpotTradePage() {
     idempotencyKeyRef.current = null;
     if (!res.ok) {
       const code = (res.data as any)?.error?.code;
-      toast({ message: `${res.error || t.spotTrade.errors.failed}${code ? ` (${code})` : ''}`, variant: 'error' });
+      const friendly =
+        code === 'INSUFFICIENT_LIQUIDITY'
+          ? t.spotTrade.errors.insufficientLiquidity
+          : code === 'INSUFFICIENT_BALANCE'
+          ? t.spotTrade.errors.insufficientBalance
+          : res.error || t.spotTrade.errors.failed;
+      const suffix = code && friendly === res.error ? ` (${code})` : '';
+      toast({ message: `${friendly}${suffix}`, variant: 'error' });
       return;
     }
     toast({ message: t.spotTrade.notifications.placed, variant: 'success' });
