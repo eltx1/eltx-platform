@@ -1412,13 +1412,28 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await apiFetch<{ settings: FeeSettings; balances: FeeBalanceRow[] }>('/admin/fees');
-    if (res.ok) {
-      setSettings(res.data.settings);
-      setBalances(Array.isArray(res.data.balances) ? res.data.balances : []);
-      syncFormWithSettings(res.data.settings);
+    const [feeRes, protectionRes] = await Promise.all([
+      apiFetch<{ settings: FeeSettings; balances: FeeBalanceRow[] }>('/admin/fees'),
+      apiFetch<{ settings: SpotProtectionSettings }>('/admin/spot/protection'),
+    ]);
+
+    if (feeRes.ok) {
+      setSettings(feeRes.data.settings);
+      setBalances(Array.isArray(feeRes.data.balances) ? feeRes.data.balances : []);
+      syncFormWithSettings(feeRes.data.settings);
     } else {
-      onNotify(res.error || 'Failed to load fee settings', 'error');
+      onNotify(feeRes.error || 'Failed to load fee settings', 'error');
+    }
+
+    if (protectionRes.ok) {
+      setProtection(protectionRes.data.settings);
+      setProtectionForm({
+        maxSlippagePct: (protectionRes.data.settings.max_slippage_bps / 100).toFixed(2),
+        maxDeviationPct: (protectionRes.data.settings.max_deviation_bps / 100).toFixed(2),
+        candleFetchCap: String(protectionRes.data.settings.candle_fetch_cap || 0),
+      });
+    } else {
+      onNotify(protectionRes.error || 'Failed to load spot protection settings', 'error');
     }
     setLoading(false);
   }, [onNotify, syncFormWithSettings]);
@@ -1433,6 +1448,12 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     const num = Number(normalized);
     if (!Number.isFinite(num) || num < 0 || num > 100) return null;
     return Math.round(num * 100);
+  };
+
+  const parsePositiveInt = (value: string) => {
+    const num = Number(value.trim());
+    if (!Number.isFinite(num) || num <= 0) return null;
+    return Math.floor(num);
   };
 
   const groupedBalances = useMemo(() => {
@@ -1481,6 +1502,82 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
       onNotify('Fee settings updated', 'success');
     } else {
       onNotify(res.error || 'Failed to update fee settings', 'error');
+    }
+  };
+
+  const updateProtection = async () => {
+    const maxSlippage = parsePercentToBps(protectionForm.maxSlippagePct);
+    const maxDeviation = parsePercentToBps(protectionForm.maxDeviationPct);
+    const cap = parsePositiveInt(protectionForm.candleFetchCap);
+
+    if (maxSlippage === null || maxDeviation === null) {
+      onNotify('Enter valid % values for slippage and deviation', 'error');
+      return;
+    }
+    if (cap === null) {
+      onNotify('Enter a valid positive number for candle fetch cap', 'error');
+      return;
+    }
+
+    setSavingProtection(true);
+    const res = await apiFetch<{ settings: SpotProtectionSettings }>('/admin/spot/protection', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        max_slippage_bps: maxSlippage,
+        max_deviation_bps: maxDeviation,
+        candle_fetch_cap: cap,
+      }),
+    });
+    setSavingProtection(false);
+
+    if (res.ok) {
+      setProtection(res.data.settings);
+      setProtectionForm({
+        maxSlippagePct: (res.data.settings.max_slippage_bps / 100).toFixed(2),
+        maxDeviationPct: (res.data.settings.max_deviation_bps / 100).toFixed(2),
+        candleFetchCap: String(res.data.settings.candle_fetch_cap),
+      });
+      onNotify('Spot protection updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update spot protection', 'error');
+    }
+  };
+
+  const updateProtection = async () => {
+    const maxSlippage = parsePercentToBps(protectionForm.maxSlippagePct);
+    const maxDeviation = parsePercentToBps(protectionForm.maxDeviationPct);
+    const cap = parsePositiveInt(protectionForm.candleFetchCap);
+
+    if (maxSlippage === null || maxDeviation === null) {
+      onNotify('Enter valid % values for slippage and deviation', 'error');
+      return;
+    }
+    if (cap === null) {
+      onNotify('Enter a valid positive number for candle fetch cap', 'error');
+      return;
+    }
+
+    setSavingProtection(true);
+    const res = await apiFetch<{ settings: SpotProtectionSettings }>('/admin/spot/protection', {
+      method: 'PATCH',
+      body: JSON.stringify({
+        max_slippage_bps: maxSlippage,
+        max_deviation_bps: maxDeviation,
+        candle_fetch_cap: cap,
+      }),
+    });
+    setSavingProtection(false);
+
+    if (res.ok) {
+      setProtection(res.data.settings);
+      setProtectionForm({
+        maxSlippagePct: (res.data.settings.max_slippage_bps / 100).toFixed(2),
+        maxDeviationPct: (res.data.settings.max_deviation_bps / 100).toFixed(2),
+        candleFetchCap: String(res.data.settings.candle_fetch_cap),
+      });
+      onNotify('Spot protection updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update spot protection', 'error');
     }
   };
 
@@ -1627,6 +1724,67 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                 className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/30 hover:text-white"
               >
                 <RefreshCw className="h-4 w-4" /> Reset to current
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <h4 className="text-md font-semibold">Spot protection</h4>
+            <p className="mt-1 text-sm text-white/60">
+              Guardrails for market orders and chart aggregation limits.
+            </p>
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <div>
+                <label className="text-xs uppercase text-white/60">Max slippage (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={protectionForm.maxSlippagePct}
+                  onChange={(e) => setProtectionForm((prev) => ({ ...prev, maxSlippagePct: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-white/50">Current: {(protection.max_slippage_bps / 100).toFixed(2)}%</p>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Max deviation (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={protectionForm.maxDeviationPct}
+                  onChange={(e) => setProtectionForm((prev) => ({ ...prev, maxDeviationPct: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-white/50">Current: {(protection.max_deviation_bps / 100).toFixed(2)}%</p>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Candle fetch cap</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={protectionForm.candleFetchCap}
+                  onChange={(e) => setProtectionForm((prev) => ({ ...prev, candleFetchCap: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+                <p className="mt-1 text-xs text-white/50">Current: {protection.candle_fetch_cap}</p>
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                onClick={updateProtection}
+                disabled={savingProtection}
+                className="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium transition hover:bg-emerald-500 disabled:opacity-60"
+              >
+                <ShieldCheck className="h-4 w-4" /> {savingProtection ? 'Saving…' : 'Save protection'}
+              </button>
+              <button
+                onClick={load}
+                className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/30 hover:text-white"
+              >
+                <RefreshCw className="h-4 w-4" /> Refresh
               </button>
             </div>
           </div>
