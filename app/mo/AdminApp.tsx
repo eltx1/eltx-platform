@@ -113,6 +113,12 @@ type SwapPricingRow = {
   updated_at?: string | null;
 };
 
+type SpotProtectionSettings = {
+  max_slippage_bps: number;
+  max_deviation_bps: number;
+  candle_fetch_cap: number;
+};
+
 type SpotMarketRow = {
   id: number;
   symbol: string;
@@ -1398,6 +1404,17 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
   });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
   const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00' });
+  const [protection, setProtection] = useState<SpotProtectionSettings>({
+    max_slippage_bps: 0,
+    max_deviation_bps: 0,
+    candle_fetch_cap: 0,
+  });
+  const [protectionForm, setProtectionForm] = useState({
+    maxSlippagePct: '0.00',
+    maxDeviationPct: '0.00',
+    candleFetchCap: '0',
+  });
+  const [savingProtection, setSavingProtection] = useState(false);
 
   const syncFormWithSettings = useCallback((next: FeeSettings) => {
     const makerBps = next.spot_maker_fee_bps ?? next.spot_trade_fee_bps ?? 0;
