@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
+import { dict, useLang } from '../../../lib/i18n';
 
 type Plan = {
   id: number;
@@ -48,6 +49,7 @@ function safeDecimal(value: string | number | null | undefined) {
 export default function NewStakePage() {
   const { user } = useAuth();
   const router = useRouter();
+  const { lang } = useLang();
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [assets, setAssets] = useState<WalletAsset[]>([]);
@@ -57,6 +59,7 @@ export default function NewStakePage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const t = useMemo(() => dict[lang].staking.new, [lang]);
 
   useEffect(() => {
     if (user === null) router.replace('/login');
@@ -82,7 +85,7 @@ export default function NewStakePage() {
         } else if (res.status === 401) {
           router.replace('/login');
         } else {
-          setError(res.error || 'حصل خطأ أثناء تحميل خطط الاستاكينج.');
+          setError(res.error || t.errors.loadPlans);
         }
       }
     })();
@@ -93,7 +96,7 @@ export default function NewStakePage() {
     return () => {
       cancelled = true;
     };
-  }, [user, router]);
+  }, [user, router, t]);
 
   useEffect(() => {
     if (planId !== undefined) return;
@@ -134,24 +137,22 @@ export default function NewStakePage() {
     try {
       const value = new Decimal(trimmed);
       if (!value.isFinite() || value.lte(0)) {
-        setAmountError('القيمة المدخلة غير صالحة.');
+        setAmountError(t.errors.invalidAmount);
         return;
       }
       if (minDepositDecimal && value.lt(minDepositDecimal)) {
-        setAmountError(
-          `الحد الأدنى للاستاكينج هو ${formatDecimal(minDepositDecimal, 6)} ${assetSymbol}.`
-        );
+        setAmountError(t.errors.minDeposit(formatDecimal(minDepositDecimal, 6), assetSymbol));
         return;
       }
       if (value.gt(balanceDecimal)) {
-        setAmountError('رصيدك مش كافي للكمية دي.');
+        setAmountError(t.errors.insufficientBalance);
         return;
       }
       setAmountError('');
     } catch {
-      setAmountError('القيمة المدخلة غير صالحة.');
+      setAmountError(t.errors.invalidAmount);
     }
-  }, [amount, selectedPlan, minDepositDecimal, balanceDecimal, assetSymbol]);
+  }, [amount, selectedPlan, minDepositDecimal, balanceDecimal, assetSymbol, t]);
 
   const aprPercent = selectedPlan ? selectedPlan.apr_bps / 100 : 0;
 
@@ -181,7 +182,7 @@ export default function NewStakePage() {
     setSubmitting(false);
     if (!res.ok) {
       const code = (res.data as any)?.error?.code;
-      setError(`${res.error || 'تعذر تنفيذ العملية.'}${code ? ` (${code})` : ''}`.trim());
+      setError(`${res.error || t.errors.submit}${code ? ` (${code})` : ''}`.trim());
     } else {
       router.push('/earn/staking/positions');
     }
@@ -194,22 +195,20 @@ export default function NewStakePage() {
         className="space-y-5 w-full max-w-md bg-white/5 border border-white/10 rounded-2xl p-6 shadow-lg"
       >
         <div className="space-y-1">
-          <h1 className="text-xl font-semibold">استاكينج ELTX</h1>
-          <p className="text-sm opacity-70">
-            اقفل رصيدك لفترة محددة علشان تكسب عائد ثابت على عملة {assetSymbol}.
-          </p>
+          <h1 className="text-xl font-semibold">{t.title(assetSymbol)}</h1>
+          <p className="text-sm opacity-70">{t.description(assetSymbol)}</p>
         </div>
 
         {error && <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/40 rounded p-2">{error}</div>}
 
         {loading && plans.length === 0 ? (
-          <div className="text-sm opacity-70">جاري تحميل خطط الاستاكينج…</div>
+          <div className="text-sm opacity-70">{t.loading}</div>
         ) : plans.length === 0 ? (
-          <div className="text-sm opacity-70">مافيش خطط متاحة دلوقتي.</div>
+          <div className="text-sm opacity-70">{t.empty}</div>
         ) : (
           <>
             <div>
-              <label className="block text-xs mb-1 opacity-70">اختر الخطة</label>
+              <label className="block text-xs mb-1 opacity-70">{t.choosePlan}</label>
               <select
                 value={planId ?? ''}
                 onChange={(e) => setPlanId(Number(e.target.value))}
@@ -217,7 +216,7 @@ export default function NewStakePage() {
               >
                 {plans.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} · {p.duration_days} يوم · APR {formatDecimal(p.apr_bps / 100, 2)}%
+                    {t.optionLabel(p.name, p.duration_days, formatDecimal(p.apr_bps / 100, 2))}
                   </option>
                 ))}
               </select>
@@ -225,24 +224,24 @@ export default function NewStakePage() {
 
             <div className="rounded-lg bg-black/20 border border-white/10 p-3 text-sm space-y-1">
               <div>
-                <span className="opacity-70">الرصيد المتاح:</span>{' '}
+                <span className="opacity-70">{t.balance}:</span>{' '}
                 <span className="font-semibold">{formatDecimal(balanceDecimal, 6)}</span>{' '}
                 {assetSymbol}
               </div>
               {minDepositDecimal && (
                 <div className="opacity-70">
-                  الحد الأدنى للدخول: {formatDecimal(minDepositDecimal, 6)} {assetSymbol}
+                  {t.minEntry}: {formatDecimal(minDepositDecimal, 6)} {assetSymbol}
                 </div>
               )}
-              <div className="opacity-70">العائد السنوي (APR): {formatDecimal(aprPercent, 2)}%</div>
+              <div className="opacity-70">{t.apr}: {formatDecimal(aprPercent, 2)}%</div>
             </div>
 
             <div>
-              <label className="block text-xs mb-1 opacity-70">الكمية اللي هتستاكها</label>
+              <label className="block text-xs mb-1 opacity-70">{t.amountLabel}</label>
               <input
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder={`مثال: 100 ${assetSymbol}`}
+                placeholder={t.amountPlaceholder(assetSymbol)}
                 className="w-full p-2 rounded bg-black/20 border border-white/20 hover:bg-black/30 transition"
                 inputMode="decimal"
               />
@@ -251,7 +250,7 @@ export default function NewStakePage() {
 
             {estimatedDaily && (
               <div className="text-sm bg-amber-500/10 border border-amber-500/40 rounded p-2">
-                العائد اليومي المتوقع: {formatDecimal(estimatedDaily, 6)} {assetSymbol}
+                {t.estimatedDaily(formatDecimal(estimatedDaily, 6), assetSymbol)}
               </div>
             )}
 
@@ -260,7 +259,7 @@ export default function NewStakePage() {
               className="btn btn-primary w-full justify-center disabled:opacity-60"
               disabled={submitting || !selectedPlan || !amount.trim() || !!amountError}
             >
-              {submitting ? 'جاري التنفيذ…' : 'ابدأ الاستاكينج'}
+              {submitting ? t.submitting : t.submit}
             </button>
           </>
         )}

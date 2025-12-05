@@ -1,15 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
 import { apiFetch } from '../../lib/api';
+import { dict, useLang } from '../../lib/i18n';
 
 export default function StakingPlansPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [plans, setPlans] = useState<any[]>([]);
+  const { lang } = useLang();
+  const t = useMemo(() => dict[lang].staking.plans, [lang]);
 
   useEffect(() => {
     if (user === null) {
@@ -30,21 +33,18 @@ export default function StakingPlansPage() {
       <div className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/5 via-purple-500/5 to-cyan-500/5 p-8 shadow-xl">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="space-y-2">
-            <p className="text-xs uppercase tracking-[0.2em] text-white/60">Auto Staking</p>
-            <h1 className="text-2xl font-bold">استثمار يومي من غير صداع</h1>
-            <p className="text-sm text-white/70 max-w-2xl">
-              اختار الباقة اللي تناسبك، رصيدك هيتحجز تلقائيًا ويتحسب لك عائد يومي لحد نهاية المدة، وبعدها بنرجعلك الأصل مع آخر
-              ربح من غير ما تحتاج تعمل أي خطوة إضافية.
-            </p>
+            <p className="text-xs uppercase tracking-[0.2em] text-white/60">{t.kicker}</p>
+            <h1 className="text-2xl font-bold">{t.title}</h1>
+            <p className="text-sm text-white/70 max-w-2xl">{t.description}</p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="rounded-2xl bg-black/30 border border-white/10 p-3 text-center">
-              <div className="text-xs text-white/60">صرف يومي</div>
-              <div className="text-lg font-semibold">أوتوماتيك</div>
+              <div className="text-xs text-white/60">{t.payoutTitle}</div>
+              <div className="text-lg font-semibold">{t.payoutValue}</div>
             </div>
             <div className="rounded-2xl bg-black/30 border border-white/10 p-3 text-center">
-              <div className="text-xs text-white/60">استرجاع الأصل</div>
-              <div className="text-lg font-semibold">لحظة الاستحقاق</div>
+              <div className="text-xs text-white/60">{t.principalTitle}</div>
+              <div className="text-lg font-semibold">{t.principalValue}</div>
             </div>
           </div>
         </div>
@@ -52,8 +52,8 @@ export default function StakingPlansPage() {
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">باقات الاستاكينج المتاحة</h2>
-          <span className="text-xs text-white/60">عائد سنوي محسوب بالـ APR</span>
+          <h2 className="text-lg font-semibold">{t.listTitle}</h2>
+          <span className="text-xs text-white/60">{t.aprNotice}</span>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {plans.map((p) => {
@@ -73,26 +73,26 @@ export default function StakingPlansPage() {
                 </div>
                 <div className="relative z-10 space-y-1 text-sm text-white/70">
                   <div className="flex items-center justify-between">
-                    <span>العملة</span>
+                    <span>{t.asset}</span>
                     <span className="font-semibold text-white">{asset}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>مدة الربط</span>
-                    <span className="font-semibold text-white">{p.duration_days} يوم</span>
+                    <span>{t.duration}</span>
+                    <span className="font-semibold text-white">{t.durationValue(p.duration_days)}</span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span>عائد يومي تقريبي</span>
-                    <span className="font-semibold text-amber-200">{dailyPct}% / يوم</span>
+                    <span>{t.dailyReturn}</span>
+                    <span className="font-semibold text-amber-200">{t.dailyReturnValue(dailyPct)}</span>
                   </div>
                   {p.min_deposit && (
                     <div className="flex items-center justify-between text-xs text-white/60">
-                      <span>حد أدنى</span>
+                      <span>{t.minDeposit}</span>
                       <span className="font-semibold text-white/80">{p.min_deposit} {asset}</span>
                     </div>
                   )}
                 </div>
                 <div className="relative z-10 flex items-center justify-between text-xs text-blue-200/80">
-                  <span>ابدأ الآن</span>
+                  <span>{t.cta}</span>
                   <span className="transition group-hover:translate-x-1">↗</span>
                 </div>
               </Link>
