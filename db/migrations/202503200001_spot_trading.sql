@@ -113,4 +113,6 @@ CREATE TABLE IF NOT EXISTS platform_fees (
 -- Default fee configuration keys
 INSERT IGNORE INTO platform_settings (name, value) VALUES
   ('swap_fee_bps', '0'),
-  ('spot_trade_fee_bps', '0');
+  ('spot_trade_fee_bps', '0'),
+  ('spot_stream_heartbeat_ms', '12000'),
+  ('spot_stream_delta_interval_ms', '1200');

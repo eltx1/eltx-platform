@@ -510,6 +510,8 @@ CREATE TABLE IF NOT EXISTS platform_settings (
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('transfer_fee_bps', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('swap_fee_bps', '50');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_trade_fee_bps', '50');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_stream_heartbeat_ms', '12000');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_stream_delta_interval_ms', '1200');
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
