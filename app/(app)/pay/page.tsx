@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ethers } from 'ethers';
 import { useAuth } from '../../lib/auth';
@@ -48,7 +48,7 @@ export default function PayPage() {
     if (user === null) router.replace('/login');
   }, [user, router]);
 
-  useEffect(() => {
+  const fetchAssets = useCallback(() => {
     apiFetch<{ assets: Asset[]; transfer_fee_bps?: number }>('/wallet/assets').then((res) => {
       if (res.ok) {
         setAssets(res.data.assets);
@@ -59,6 +59,10 @@ export default function PayPage() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    fetchAssets();
+  }, [fetchAssets]);
 
   const selected = assets.find((a) => a.symbol === asset);
 
@@ -105,6 +109,7 @@ export default function PayPage() {
       toast(t.pay.success);
       setToId('');
       setAmount('');
+      fetchAssets();
     } else {
       toast(res.error || t.common.genericError);
     }
