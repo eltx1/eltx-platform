@@ -27,6 +27,10 @@ const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const STRIPE_BASE_FALLBACK = 'https://eltx.online';
 
+const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
+const DEFAULT_SPOT_MAX_DEVIATION_BPS = 800n;
+const DEFAULT_SPOT_CANDLE_FETCH_LIMIT = 3000;
+
 function normalizeSettingValue(value) {
   if (value === undefined || value === null) return null;
   const str = value.toString().trim();
@@ -542,14 +546,37 @@ const AdminTransactionsQuerySchema = PaginationSchema.extend({
   type: z.enum(['deposits', 'transfers', 'swaps', 'spot', 'fiat']).default('deposits'),
 });
 
+const SpotRiskSettingsSchema = z
+  .object({
+    max_slippage_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    max_deviation_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    candle_fetch_cap: z.coerce.number().int().min(100).max(10000).optional(),
+  })
+  .refine(
+    (data) =>
+      data.max_slippage_bps !== undefined ||
+      data.max_deviation_bps !== undefined ||
+      data.candle_fetch_cap !== undefined,
+    {
+      message: 'At least one spot protection field must be provided',
+    }
+  );
+
 const AdminFeeUpdateSchema = z
   .object({
     swap_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     spot_trade_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    spot_maker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    spot_taker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     transfer_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
   })
   .refine(
-    (data) => data.swap_fee_bps !== undefined || data.spot_trade_fee_bps !== undefined || data.transfer_fee_bps !== undefined,
+    (data) =>
+      data.swap_fee_bps !== undefined ||
+      data.spot_trade_fee_bps !== undefined ||
+      data.spot_maker_fee_bps !== undefined ||
+      data.spot_taker_fee_bps !== undefined ||
+      data.transfer_fee_bps !== undefined,
     {
       message: 'At least one fee field must be provided',
     }
@@ -868,13 +895,18 @@ async function readAiUsageSummary(date, conn = pool) {
 async function readPlatformFeeSettings(conn = pool) {
   const swapVal = await getPlatformSettingValue('swap_fee_bps', '50', conn);
   const spotVal = await getPlatformSettingValue('spot_trade_fee_bps', '50', conn);
+  const makerVal = await getPlatformSettingValue('spot_maker_fee_bps', spotVal, conn);
+  const takerVal = await getPlatformSettingValue('spot_taker_fee_bps', spotVal, conn);
   const transferVal = await getPlatformSettingValue('transfer_fee_bps', '0', conn);
   const swapFeeBps = clampBps(BigInt(Number.parseInt(swapVal, 10) || 0));
-  const spotFeeBps = clampBps(BigInt(Number.parseInt(spotVal, 10) || 0));
+  const spotMakerFeeBps = clampBps(BigInt(Number.parseInt(makerVal, 10) || 0));
+  const spotTakerFeeBps = clampBps(BigInt(Number.parseInt(takerVal, 10) || 0));
   const transferFeeBps = clampBps(BigInt(Number.parseInt(transferVal, 10) || 0));
   return {
     swap_fee_bps: Number(swapFeeBps),
-    spot_trade_fee_bps: Number(spotFeeBps),
+    spot_trade_fee_bps: Number(spotTakerFeeBps),
+    spot_maker_fee_bps: Number(spotMakerFeeBps),
+    spot_taker_fee_bps: Number(spotTakerFeeBps),
     transfer_fee_bps: Number(transferFeeBps),
   };
 }
@@ -899,6 +931,15 @@ async function readPlatformFeeBalances(conn = pool) {
       amount: trimDecimal(formatUnitsStr(totalWei.toString(), decimals)),
     };
   });
+}
+
+async function readSpotFeeBps(conn = pool) {
+  const defaultVal = await getPlatformSettingValue('spot_trade_fee_bps', '50', conn);
+  const makerVal = await getPlatformSettingValue('spot_maker_fee_bps', defaultVal, conn);
+  const takerVal = await getPlatformSettingValue('spot_taker_fee_bps', defaultVal, conn);
+  const makerFeeBps = clampBps(BigInt(Number.parseInt(makerVal, 10) || 0));
+  const takerFeeBps = clampBps(BigInt(Number.parseInt(takerVal, 10) || 0));
+  return { maker: Number(makerFeeBps), taker: Number(takerFeeBps) };
 }
 
 async function getSwapPoolRow(conn, asset, { forUpdate = false } = {}) {
@@ -960,13 +1001,13 @@ async function getSpotMarketForSwap(asset, conn = pool) {
   return rows.length ? rows[0] : null;
 }
 
-async function getSpotTopOfBook(conn, marketId) {
+async function getSpotTopOfBook(conn, marketId, { forUpdate = false } = {}) {
   const [[ask]] = await conn.query(
     `SELECT price_wei
        FROM spot_orders
       WHERE market_id=? AND side='sell' AND status='open'
       ORDER BY price_wei ASC, id ASC
-      LIMIT 1`,
+      LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     [marketId]
   );
   const [[bid]] = await conn.query(
@@ -974,10 +1015,171 @@ async function getSpotTopOfBook(conn, marketId) {
        FROM spot_orders
       WHERE market_id=? AND side='buy' AND status='open'
       ORDER BY price_wei DESC, id ASC
-      LIMIT 1`,
+      LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     [marketId]
   );
   return { ask: ask ? BigInt(ask.price_wei) : null, bid: bid ? BigInt(bid.price_wei) : null };
+}
+
+async function getSpotLastTradePriceWei(conn, marketId) {
+  const executor = conn.query ? conn : pool;
+  const [[row]] = await executor.query(
+    'SELECT price_wei FROM spot_trades WHERE market_id=? ORDER BY id DESC LIMIT 1',
+    [marketId]
+  );
+  return row ? BigInt(row.price_wei) : null;
+}
+
+function computeRelativeBps(value, reference) {
+  if (!value || !reference || reference === 0n) return 0n;
+  const diff = value > reference ? value - reference : reference - value;
+  return mulDiv(diff, 10000n, reference);
+}
+
+async function readSpotRiskSettings(conn = pool) {
+  const maxSlippage = await getPlatformSettingValue(
+    'spot_max_slippage_bps',
+    DEFAULT_SPOT_MAX_SLIPPAGE_BPS.toString(),
+    conn
+  );
+  const maxDeviation = await getPlatformSettingValue(
+    'spot_max_deviation_bps',
+    DEFAULT_SPOT_MAX_DEVIATION_BPS.toString(),
+    conn
+  );
+  const candleFetchCap = await getPlatformSettingValue(
+    'spot_candle_fetch_cap',
+    DEFAULT_SPOT_CANDLE_FETCH_LIMIT.toString(),
+    conn
+  );
+  return {
+    maxSlippageBps: clampBps(BigInt(Number.parseInt(maxSlippage, 10) || Number(DEFAULT_SPOT_MAX_SLIPPAGE_BPS))),
+    maxDeviationBps: clampBps(BigInt(Number.parseInt(maxDeviation, 10) || Number(DEFAULT_SPOT_MAX_DEVIATION_BPS))),
+    candleFetchCap: Number.parseInt(candleFetchCap, 10) || DEFAULT_SPOT_CANDLE_FETCH_LIMIT,
+  };
+}
+
+async function readSpotOrderbookSnapshot(conn, marketRow) {
+  const [bidRows] = await conn.query(
+    `SELECT price_wei, SUM(remaining_base_wei) AS base_total
+       FROM spot_orders
+       WHERE market_id=? AND status='open' AND side='buy'
+       GROUP BY price_wei
+       ORDER BY price_wei DESC
+       LIMIT 50`,
+    [marketRow.id]
+  );
+  const [askRows] = await conn.query(
+    `SELECT price_wei, SUM(remaining_base_wei) AS base_total
+       FROM spot_orders
+       WHERE market_id=? AND status='open' AND side='sell'
+       GROUP BY price_wei
+       ORDER BY price_wei ASC
+       LIMIT 50`,
+    [marketRow.id]
+  );
+  const [tradeRows] = await conn.query(
+    `SELECT id, price_wei, base_amount_wei, quote_amount_wei, taker_side, created_at
+       FROM spot_trades
+       WHERE market_id=?
+       ORDER BY id DESC
+       LIMIT 50`,
+    [marketRow.id]
+  );
+  const formatLevel = (row) => {
+    const priceWei = BigInt(row.price_wei);
+    const baseWei = bigIntFromValue(row.base_total);
+    const quoteWei = computeQuoteAmount(baseWei, priceWei);
+    return {
+      price: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
+      price_wei: priceWei.toString(),
+      base_amount: trimDecimal(formatUnitsStr(baseWei.toString(), marketRow.base_decimals)),
+      base_amount_wei: baseWei.toString(),
+      quote_amount: trimDecimal(formatUnitsStr(quoteWei.toString(), marketRow.quote_decimals)),
+      quote_amount_wei: quoteWei.toString(),
+    };
+  };
+  const trades = tradeRows.map((row) => ({
+    id: row.id,
+    price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
+    price_wei: row.price_wei?.toString() || '0',
+    base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
+    base_amount_wei: row.base_amount_wei?.toString() || '0',
+    quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
+    quote_amount_wei: row.quote_amount_wei?.toString() || '0',
+    taker_side: row.taker_side,
+    created_at: row.created_at,
+  }));
+
+  return {
+    orderbook: { bids: bidRows.map(formatLevel), asks: askRows.map(formatLevel) },
+    trades,
+  };
+}
+
+async function readSpotOrdersForUser(conn, userId, marketRow) {
+  const [orderRows] = await conn.query(
+    `SELECT so.*, sm.symbol, sm.base_asset, sm.quote_asset, sm.base_decimals, sm.quote_decimals
+       FROM spot_orders so
+       JOIN spot_markets sm ON sm.id = so.market_id
+       WHERE so.user_id = ? AND so.market_id = ?
+       ORDER BY FIELD(so.status,'open','filled','cancelled'), so.id DESC
+       LIMIT 100`,
+    [userId, marketRow.id]
+  );
+  return orderRows.map((row) => {
+    const baseDecimals = row.base_decimals;
+    const quoteDecimals = row.quote_decimals;
+    const priceWei = BigInt(row.price_wei || 0);
+    const baseWei = bigIntFromValue(row.base_amount_wei);
+    const remainingBaseWei = bigIntFromValue(row.remaining_base_wei);
+    const quoteWei = bigIntFromValue(row.quote_amount_wei);
+    const remainingQuoteWei = bigIntFromValue(row.remaining_quote_wei);
+    return {
+      id: row.id,
+      market: row.symbol,
+      side: row.side,
+      type: row.type,
+      status: row.status,
+      price: priceWei > 0n ? trimDecimal(formatUnitsStr(priceWei.toString(), 18)) : null,
+      price_wei: priceWei.toString(),
+      base_amount: trimDecimal(formatUnitsStr(baseWei.toString(), baseDecimals)),
+      base_amount_wei: baseWei.toString(),
+      remaining_base_amount: trimDecimal(formatUnitsStr(remainingBaseWei.toString(), baseDecimals)),
+      remaining_base_wei: remainingBaseWei.toString(),
+      quote_amount: trimDecimal(formatUnitsStr(quoteWei.toString(), quoteDecimals)),
+      quote_amount_wei: quoteWei.toString(),
+      remaining_quote_amount: trimDecimal(formatUnitsStr(remainingQuoteWei.toString(), quoteDecimals)),
+      remaining_quote_wei: remainingQuoteWei.toString(),
+      fee_bps: row.fee_bps,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  });
+}
+
+async function readUserBalancesForAssets(conn, userId, assets) {
+  if (!assets.length) return {};
+  const upper = assets.map((a) => a.toUpperCase());
+  const [rows] = await conn.query(
+    `SELECT asset, balance_wei
+       FROM user_balances
+      WHERE user_id=? AND UPPER(asset) IN (${upper.map(() => '?').join(',')})`,
+    [userId, ...upper]
+  );
+  const result = {};
+  for (const row of rows) {
+    const asset = row.asset.toUpperCase();
+    const decimals = getSymbolDecimals(asset);
+    const balanceWei = bigIntFromValue(row.balance_wei);
+    result[asset] = {
+      symbol: asset,
+      balance: trimDecimal(formatUnitsStr(balanceWei.toString(), decimals)),
+      balance_wei: balanceWei.toString(),
+      decimals,
+    };
+  }
+  return result;
 }
 
 async function simulateSpotMarketBuy(conn, market, quoteAmountWei, takerFeeBps) {
@@ -1771,6 +1973,51 @@ app.get('/admin/fees', async (req, res, next) => {
   }
 });
 
+app.get('/admin/spot/protection', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const settings = await readSpotRiskSettings();
+    res.json({
+      ok: true,
+      settings: {
+        max_slippage_bps: Number(settings.maxSlippageBps),
+        max_deviation_bps: Number(settings.maxDeviationBps),
+        candle_fetch_cap: settings.candleFetchCap,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/spot/protection', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const updates = SpotRiskSettingsSchema.parse(req.body || {});
+    const tasks = [];
+    if (updates.max_slippage_bps !== undefined)
+      tasks.push(setPlatformSettingValue('spot_max_slippage_bps', updates.max_slippage_bps.toString()));
+    if (updates.max_deviation_bps !== undefined)
+      tasks.push(setPlatformSettingValue('spot_max_deviation_bps', updates.max_deviation_bps.toString()));
+    if (updates.candle_fetch_cap !== undefined)
+      tasks.push(setPlatformSettingValue('spot_candle_fetch_cap', updates.candle_fetch_cap.toString()));
+    await Promise.all(tasks);
+    const settings = await readSpotRiskSettings();
+    res.json({
+      ok: true,
+      settings: {
+        max_slippage_bps: Number(settings.maxSlippageBps),
+        max_deviation_bps: Number(settings.maxDeviationBps),
+        candle_fetch_cap: settings.candleFetchCap,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: err.message || 'Invalid input', details: err.flatten() });
+    next(err);
+  }
+});
+
 app.patch('/admin/fees', async (req, res, next) => {
   try {
     await requireAdmin(req);
@@ -1780,6 +2027,10 @@ app.patch('/admin/fees', async (req, res, next) => {
       tasks.push(setPlatformSettingValue('swap_fee_bps', updates.swap_fee_bps.toString()));
     if (updates.spot_trade_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('spot_trade_fee_bps', updates.spot_trade_fee_bps.toString()));
+    if (updates.spot_maker_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('spot_maker_fee_bps', updates.spot_maker_fee_bps.toString()));
+    if (updates.spot_taker_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('spot_taker_fee_bps', updates.spot_taker_fee_bps.toString()));
     if (updates.transfer_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('transfer_fee_bps', updates.transfer_fee_bps.toString()));
     await Promise.all(tasks);
@@ -3705,12 +3956,7 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
        WHERE sm.active = 1
        ORDER BY sm.symbol`
     );
-    let feeSetting = '50';
-    try {
-      feeSetting = await getPlatformSettingValue('spot_trade_fee_bps', '50');
-    } catch {}
-    const feeBps = Number.parseInt(feeSetting, 10);
-    const normalizedFeeBps = Number.isFinite(feeBps) ? feeBps : 0;
+    const feeSettings = await readSpotFeeBps();
     const markets = rows.map((row) => {
       const lastPriceWei = bigIntFromValue(row.last_price_wei);
       return {
@@ -3730,7 +3976,7 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
     res.json({
       ok: true,
       markets,
-      fees: { maker_bps: normalizedFeeBps, taker_bps: normalizedFeeBps },
+      fees: { maker_bps: feeSettings.maker, taker_bps: feeSettings.taker },
     });
   } catch (err) {
     next(err);
@@ -3745,57 +3991,7 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
     if (!marketRow || !marketRow.active)
       return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
 
-    const [bidRows] = await pool.query(
-      `SELECT price_wei, SUM(remaining_base_wei) AS base_total
-       FROM spot_orders
-       WHERE market_id=? AND status='open' AND side='buy'
-       GROUP BY price_wei
-       ORDER BY price_wei DESC
-       LIMIT 50`,
-      [marketRow.id]
-    );
-    const [askRows] = await pool.query(
-      `SELECT price_wei, SUM(remaining_base_wei) AS base_total
-       FROM spot_orders
-       WHERE market_id=? AND status='open' AND side='sell'
-       GROUP BY price_wei
-       ORDER BY price_wei ASC
-       LIMIT 50`,
-      [marketRow.id]
-    );
-    const formatLevel = (row) => {
-      const priceWei = BigInt(row.price_wei);
-      const baseWei = bigIntFromValue(row.base_total);
-      const quoteWei = computeQuoteAmount(baseWei, priceWei);
-      return {
-        price: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
-        price_wei: priceWei.toString(),
-        base_amount: trimDecimal(formatUnitsStr(baseWei.toString(), marketRow.base_decimals)),
-        base_amount_wei: baseWei.toString(),
-        quote_amount: trimDecimal(formatUnitsStr(quoteWei.toString(), marketRow.quote_decimals)),
-        quote_amount_wei: quoteWei.toString(),
-      };
-    };
-
-    const [tradeRows] = await pool.query(
-      `SELECT id, price_wei, base_amount_wei, quote_amount_wei, taker_side, created_at
-       FROM spot_trades
-       WHERE market_id=?
-       ORDER BY id DESC
-       LIMIT 50`,
-      [marketRow.id]
-    );
-    const trades = tradeRows.map((row) => ({
-      id: row.id,
-      price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
-      price_wei: row.price_wei?.toString() || '0',
-      base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
-      base_amount_wei: row.base_amount_wei?.toString() || '0',
-      quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
-      quote_amount_wei: row.quote_amount_wei?.toString() || '0',
-      taker_side: row.taker_side,
-      created_at: row.created_at,
-    }));
+    const { orderbook, trades } = await readSpotOrderbookSnapshot(pool, marketRow);
 
     res.json({
       ok: true,
@@ -3804,11 +4000,68 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
         base_asset: marketRow.base_asset,
         quote_asset: marketRow.quote_asset,
       },
-      orderbook: {
-        bids: bidRows.map(formatLevel),
-        asks: askRows.map(formatLevel),
-      },
+      orderbook,
       trades,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/spot/stream', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const { market } = SpotOrderbookSchema.parse({ market: req.query.market });
+    const marketRow = await getSpotMarket(pool, market);
+    if (!marketRow || !marketRow.active)
+      return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    let closed = false;
+    const send = (type, payload) => {
+      if (closed) return;
+      res.write(`event: ${type}\n`);
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    };
+
+    const pushSnapshot = async () => {
+      try {
+        const [snapshot, orders, balances, fees] = await Promise.all([
+          readSpotOrderbookSnapshot(pool, marketRow),
+          readSpotOrdersForUser(pool, userId, marketRow),
+          readUserBalancesForAssets(pool, userId, [marketRow.base_asset, marketRow.quote_asset]),
+          readSpotFeeBps(pool),
+        ]);
+        send('update', {
+          market: {
+            symbol: marketRow.symbol,
+            base_asset: marketRow.base_asset,
+            quote_asset: marketRow.quote_asset,
+          },
+          orderbook: snapshot.orderbook,
+          trades: snapshot.trades,
+          orders,
+          balances,
+          fees: { maker_bps: fees.maker, taker_bps: fees.taker },
+        });
+      } catch (err) {
+        send('error', { message: err?.message || 'Stream error' });
+      }
+    };
+
+    const heartbeat = setInterval(() => send('ping', { ts: Date.now() }), 15000);
+    const interval = setInterval(pushSnapshot, 2000);
+    pushSnapshot();
+
+    req.on('close', () => {
+      closed = true;
+      clearInterval(interval);
+      clearInterval(heartbeat);
+      res.end();
     });
   } catch (err) {
     next(err);
@@ -3835,7 +4088,8 @@ app.get('/spot/candles', walletLimiter, async (req, res, next) => {
     const intervalSeconds = intervalInfo.seconds;
     const maxPoints = limit;
     const sinceDate = new Date(Date.now() - intervalSeconds * maxPoints * 1000);
-    const fetchLimit = Math.min(maxPoints * 3, 1500);
+    const { candleFetchCap } = await readSpotRiskSettings();
+    const fetchLimit = Math.min(maxPoints * 3, candleFetchCap);
 
     const [tradeRows] = await pool.query(
       `SELECT price_wei, base_amount_wei, created_at
@@ -4085,11 +4339,11 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       }
     }
 
-    let feeBps = 0n;
-    try {
-      const feeVal = await getPlatformSettingValue('spot_trade_fee_bps', '50', conn);
-      feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
-    } catch {}
+    const feeSettings = await readSpotFeeBps(conn);
+    const riskSettings = await readSpotRiskSettings(conn);
+    const makerFeeBps = clampBps(BigInt(feeSettings.maker || 0));
+    const takerFeeBps = clampBps(BigInt(feeSettings.taker || 0));
+    const topOfBook = await getSpotTopOfBook(conn, market.id, { forUpdate: true });
 
     const baseAsset = market.base_asset;
     const quoteAsset = market.quote_asset;
@@ -4115,7 +4369,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     if (side === 'buy') {
       if (type === 'limit') {
         const quoteWithoutFee = computeQuoteAmount(amountWei, priceWei);
-        const feeAmount = (quoteWithoutFee * feeBps) / 10000n;
+        const feeAmount = (quoteWithoutFee * makerFeeBps) / 10000n;
         reservedQuote = quoteWithoutFee + feeAmount;
         if (quoteBalance < reservedQuote) {
           await conn.rollback();
@@ -4146,6 +4400,14 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       ]);
     }
 
+    if (type === 'market') {
+      const bestReference = side === 'buy' ? topOfBook.ask : topOfBook.bid;
+      if (!bestReference || bestReference <= 0n) {
+        await conn.rollback();
+        return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
+      }
+    }
+
     const [insert] = await conn.query(
       'INSERT INTO spot_orders (market_id, user_id, side, type, price_wei, base_amount_wei, quote_amount_wei, remaining_base_wei, remaining_quote_wei, fee_bps, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
       [
@@ -4158,7 +4420,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         side === 'buy' && type === 'limit' ? reservedQuote.toString() : '0',
         amountWei.toString(),
         side === 'buy' && type === 'limit' ? reservedQuote.toString() : '0',
-        Number(feeBps),
+        Number(type === 'limit' ? makerFeeBps : takerFeeBps),
         'open',
       ]
     );
@@ -4173,10 +4435,32 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       remainingBase: amountWei,
       remainingQuote: side === 'buy' && type === 'limit' ? reservedQuote : 0n,
       availableQuote,
-      feeBps,
+      feeBps: takerFeeBps,
     };
 
     const matchResult = await matchSpotOrder(conn, market, taker);
+
+    if (type === 'market' && matchResult.filledBase > 0n) {
+      const averagePriceWei = matchResult.averagePriceWei;
+      const referencePrice = side === 'buy' ? topOfBook.ask : topOfBook.bid;
+      if (!referencePrice || referencePrice <= 0n) {
+        await conn.rollback();
+        return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Orderbook reference price missing' });
+      }
+      const slippageBps = computeRelativeBps(averagePriceWei, referencePrice);
+      if (slippageBps > riskSettings.maxSlippageBps) {
+        await conn.rollback();
+        return next({ status: 400, code: 'SLIPPAGE_EXCEEDED', message: 'Order exceeds max slippage limit' });
+      }
+      const lastTradePrice = await getSpotLastTradePriceWei(conn, market.id);
+      if (lastTradePrice && lastTradePrice > 0n) {
+        const deviationBps = computeRelativeBps(averagePriceWei, lastTradePrice);
+        if (deviationBps > riskSettings.maxDeviationBps) {
+          await conn.rollback();
+          return next({ status: 400, code: 'PRICE_DEVIATION_EXCEEDED', message: 'Order deviates from reference price' });
+        }
+      }
+    }
 
     let orderStatus = 'open';
     if (taker.remainingBase <= 0n) orderStatus = 'filled';
