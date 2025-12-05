@@ -1534,7 +1534,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
 
 const TransferSchema = z.object({
   to_user_id: z.coerce.number().int().positive(),
-  asset: z.enum(['BNB', 'ETH', 'USDC', 'USDT']),
+  asset: z.enum(['BNB', 'ETH', 'USDC', 'USDT', 'ELTX']),
   amount: z.string(),
 });
 
@@ -3758,7 +3758,10 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     const fromUserId = await requireUser(req);
     const { to_user_id, asset, amount } = TransferSchema.parse(req.body);
     if (to_user_id === fromUserId) throw { status: 400, message: 'Cannot transfer to self' };
-    const meta = asset === 'BNB' || asset === 'ETH' ? { decimals: 18 } : tokenMetaBySymbol[asset];
+    const meta =
+      asset === 'BNB' || asset === 'ETH'
+        ? { decimals: 18 }
+        : tokenMetaBySymbol[asset] || (asset === ELTX_SYMBOL ? { decimals: getSymbolDecimals(asset) } : null);
     if (!meta) throw { status: 400, message: 'Unsupported asset' };
     let amtWei;
     try {
