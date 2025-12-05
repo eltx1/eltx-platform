@@ -1036,6 +1036,40 @@ function computeRelativeBps(value, reference) {
   return mulDiv(diff, 10000n, reference);
 }
 
+async function estimateSpotMarketFill(conn, market, { side, baseAmountWei }) {
+  const result = { filledBase: 0n, totalQuote: 0n, averagePriceWei: 0n };
+  const [rows] = await conn.query(
+    `SELECT price_wei, remaining_base_wei
+       FROM spot_orders
+      WHERE market_id=? AND side=? AND status='open'
+      ORDER BY ${side === 'buy' ? 'price_wei ASC, id ASC' : 'price_wei DESC, id ASC'}
+      LIMIT 200`,
+    [market.id, side === 'buy' ? 'sell' : 'buy']
+  );
+
+  let remainingBase = baseAmountWei;
+  for (const row of rows) {
+    if (remainingBase <= 0n) break;
+    const levelBase = bigIntFromValue(row.remaining_base_wei);
+    const priceWei = BigInt(row.price_wei || 0);
+    if (levelBase <= 0n || priceWei <= 0n) continue;
+
+    const tradeBase = remainingBase < levelBase ? remainingBase : levelBase;
+    const quoteWithoutFee = computeQuoteAmount(tradeBase, priceWei);
+    if (tradeBase <= 0n || quoteWithoutFee <= 0n) continue;
+
+    result.filledBase += tradeBase;
+    result.totalQuote += quoteWithoutFee;
+    remainingBase -= tradeBase;
+  }
+
+  if (result.filledBase > 0n) {
+    result.averagePriceWei = mulDiv(result.totalQuote, PRICE_SCALE, result.filledBase);
+  }
+
+  return result;
+}
+
 async function readSpotRiskSettings(conn = pool) {
   const maxSlippage = await getPlatformSettingValue(
     'spot_max_slippage_bps',
@@ -1434,6 +1468,10 @@ const SpotOrderSchema = z.object({
   type: z.enum(['limit', 'market']),
   amount: z.string().min(1),
   price: z.string().optional(),
+  time_in_force: z.preprocess(
+    (v) => (typeof v === 'string' ? v.toLowerCase() : v),
+    z.enum(['gtc', 'ioc', 'fok']).default('gtc')
+  ),
 });
 
 const SpotOrderbookSchema = z.object({
@@ -4289,7 +4327,9 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
   let conn;
   try {
     const userId = await requireUser(req);
-    const { market: rawMarket, side, type, amount, price } = SpotOrderSchema.parse(req.body);
+    const { market: rawMarket, side, type, amount, price, time_in_force } = SpotOrderSchema.parse(req.body);
+    let timeInForce = (time_in_force || 'gtc').toLowerCase();
+    if (type === 'market' && timeInForce === 'gtc') timeInForce = 'ioc';
     const marketSymbol = normalizeMarketSymbol(rawMarket);
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -4406,6 +4446,29 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         await conn.rollback();
         return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
       }
+
+      const estimate = await estimateSpotMarketFill(conn, market, { side, baseAmountWei: amountWei });
+      if (estimate.filledBase <= 0n) {
+        await conn.rollback();
+        return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
+      }
+      if (timeInForce === 'fok' && estimate.filledBase < amountWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'FOK_INCOMPLETE', message: 'Order could not be fully filled immediately' });
+      }
+      const expectedSlippageBps = computeRelativeBps(estimate.averagePriceWei, bestReference);
+      if (expectedSlippageBps > riskSettings.maxSlippageBps) {
+        await conn.rollback();
+        return next({ status: 400, code: 'SLIPPAGE_EXCEEDED', message: 'Expected slippage exceeds max limit' });
+      }
+      const lastTradePrice = await getSpotLastTradePriceWei(conn, market.id);
+      if (lastTradePrice && lastTradePrice > 0n) {
+        const expectedDeviationBps = computeRelativeBps(estimate.averagePriceWei, lastTradePrice);
+        if (expectedDeviationBps > riskSettings.maxDeviationBps) {
+          await conn.rollback();
+          return next({ status: 400, code: 'PRICE_DEVIATION_EXCEEDED', message: 'Order deviates from reference price' });
+        }
+      }
     }
 
     const [insert] = await conn.query(
@@ -4436,9 +4499,15 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       remainingQuote: side === 'buy' && type === 'limit' ? reservedQuote : 0n,
       availableQuote,
       feeBps: takerFeeBps,
+      timeInForce,
     };
 
     const matchResult = await matchSpotOrder(conn, market, taker);
+
+    if (timeInForce === 'fok' && matchResult.filledBase < amountWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'FOK_INCOMPLETE', message: 'Order could not be fully filled immediately' });
+    }
 
     if (type === 'market' && matchResult.filledBase > 0n) {
       const averagePriceWei = matchResult.averagePriceWei;
@@ -4462,11 +4531,12 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       }
     }
 
+    const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
     let orderStatus = 'open';
-    if (taker.remainingBase <= 0n) orderStatus = 'filled';
-    if (type === 'market') {
-      if (matchResult.filledBase > 0n) orderStatus = 'filled';
-      else orderStatus = 'cancelled';
+    if (isImmediateOrCancel) {
+      orderStatus = matchResult.filledBase > 0n ? 'filled' : 'cancelled';
+    } else if (taker.remainingBase <= 0n) {
+      orderStatus = 'filled';
     }
 
     let remainingQuote = taker.remainingQuote;
@@ -4514,6 +4584,11 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         );
       }
       quoteAmountRecord = matchResult.receivedQuote + matchResult.takerFee;
+    }
+
+    if (isImmediateOrCancel) {
+      taker.remainingBase = 0n;
+      remainingQuote = 0n;
     }
 
     await conn.query('UPDATE spot_orders SET remaining_base_wei=?, remaining_quote_wei=?, status=?, quote_amount_wei=? WHERE id=?', [
