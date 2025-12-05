@@ -87,7 +87,7 @@ interface StripeStatusResponse {
   };
 }
 
-type FeeSettings = { swap_fee_bps: number; spot_trade_fee_bps: number };
+type FeeSettings = { swap_fee_bps: number; spot_trade_fee_bps: number; transfer_fee_bps: number };
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot'; asset: string; amount: string; amount_wei: string; entries: number };
 
@@ -1384,14 +1384,15 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
 function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<FeeSettings>({ swap_fee_bps: 0, spot_trade_fee_bps: 0 });
+  const [settings, setSettings] = useState<FeeSettings>({ swap_fee_bps: 0, spot_trade_fee_bps: 0, transfer_fee_bps: 0 });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
-  const [form, setForm] = useState({ swap: '0.50', spot: '0.50' });
+  const [form, setForm] = useState({ swap: '0.50', spot: '0.50', transfer: '0.00' });
 
   const syncFormWithSettings = useCallback((next: FeeSettings) => {
     setForm({
       swap: (next.swap_fee_bps / 100).toFixed(2),
       spot: (next.spot_trade_fee_bps / 100).toFixed(2),
+      transfer: (next.transfer_fee_bps / 100).toFixed(2),
     });
   }, []);
 
@@ -1435,14 +1436,16 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     const payload: Record<string, unknown> = {};
     const swapBps = parsePercentToBps(form.swap);
     const spotBps = parsePercentToBps(form.spot);
+    const transferBps = parsePercentToBps(form.transfer);
 
-    if (swapBps === null || spotBps === null) {
+    if (swapBps === null || spotBps === null || transferBps === null) {
       onNotify('Enter valid percentage values between 0 and 100', 'error');
       return;
     }
 
     if (swapBps !== settings.swap_fee_bps) payload.swap_fee_bps = swapBps;
     if (spotBps !== settings.spot_trade_fee_bps) payload.spot_trade_fee_bps = spotBps;
+    if (transferBps !== settings.transfer_fee_bps) payload.transfer_fee_bps = transferBps;
     if (!Object.keys(payload).length) {
       onNotify('No fee changes to save');
       return;
@@ -1521,7 +1524,7 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <StatCard
               title="Swap commission"
               value={`${(settings.swap_fee_bps / 100).toFixed(2)}%`}
@@ -1534,12 +1537,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
               subtitle="Flat fee for both sides of each trade"
               icon={DollarSign}
             />
+            <StatCard
+              title="User transfers"
+              value={`${(settings.transfer_fee_bps / 100).toFixed(2)}%`}
+              subtitle="Deducted once per peer-to-peer transfer"
+              icon={Users}
+            />
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h4 className="text-md font-semibold">Update fees</h4>
             <p className="mt-1 text-sm text-white/60">Values are percentages; 0.50% equals 50 bps.</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
               <div>
                 <label className="text-xs uppercase text-white/60">Swap fee (%)</label>
                 <input
@@ -1561,6 +1570,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                   step={0.01}
                   value={form.spot}
                   onChange={(e) => setForm((prev) => ({ ...prev, spot: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Transfer fee (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={form.transfer}
+                  onChange={(e) => setForm((prev) => ({ ...prev, transfer: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
                 />
               </div>
