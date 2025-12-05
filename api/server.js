@@ -1093,6 +1093,57 @@ async function readSpotRiskSettings(conn = pool) {
   };
 }
 
+async function readSpotOrderbookVersion(conn, marketRow) {
+  const [rows] = await conn.query(
+    `SELECT UNIX_TIMESTAMP(updated_at) * 1000 AS updated_ms, id
+       FROM spot_orders
+       WHERE market_id = ?
+       ORDER BY updated_at DESC, id DESC
+       LIMIT 1`,
+    [marketRow.id]
+  );
+  if (!rows.length) return { ts: 0, id: 0 };
+  return { ts: Number(rows[0].updated_ms) || 0, id: Number(rows[0].id) || 0 };
+}
+
+function formatSpotTrade(row, marketRow) {
+  return {
+    id: row.id,
+    price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
+    price_wei: row.price_wei?.toString() || '0',
+    base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
+    base_amount_wei: row.base_amount_wei?.toString() || '0',
+    quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
+    quote_amount_wei: row.quote_amount_wei?.toString() || '0',
+    taker_side: row.taker_side,
+    created_at: row.created_at,
+  };
+}
+
+function formatSpotOrderDelta(row, marketRow) {
+  const priceWei = BigInt(row.price_wei || 0);
+  const remainingBaseWei = bigIntFromValue(row.remaining_base_wei);
+  const remainingQuoteWei = bigIntFromValue(row.remaining_quote_wei);
+  const createdAt = new Date(row.created_at);
+  const updatedAt = new Date(row.updated_at);
+  const isInsert = createdAt.getTime() === updatedAt.getTime();
+  const action = row.status === 'open' ? (isInsert ? 'insert' : 'update') : 'cancel';
+
+  return {
+    id: row.id,
+    side: row.side,
+    status: row.status,
+    action,
+    price: priceWei > 0n ? trimDecimal(formatUnitsStr(priceWei.toString(), 18)) : null,
+    price_wei: priceWei.toString(),
+    remaining_base_amount: trimDecimal(formatUnitsStr(remainingBaseWei.toString(), marketRow.base_decimals)),
+    remaining_base_wei: remainingBaseWei.toString(),
+    remaining_quote_amount: trimDecimal(formatUnitsStr(remainingQuoteWei.toString(), marketRow.quote_decimals)),
+    remaining_quote_wei: remainingQuoteWei.toString(),
+    updated_at: row.updated_at,
+  };
+}
+
 async function readSpotOrderbookSnapshot(conn, marketRow) {
   const [bidRows] = await conn.query(
     `SELECT price_wei, SUM(remaining_base_wei) AS base_total
@@ -1133,22 +1184,56 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
       quote_amount_wei: quoteWei.toString(),
     };
   };
-  const trades = tradeRows.map((row) => ({
-    id: row.id,
-    price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
-    price_wei: row.price_wei?.toString() || '0',
-    base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
-    base_amount_wei: row.base_amount_wei?.toString() || '0',
-    quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
-    quote_amount_wei: row.quote_amount_wei?.toString() || '0',
-    taker_side: row.taker_side,
-    created_at: row.created_at,
-  }));
+  const trades = tradeRows.map((row) => formatSpotTrade(row, marketRow));
+  const orderbookVersion = await readSpotOrderbookVersion(conn, marketRow);
+  const lastTradeId = trades.length ? trades[0].id : 0;
 
   return {
+    orderbookVersion,
+    lastTradeId,
     orderbook: { bids: bidRows.map(formatLevel), asks: askRows.map(formatLevel) },
     trades,
   };
+}
+
+async function readSpotOrderbookDeltas(conn, marketRow, sinceVersion) {
+  const sinceTs = Number(sinceVersion?.ts || 0);
+  const sinceId = Number(sinceVersion?.id || 0);
+  const [rows] = await conn.query(
+    `SELECT id, side, price_wei, remaining_base_wei, remaining_quote_wei, status, created_at, updated_at
+       FROM spot_orders
+       WHERE market_id=?
+         AND (
+           updated_at > FROM_UNIXTIME(? / 1000)
+           OR (updated_at = FROM_UNIXTIME(? / 1000) AND id > ?)
+         )
+       ORDER BY updated_at ASC, id ASC
+       LIMIT 200`,
+    [marketRow.id, sinceTs, sinceTs, sinceId]
+  );
+  const deltas = rows.map((row) => formatSpotOrderDelta(row, marketRow));
+  let version = sinceVersion || { ts: 0, id: 0 };
+  if (rows.length) {
+    const lastRow = rows[rows.length - 1];
+    version = { ts: new Date(lastRow.updated_at).getTime(), id: lastRow.id };
+  } else {
+    version = await readSpotOrderbookVersion(conn, marketRow);
+  }
+  return { deltas, version };
+}
+
+async function readSpotTradeDeltas(conn, marketRow, lastTradeId = 0) {
+  const [rows] = await conn.query(
+    `SELECT id, price_wei, base_amount_wei, quote_amount_wei, taker_side, created_at
+       FROM spot_trades
+       WHERE market_id=? AND id > ?
+       ORDER BY id ASC
+       LIMIT 50`,
+    [marketRow.id, lastTradeId]
+  );
+  const trades = rows.map((row) => formatSpotTrade(row, marketRow));
+  const maxId = trades.length ? trades[trades.length - 1].id : lastTradeId;
+  return { trades, lastTradeId: maxId };
 }
 
 async function readSpotOrdersForUser(conn, userId, marketRow) {
@@ -1476,6 +1561,13 @@ const SpotOrderSchema = z.object({
 
 const SpotOrderbookSchema = z.object({
   market: z.string().min(3).max(32),
+});
+
+const SpotDeltaSchema = z.object({
+  market: z.string().min(3).max(32),
+  last_trade_id: z.coerce.number().int().nonnegative().default(0),
+  orderbook_version_ts: z.coerce.number().nonnegative().default(0),
+  orderbook_version_id: z.coerce.number().int().nonnegative().default(0),
 });
 
 const SpotOrdersQuerySchema = z.object({
@@ -4029,7 +4121,7 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
     if (!marketRow || !marketRow.active)
       return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
 
-    const { orderbook, trades } = await readSpotOrderbookSnapshot(pool, marketRow);
+    const { orderbook, trades, orderbookVersion, lastTradeId } = await readSpotOrderbookSnapshot(pool, marketRow);
 
     res.json({
       ok: true,
@@ -4040,6 +4132,40 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
       },
       orderbook,
       trades,
+      orderbook_version: orderbookVersion,
+      last_trade_id: lastTradeId,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/spot/changes', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const query = SpotDeltaSchema.parse({
+      market: req.query.market,
+      last_trade_id: req.query.last_trade_id,
+      orderbook_version_ts: req.query.orderbook_version_ts,
+      orderbook_version_id: req.query.orderbook_version_id,
+    });
+    const marketRow = await getSpotMarket(pool, query.market);
+    if (!marketRow || !marketRow.active)
+      return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not found' });
+
+    const version = { ts: query.orderbook_version_ts, id: query.orderbook_version_id };
+    const [orderbookDelta, tradeDelta] = await Promise.all([
+      readSpotOrderbookDeltas(pool, marketRow, version),
+      readSpotTradeDeltas(pool, marketRow, query.last_trade_id),
+    ]);
+
+    res.json({
+      ok: true,
+      market: { symbol: marketRow.symbol, base_asset: marketRow.base_asset, quote_asset: marketRow.quote_asset },
+      orderbook_version: orderbookDelta.version,
+      orderbook_deltas: orderbookDelta.deltas,
+      last_trade_id: tradeDelta.lastTradeId,
+      trades: tradeDelta.trades,
     });
   } catch (err) {
     next(err);
@@ -4060,6 +4186,9 @@ app.get('/spot/stream', walletLimiter, async (req, res, next) => {
     res.flushHeaders?.();
 
     let closed = false;
+    let lastOrderbookVersion = { ts: 0, id: 0 };
+    let lastTradeId = 0;
+
     const send = (type, payload) => {
       if (closed) return;
       res.write(`event: ${type}\n`);
@@ -4074,12 +4203,16 @@ app.get('/spot/stream', walletLimiter, async (req, res, next) => {
           readUserBalancesForAssets(pool, userId, [marketRow.base_asset, marketRow.quote_asset]),
           readSpotFeeBps(pool),
         ]);
-        send('update', {
+        lastOrderbookVersion = snapshot.orderbookVersion;
+        lastTradeId = snapshot.lastTradeId;
+        send('snapshot', {
           market: {
             symbol: marketRow.symbol,
             base_asset: marketRow.base_asset,
             quote_asset: marketRow.quote_asset,
           },
+          orderbook_version: lastOrderbookVersion,
+          last_trade_id: lastTradeId,
           orderbook: snapshot.orderbook,
           trades: snapshot.trades,
           orders,
@@ -4091,9 +4224,54 @@ app.get('/spot/stream', walletLimiter, async (req, res, next) => {
       }
     };
 
-    const heartbeat = setInterval(() => send('ping', { ts: Date.now() }), 15000);
-    const interval = setInterval(pushSnapshot, 2000);
-    pushSnapshot();
+    const pushDeltas = async () => {
+      try {
+        const [orderbookDelta, tradeDelta] = await Promise.all([
+          readSpotOrderbookDeltas(pool, marketRow, lastOrderbookVersion),
+          readSpotTradeDeltas(pool, marketRow, lastTradeId),
+        ]);
+
+        const hasOrderbookChange = orderbookDelta.deltas.length > 0;
+        const hasTradeChange = tradeDelta.trades.length > 0;
+
+        if (hasOrderbookChange) {
+          lastOrderbookVersion = orderbookDelta.version;
+          send('orderbook_delta', {
+            version: lastOrderbookVersion,
+            deltas: orderbookDelta.deltas,
+          });
+        }
+
+        if (hasTradeChange) {
+          lastTradeId = tradeDelta.lastTradeId;
+          send('trades_delta', {
+            last_trade_id: lastTradeId,
+            trades: tradeDelta.trades,
+          });
+        }
+
+        if (hasOrderbookChange || hasTradeChange) {
+          const [orders, balances] = await Promise.all([
+            readSpotOrdersForUser(pool, userId, marketRow),
+            readUserBalancesForAssets(pool, userId, [marketRow.base_asset, marketRow.quote_asset]),
+          ]);
+          send('account', { orders, balances });
+        }
+      } catch (err) {
+        send('error', { message: err?.message || 'Stream error' });
+      }
+    };
+
+    const heartbeatMs = Number(
+      (await getPlatformSettingValue('spot_stream_heartbeat_ms', '12000').catch(() => '12000')) || '12000'
+    );
+    const deltaIntervalMs = Number(
+      (await getPlatformSettingValue('spot_stream_delta_interval_ms', '1200').catch(() => '1200')) || '1200'
+    );
+
+    const heartbeat = setInterval(() => send('ping', { ts: Date.now() }), heartbeatMs);
+    const interval = setInterval(pushDeltas, deltaIntervalMs);
+    await pushSnapshot();
 
     req.on('close', () => {
       closed = true;

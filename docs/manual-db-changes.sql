@@ -1,23 +1,23 @@
--- Ensure wallet foreign keys use INT to match users.id
+-- Wallet/user foreign key alignment and fee fields
 ALTER TABLE wallet_addresses MODIFY COLUMN user_id INT NOT NULL;
 ALTER TABLE wallet_deposits MODIFY COLUMN user_id INT NOT NULL;
 ALTER TABLE user_balances MODIFY COLUMN user_id INT NOT NULL;
 ALTER TABLE trade_quotes MODIFY COLUMN user_id INT NOT NULL;
 ALTER TABLE trade_swaps MODIFY COLUMN user_id INT NOT NULL;
 
--- Extend trade quotes with fee support
+-- Trade quotes fee support
 ALTER TABLE trade_quotes
   ADD COLUMN IF NOT EXISTS fee_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER spread_bps,
   ADD COLUMN IF NOT EXISTS fee_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER fee_bps,
   ADD COLUMN IF NOT EXISTS fee_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER fee_asset;
 
--- Extend trade swaps to store gross amount and fee attribution
+-- Trade swaps fee attribution
 ALTER TABLE trade_swaps
   ADD COLUMN IF NOT EXISTS gross_eltx_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER price_wei,
   ADD COLUMN IF NOT EXISTS fee_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER gross_eltx_amount_wei,
   ADD COLUMN IF NOT EXISTS fee_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER fee_asset;
 
--- Liquidity pool registry for swaps
+-- Liquidity pool registry
 CREATE TABLE IF NOT EXISTS swap_liquidity_pools (
   asset VARCHAR(32) NOT NULL PRIMARY KEY,
   asset_decimals INT UNSIGNED NOT NULL,
@@ -26,7 +26,6 @@ CREATE TABLE IF NOT EXISTS swap_liquidity_pools (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Seed default pools if missing
 INSERT IGNORE INTO swap_liquidity_pools (asset, asset_decimals, asset_reserve_wei, eltx_reserve_wei) VALUES
   ('USDT', 18, 1000000000000000000000000, 1000000000000000000000000),
   ('USDC', 18, 1000000000000000000000000, 1000000000000000000000000);
@@ -47,12 +46,11 @@ CREATE TABLE IF NOT EXISTS spot_markets (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Seed ELTX spot markets
 INSERT IGNORE INTO spot_markets (symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount) VALUES
   ('ELTX/USDT', 'ELTX', 18, 'USDT', 18, 0.0001, 0.1),
   ('ELTX/USDC', 'ELTX', 18, 'USDC', 18, 0.0001, 0.1);
 
--- Order book entries
+-- Spot order book entries
 CREATE TABLE IF NOT EXISTS spot_orders (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   market_id INT UNSIGNED NOT NULL,
@@ -76,7 +74,7 @@ CREATE TABLE IF NOT EXISTS spot_orders (
   CONSTRAINT fk_spot_orders_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Trade executions
+-- Spot trade executions
 CREATE TABLE IF NOT EXISTS spot_trades (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   market_id INT UNSIGNED NOT NULL,
@@ -110,9 +108,44 @@ CREATE TABLE IF NOT EXISTS platform_fees (
   INDEX idx_platform_fees_asset (asset)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Default fee configuration keys
 INSERT IGNORE INTO platform_settings (name, value) VALUES
   ('swap_fee_bps', '0'),
   ('spot_trade_fee_bps', '0'),
   ('spot_stream_heartbeat_ms', '12000'),
   ('spot_stream_delta_interval_ms', '1200');
+
+-- Wallet schema alignment
+ALTER TABLE wallet_addresses
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS wallet_index INT UNSIGNED NULL AFTER chain_id,
+  ADD COLUMN IF NOT EXISTS wallet_path VARCHAR(128) NULL AFTER wallet_index,
+  ADD COLUMN IF NOT EXISTS derivation_index INT UNSIGNED NOT NULL AFTER chain_id,
+  ADD UNIQUE KEY uniq_user_chain (user_id, chain_id),
+  ADD UNIQUE KEY uniq_wallet_index (chain_id, wallet_index),
+  ADD UNIQUE KEY uniq_addr (chain_id, address),
+  ADD INDEX idx_user (user_id),
+  MODIFY COLUMN user_id INT NOT NULL;
+
+UPDATE wallet_addresses SET wallet_index = derivation_index WHERE wallet_index IS NULL;
+UPDATE wallet_addresses SET wallet_path = CONCAT("m/44'/60'/0'/0/", wallet_index) WHERE wallet_path IS NULL AND wallet_index IS NOT NULL;
+ALTER TABLE wallet_addresses MODIFY wallet_index INT UNSIGNED NOT NULL;
+
+ALTER TABLE wallet_deposits
+  ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS token_symbol VARCHAR(32) NOT NULL DEFAULT 'BNB' AFTER address,
+  ADD COLUMN IF NOT EXISTS confirmations INT UNSIGNED NOT NULL DEFAULT 0 AFTER amount_wei,
+  ADD COLUMN IF NOT EXISTS source ENUM('worker','on_demand','stripe') NOT NULL DEFAULT 'worker' AFTER credited,
+  ADD COLUMN IF NOT EXISTS scanner_run_id VARCHAR(36) NULL AFTER source,
+  ADD COLUMN IF NOT EXISTS last_update_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at,
+  ADD INDEX IF NOT EXISTS idx_user_chain (user_id, chain_id),
+  ADD INDEX IF NOT EXISTS idx_addr (address),
+  MODIFY COLUMN user_id INT NOT NULL;
+
+ALTER TABLE wallet_deposits
+  MODIFY COLUMN source ENUM('worker','on_demand','stripe') NOT NULL DEFAULT 'worker';
+
+ALTER TABLE user_balances
+  DROP COLUMN IF EXISTS usd_balance,
+  DROP COLUMN IF EXISTS chain,
+  DROP COLUMN IF EXISTS status,
+  MODIFY COLUMN user_id INT NOT NULL;
