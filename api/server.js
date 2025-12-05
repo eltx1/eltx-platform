@@ -546,10 +546,14 @@ const AdminFeeUpdateSchema = z
   .object({
     swap_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     spot_trade_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    transfer_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
   })
-  .refine((data) => data.swap_fee_bps !== undefined || data.spot_trade_fee_bps !== undefined, {
-    message: 'At least one fee field must be provided',
-  });
+  .refine(
+    (data) => data.swap_fee_bps !== undefined || data.spot_trade_fee_bps !== undefined || data.transfer_fee_bps !== undefined,
+    {
+      message: 'At least one fee field must be provided',
+    }
+  );
 
 const AdminStakingPlanCreateSchema = z.object({
   name: z.string().min(2).max(32),
@@ -864,11 +868,14 @@ async function readAiUsageSummary(date, conn = pool) {
 async function readPlatformFeeSettings(conn = pool) {
   const swapVal = await getPlatformSettingValue('swap_fee_bps', '50', conn);
   const spotVal = await getPlatformSettingValue('spot_trade_fee_bps', '50', conn);
+  const transferVal = await getPlatformSettingValue('transfer_fee_bps', '0', conn);
   const swapFeeBps = clampBps(BigInt(Number.parseInt(swapVal, 10) || 0));
   const spotFeeBps = clampBps(BigInt(Number.parseInt(spotVal, 10) || 0));
+  const transferFeeBps = clampBps(BigInt(Number.parseInt(transferVal, 10) || 0));
   return {
     swap_fee_bps: Number(swapFeeBps),
     spot_trade_fee_bps: Number(spotFeeBps),
+    transfer_fee_bps: Number(transferFeeBps),
   };
 }
 
@@ -1773,6 +1780,8 @@ app.patch('/admin/fees', async (req, res, next) => {
       tasks.push(setPlatformSettingValue('swap_fee_bps', updates.swap_fee_bps.toString()));
     if (updates.spot_trade_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('spot_trade_fee_bps', updates.spot_trade_fee_bps.toString()));
+    if (updates.transfer_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('transfer_fee_bps', updates.transfer_fee_bps.toString()));
     await Promise.all(tasks);
     const [settings, balances] = await Promise.all([readPlatformFeeSettings(), readPlatformFeeBalances()]);
     res.json({ ok: true, settings, balances });
@@ -3167,6 +3176,8 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
 app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
+    const transferFeeVal = await getPlatformSettingValue('transfer_fee_bps', '0');
+    const transferFeeBps = Number(clampBps(BigInt(Number.parseInt(transferFeeVal, 10) || 0)));
     const [rows] = await pool.query(
       'SELECT asset, balance_wei FROM user_balances WHERE user_id=?',
       [userId]
@@ -3292,7 +3303,7 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       }
     }
 
-    res.json({ ok: true, assets });
+    res.json({ ok: true, assets, transfer_fee_bps: transferFeeBps });
   } catch (err) {
     next(err);
   }
@@ -3378,8 +3389,8 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     await conn.beginTransaction();
     const [target] = await conn.query('SELECT id FROM users WHERE id=? FOR UPDATE', [to_user_id]);
     if (!target.length) throw { status: 404, message: 'User not found' };
-    const [feeRows] = await conn.query("SELECT value FROM platform_settings WHERE name='transfer_fee_bps'");
-    const feeBps = feeRows.length ? parseInt(feeRows[0].value, 10) || 0 : 0;
+    const feeVal = await getPlatformSettingValue('transfer_fee_bps', '0', conn);
+    const feeBps = Number(clampBps(BigInt(Number.parseInt(feeVal, 10) || 0)));
     const feeWei = (amtWei * BigInt(feeBps)) / 10000n;
     const recvAmt = amtWei - feeWei;
     const [balRows] = await conn.query(

@@ -139,6 +139,9 @@ export const dict = {
       balance: 'Balance',
       insufficient: 'Insufficient balance',
       success: 'Transfer complete',
+      feeRate: 'Platform fee: {value}% per transfer',
+      estimatedFee: 'Estimated fee',
+      recipientGets: 'Recipient receives',
     },
     buy: {
       title: 'Buy ELTX',
@@ -601,6 +604,9 @@ export const dict = {
       balance: 'الرصيد',
       insufficient: 'الرصيد غير كافٍ',
       success: 'تم التحويل',
+      feeRate: 'رسوم التحويل: {value}٪ لكل عملية',
+      estimatedFee: 'الرسوم التقديرية',
+      recipientGets: 'صافي المستلم',
     },
     buy: {
       title: 'اشتري ELTX',

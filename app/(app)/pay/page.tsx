@@ -1,7 +1,7 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ethers } from 'ethers';
 import { useAuth } from '../../lib/auth';
@@ -42,18 +42,20 @@ export default function PayPage() {
   const [asset, setAsset] = useState('');
   const [amount, setAmount] = useState('');
   const [error, setError] = useState('');
+  const [transferFeeBps, setTransferFeeBps] = useState(0);
 
   useEffect(() => {
     if (user === null) router.replace('/login');
   }, [user, router]);
 
   useEffect(() => {
-    apiFetch<{ assets: Asset[] }>('/wallet/assets').then((res) => {
+    apiFetch<{ assets: Asset[]; transfer_fee_bps?: number }>('/wallet/assets').then((res) => {
       if (res.ok) {
         setAssets(res.data.assets);
         const preferred =
           res.data.assets.find((token) => token.symbol === 'BNB')?.symbol || res.data.assets[0]?.symbol || '';
         setAsset((prev) => prev || preferred);
+        setTransferFeeBps(Number(res.data.transfer_fee_bps ?? 0));
       }
     });
   }, []);
@@ -80,6 +82,18 @@ export default function PayPage() {
       setError(t.pay.insufficient);
     }
   }, [amount, selected, t.pay.insufficient]);
+
+  const feePreview = useMemo(() => {
+    if (!selected || !amount) return null;
+    try {
+      const amtWei = ethers.parseUnits(amount, selected.decimals);
+      const feeWei = (amtWei * BigInt(transferFeeBps)) / 10000n;
+      const netWei = amtWei - feeWei;
+      return { feeWei, netWei };
+    } catch {
+      return null;
+    }
+  }, [amount, selected, transferFeeBps]);
 
   const handleSubmit = async () => {
     if (!asset) return;
@@ -131,8 +145,23 @@ export default function PayPage() {
             className="w-full p-2 rounded bg-black/20 border border-white/20"
           />
           {selected && (
-            <div className="text-xs opacity-70">
-              {t.pay.balance}: {formatWei(selected.balance_wei, selected.decimals)}
+            <div className="text-xs opacity-70 space-y-1">
+              <div>
+                {t.pay.balance}: {formatWei(selected.balance_wei, selected.decimals)}
+              </div>
+              <div>
+                {t.pay.feeRate.replace('{value}', (transferFeeBps / 100).toFixed(2))}
+              </div>
+              {feePreview && (
+                <>
+                  <div>
+                    {t.pay.estimatedFee}: {formatWei(feePreview.feeWei.toString(), selected.decimals)} {selected.display_symbol}
+                  </div>
+                  <div>
+                    {t.pay.recipientGets}: {formatWei(feePreview.netWei.toString(), selected.decimals)} {selected.display_symbol}
+                  </div>
+                </>
+              )}
             </div>
           )}
           {error && <div className="text-xs text-red-500 mt-1">{error}</div>}
