@@ -7,8 +7,7 @@ export type ApiResponse<T> = {
   error?: string | null;
 };
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  const base = process.env.NEXT_PUBLIC_API_BASE;
-  if (!base) throw new Error('NEXT_PUBLIC_API_BASE is not defined');
+  const base = process.env.NEXT_PUBLIC_API_BASE || '';
   const url = `${base}${path}`;
   try {
     const res = await fetch(url, {
