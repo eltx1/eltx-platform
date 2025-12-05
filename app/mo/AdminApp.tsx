@@ -1083,9 +1083,20 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   const [plans, setPlans] = useState<any[]>([]);
   const [positions, setPositions] = useState<any[]>([]);
   const [status, setStatus] = useState<'active' | 'matured' | 'cancelled' | 'all'>('active');
+  const [activePositions, setActivePositions] = useState<any[]>([]);
   const [loadingPlans, setLoadingPlans] = useState(true);
   const [loadingPositions, setLoadingPositions] = useState(true);
+  const [loadingActivePositions, setLoadingActivePositions] = useState(true);
   const [settling, setSettling] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: '',
+    duration_days: '',
+    apr_bps: '',
+    stake_asset: '',
+    stake_decimals: '',
+    min_deposit: '',
+  });
 
   const loadPlans = useCallback(async () => {
     setLoadingPlans(true);
@@ -1105,6 +1116,14 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     },
     [onNotify]
   );
+
+  const loadActivePositions = useCallback(async () => {
+    setLoadingActivePositions(true);
+    const res = await apiFetch<{ positions: any[] }>('/admin/staking/positions?status=active');
+    if (res.ok) setActivePositions(res.data.positions);
+    else onNotify(res.error || 'Failed to load active positions', 'error');
+    setLoadingActivePositions(false);
+  }, [onNotify]);
 
   const settleAll = useCallback(async () => {
     setSettling(true);
@@ -1130,6 +1149,10 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     loadPositions(status);
   }, [status, loadPositions]);
 
+  useEffect(() => {
+    loadActivePositions();
+  }, [loadActivePositions]);
+
   const togglePlanActive = async (plan: any) => {
     const res = await apiFetch(`/admin/staking/plans/${plan.id}`, {
       method: 'PATCH',
@@ -1137,6 +1160,44 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     });
     if (res.ok) {
       onNotify('Plan updated', 'success');
+      loadPlans();
+      loadActivePositions();
+    } else {
+      onNotify(res.error || 'Failed to update plan', 'error');
+    }
+  };
+
+  const startEditing = (plan: any) => {
+    setEditingPlan(plan);
+    setEditForm({
+      name: plan.name || '',
+      duration_days: String(plan.duration_days ?? ''),
+      apr_bps: String(plan.apr_bps ?? ''),
+      stake_asset: plan.stake_asset || '',
+      stake_decimals: String(plan.stake_decimals ?? ''),
+      min_deposit: plan.min_deposit !== null && plan.min_deposit !== undefined ? String(plan.min_deposit) : '',
+    });
+  };
+
+  const updatePlan = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingPlan) return;
+
+    const res = await apiFetch(`/admin/staking/plans/${editingPlan.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: editForm.name,
+        duration_days: Number(editForm.duration_days || 0),
+        apr_bps: Number(editForm.apr_bps || 0),
+        stake_asset: editForm.stake_asset || 'ELTX',
+        stake_decimals: Number(editForm.stake_decimals || 18),
+        min_deposit: editForm.min_deposit === '' ? null : Number(editForm.min_deposit),
+      }),
+    });
+
+    if (res.ok) {
+      onNotify('Plan details updated', 'success');
+      setEditingPlan(null);
       loadPlans();
     } else {
       onNotify(res.error || 'Failed to update plan', 'error');
@@ -1172,6 +1233,7 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     if (res.ok) {
       onNotify('Position updated', 'success');
       loadPositions(status);
+      loadActivePositions();
     } else {
       onNotify(res.error || 'Failed to update position', 'error');
     }
@@ -1188,6 +1250,7 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       const count = res.data.summary?.length || 0;
       onNotify(count ? 'تمت تسوية المركز' : 'لا يوجد شيء لتسويته', 'success');
       loadPositions(status);
+      loadActivePositions();
     } else {
       onNotify(res.error || 'فشل التسوية', 'error');
     }
@@ -1247,6 +1310,97 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
             <RefreshCw className="h-3 w-3" /> Refresh
           </button>
         </div>
+        {editingPlan ? (
+          <form className="grid gap-3 border-b border-white/5 bg-black/30 p-4 text-sm md:grid-cols-3" onSubmit={updatePlan}>
+            <div className="md:col-span-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-white">Editing {editingPlan.name}</div>
+                <div className="text-xs text-white/60">Update plan name, APR, duration, asset and minimum deposit.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPlan(null)}
+                className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+              >
+                Cancel
+              </button>
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-white/60">Name</label>
+              <input
+                value={editForm.name}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+                required
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-2 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-white/60">Duration (days)</label>
+              <input
+                type="number"
+                min={1}
+                value={editForm.duration_days}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, duration_days: e.target.value }))}
+                required
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-2 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-white/60">APR (bps)</label>
+              <input
+                type="number"
+                min={0}
+                value={editForm.apr_bps}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, apr_bps: e.target.value }))}
+                required
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-2 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-white/60">Stake asset</label>
+              <input
+                value={editForm.stake_asset}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, stake_asset: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-2 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-white/60">Asset decimals</label>
+              <input
+                type="number"
+                min={0}
+                max={36}
+                value={editForm.stake_decimals}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, stake_decimals: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-2 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase text-white/60">Minimum deposit</label>
+              <input
+                value={editForm.min_deposit}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, min_deposit: e.target.value }))}
+                placeholder="Optional"
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-2 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
+            <div className="md:col-span-3 flex gap-2">
+              <button
+                type="submit"
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium transition hover:bg-blue-500"
+              >
+                Save changes
+              </button>
+              <button
+                type="button"
+                onClick={() => startEditing(editingPlan)}
+                className="rounded-lg border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:border-white/30 hover:text-white"
+              >
+                Reset values
+              </button>
+            </div>
+          </form>
+        ) : null}
         {loadingPlans ? (
           <div className="flex h-40 items-center justify-center">
             <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
@@ -1260,6 +1414,7 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">APR</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Min</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/10">
@@ -1281,11 +1436,89 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                         {plan.is_active ? 'Active' : 'Disabled'}
                       </button>
                     </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <button
+                          onClick={() => startEditing(plan)}
+                          className="rounded-full border border-white/10 px-3 py-1 text-white/70 transition hover:border-white/30 hover:text-white"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => setEditingPlan(null)}
+                          className="rounded-full border border-white/5 px-3 py-1 text-white/40 transition hover:border-white/20 hover:text-white/80"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
+          <div>
+            <h3 className="text-lg font-semibold">Active staking positions</h3>
+            <p className="text-sm text-white/60">Live customer stakes that are still accruing rewards.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+              {loadingActivePositions ? 'Loading…' : `${activePositions.length} active`}
+            </span>
+            <button
+              onClick={() => {
+                setStatus('active');
+                loadPositions('active');
+                loadActivePositions();
+              }}
+              className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+            >
+              View full list
+            </button>
+            <button
+              onClick={loadActivePositions}
+              className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+            >
+              <RefreshCw className="h-3 w-3" /> Refresh
+            </button>
+          </div>
+        </div>
+        {loadingActivePositions ? (
+          <div className="flex h-32 items-center justify-center">
+            <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+          </div>
+        ) : activePositions.length ? (
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full divide-y divide-white/10 text-sm">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">User</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Plan</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Amount</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Daily</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Ends</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {activePositions.map((position) => (
+                  <tr key={`active-${position.id}`}>
+                    <td className="px-3 py-2">#{position.user_id}</td>
+                    <td className="px-3 py-2">{position.plan_name}</td>
+                    <td className="px-3 py-2">{position.amount}</td>
+                    <td className="px-3 py-2">{position.daily_reward}</td>
+                    <td className="px-3 py-2">{position.end_date?.slice(0, 10)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="p-4 text-sm text-white/60">No active positions found.</div>
         )}
       </div>
 
