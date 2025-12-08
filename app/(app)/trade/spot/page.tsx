@@ -951,6 +951,7 @@ export default function SpotTradePage() {
               marketSymbol={selectedMarket}
               baseAsset={baseSymbol}
               quoteAsset={quoteSymbol}
+              pricePrecision={pricePrecision}
               title={t.spotTrade.chart.title}
               emptyLabel={t.spotTrade.chart.empty}
               trades={trades}

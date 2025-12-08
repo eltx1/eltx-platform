@@ -19,6 +19,7 @@ type SpotMarketChartProps = {
   marketSymbol?: string;
   baseAsset?: string | null;
   quoteAsset?: string | null;
+  pricePrecision?: number;
   title: string;
   emptyLabel: string;
   trades?: TradePoint[];
@@ -70,6 +71,7 @@ export default function SpotMarketChart({
   marketSymbol,
   baseAsset,
   quoteAsset,
+  pricePrecision = 6,
   title,
   emptyLabel,
   trades = [],
