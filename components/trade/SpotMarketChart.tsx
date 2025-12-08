@@ -1,15 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ColorType,
-  HistogramSeries,
-  CandlestickSeries,
-  IChartApi,
-  ISeriesApi,
-  Time,
-  createChart,
-} from 'lightweight-charts';
+import { AreaSeries, ColorType, HistogramSeries, IChartApi, ISeriesApi, Time, createChart } from 'lightweight-charts';
 import Decimal from 'decimal.js';
 import { dict, useLang } from '../../app/lib/i18n';
 
@@ -36,13 +28,10 @@ type SpotMarketChartProps = {
 
 type AggregatedPoint = {
   time: Time;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
+  value: number;
 };
 
-type VolumePoint = { time: Time; value: number; color: string };
+type VolumePoint = AggregatedPoint & { color: string };
 
 const DEFAULT_VOLUME_COLOR = 'rgba(148, 163, 184, 0.55)';
 
@@ -78,15 +67,6 @@ function formatUpdateTimestamp(timestamp?: number, locale?: string): string {
   });
 }
 
-function formatDisplayNumber(value: number | null, precision: number, locale: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—';
-  const dec = new Decimal(value);
-  const fixed = dec.toFixed(Math.min(Math.max(precision, 2), 12));
-  const trimmed = fixed.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-  if (Math.abs(value) < 0.0001) return trimmed;
-  return Number(trimmed).toLocaleString(locale, { maximumFractionDigits: Math.min(Math.max(precision, 2), 12) });
-}
-
 export default function SpotMarketChart({
   marketSymbol,
   baseAsset,
@@ -102,7 +82,7 @@ export default function SpotMarketChart({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const priceSeriesRef = useRef<ISeriesApi<'Candlestick', Time> | null>(null);
+  const priceSeriesRef = useRef<ISeriesApi<'Area', Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram', Time> | null>(null);
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
@@ -124,8 +104,6 @@ export default function SpotMarketChart({
     const withinWindow = sorted.filter((trade) => new Date(trade.created_at).getTime() >= cutoff);
     return withinWindow.length ? withinWindow : sorted;
   }, [timeframe, trades]);
-
-  const displayPrecision = Math.min(Math.max(pricePrecision, 2), 10);
 
   const chartData = useMemo(() => {
     if (!enabled || !filtered.length) {
@@ -200,26 +178,7 @@ export default function SpotMarketChart({
 
       const pointTime = Math.floor(bucketEnd / 1000) as Time;
 
-      if (bucketTrades.length) {
-        const opens = safeDecimal(bucketTrades[0].price).toNumber();
-        const closes = safeDecimal(bucketTrades[bucketTrades.length - 1].price).toNumber();
-        const highs = Math.max(...bucketTrades.map((t) => safeDecimal(t.price).toNumber()));
-        const lows = Math.min(...bucketTrades.map((t) => safeDecimal(t.price).toNumber()));
-        lastPrice = closes;
-        pricePoints.push({ time: pointTime, open: opens, high: highs, low: lows, close: closes });
-      } else if (pricePoints.length) {
-        const lastPoint = pricePoints[pricePoints.length - 1];
-        pricePoints.push({
-          time: pointTime,
-          open: lastPoint.close,
-          high: lastPoint.close,
-          low: lastPoint.close,
-          close: lastPoint.close,
-        });
-      } else {
-        pricePoints.push({ time: pointTime, open: lastPrice, high: lastPrice, low: lastPrice, close: lastPrice });
-      }
-
+      pricePoints.push({ time: pointTime, value: lastPrice });
       volumePoints.push({
         time: pointTime,
         value: netVolume.toNumber(),
@@ -227,10 +186,9 @@ export default function SpotMarketChart({
       });
     }
 
-    const highs = pricePoints.map((p) => p.high);
-    const lows = pricePoints.map((p) => p.low);
+    const highs = pricePoints.map((p) => p.value);
     const high = highs.length ? Math.max(...highs) : null;
-    const low = lows.length ? Math.min(...lows) : null;
+    const low = highs.length ? Math.min(...highs) : null;
     const vwap = totalVolume.gt(0) ? vwapNumerator.div(totalVolume).toNumber() : lastPrice;
 
     return {
@@ -253,23 +211,20 @@ export default function SpotMarketChart({
 
     const chart = createChart(containerRef.current, {
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#e2e8f0' },
-      rightPriceScale: { borderVisible: false, autoScale: true },
+      rightPriceScale: { borderVisible: false },
       leftPriceScale: { borderVisible: false, visible: false },
-      timeScale: { borderVisible: false, secondsVisible: false, fixLeftEdge: true, fixRightEdge: true },
+      timeScale: { borderVisible: false, secondsVisible: false },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.06)' },
-        horzLines: { color: 'rgba(255,255,255,0.06)' },
+        vertLines: { color: 'rgba(255,255,255,0.04)' },
+        horzLines: { color: 'rgba(255,255,255,0.04)' },
       },
       crosshair: { mode: 0 },
-      localization: { priceFormatter: (p: number) => p.toLocaleString(undefined, { maximumFractionDigits: displayPrecision }) },
     });
 
-    const area = chart.addSeries(CandlestickSeries, {
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
-      borderVisible: false,
+    const area = chart.addSeries(AreaSeries, {
+      lineColor: '#7dd3fc',
+      topColor: 'rgba(125, 211, 252, 0.35)',
+      bottomColor: 'rgba(14, 165, 233, 0.08)',
       priceLineVisible: false,
     });
     const histogram = chart.addSeries(HistogramSeries, {
@@ -300,14 +255,14 @@ export default function SpotMarketChart({
       priceSeriesRef.current = null;
       volumeSeriesRef.current = null;
     };
-  }, [displayPrecision]);
+  }, []);
 
   useEffect(() => {
     if (!chartRef.current || !priceSeriesRef.current || !volumeSeriesRef.current) return;
     priceSeriesRef.current.setData(chartData.pricePoints);
     volumeSeriesRef.current.setData(chartData.volumePoints);
     chartRef.current.timeScale().fitContent();
-  }, [chartData, displayPrecision]);
+  }, [chartData]);
 
   const timeframeButtons: { value: Timeframe; label: string }[] = [
     { value: '5m', label: t.spotTrade.chart.timeframes['5m'] },
@@ -355,7 +310,7 @@ export default function SpotMarketChart({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <div className="lg:col-span-3 relative min-h-[260px] h-[320px] sm:h-80 overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
+        <div className="lg:col-span-3 relative h-80 overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
           <div ref={containerRef} className="absolute inset-0" />
           {(!enabled || !chartData.pricePoints.length) && (
             <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{emptyLabel}</div>
@@ -366,19 +321,19 @@ export default function SpotMarketChart({
           <div className="rounded-lg bg-white/5 border border-white/10 p-3 text-xs space-y-1">
             <div className="flex justify-between">
               <span className="opacity-70">{t.spotTrade.chart.high}</span>
-              <span className="font-semibold">{formatDisplayNumber(chartData.stats.high, displayPrecision, locale)}</span>
+              <span className="font-semibold">{chartData.stats.high ?? '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="opacity-70">{t.spotTrade.chart.low}</span>
-              <span className="font-semibold">{formatDisplayNumber(chartData.stats.low, displayPrecision, locale)}</span>
+              <span className="font-semibold">{chartData.stats.low ?? '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="opacity-70">{t.spotTrade.chart.vwap}</span>
-              <span className="font-semibold">{formatDisplayNumber(chartData.stats.vwap, displayPrecision, locale)}</span>
+              <span className="font-semibold">{chartData.stats.vwap ? chartData.stats.vwap.toFixed(4) : '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="opacity-70">{t.spotTrade.lastPrice}</span>
-              <span className="font-semibold">{formatDisplayNumber(chartData.stats.lastPrice, displayPrecision, locale)}</span>
+              <span className="font-semibold">{chartData.stats.lastPrice ?? '—'}</span>
             </div>
           </div>
 
