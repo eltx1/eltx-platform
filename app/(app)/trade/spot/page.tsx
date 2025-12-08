@@ -953,6 +953,7 @@ export default function SpotTradePage() {
               quoteAsset={quoteSymbol}
               title={t.spotTrade.chart.title}
               emptyLabel={t.spotTrade.chart.empty}
+              trades={trades}
               enabled={!!selectedMarket}
             />
             <div className="bg-white/5 rounded-xl p-4 space-y-3">
