@@ -1,6 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import SectionCta from './SectionCta';
 
 const phases = [
   {
@@ -48,6 +49,13 @@ export default function Roadmap() {
             </motion.div>
           ))}
         </div>
+      </div>
+      <div className="max-w-4xl mx-auto mt-12 px-4">
+        <SectionCta
+          eyebrow="Next steps"
+          title="Move with our roadmap"
+          copy="Create an ELTX account to experience each phase as it ships, or sign in to track your progress across launches."
+        />
       </div>
     </section>
   );

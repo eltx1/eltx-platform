@@ -2,6 +2,7 @@
 
 import { Building2, Briefcase, User } from 'lucide-react';
 import { motion } from 'framer-motion';
+import SectionCta from './SectionCta';
 
 const data = [
   {
@@ -62,6 +63,12 @@ export default function Industries() {
             </motion.div>
           );
         })}
+      </div>
+      <div className="max-w-6xl mx-auto px-4">
+        <SectionCta
+          title="Choose the ELTX flow that fits you"
+          copy="Governments, teams, and individuals can open an account to move value securely. Log in if you already have access."
+        />
       </div>
     </section>
   );
