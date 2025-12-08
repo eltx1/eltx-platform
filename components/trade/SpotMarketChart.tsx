@@ -133,7 +133,7 @@ export default function SpotMarketChart({
           throw new Error('TradingView widget unavailable');
         }
 
-        const widget = window.TradingView.widget({
+        const widget = new window.TradingView.widget({
           symbol,
           interval: toTradingViewInterval(timeframe),
           container_id: containerId,
