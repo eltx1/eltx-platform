@@ -290,7 +290,7 @@ export default function SpotMarketChart({
           )}
         </div>
       </div>
-      <div className="relative h-72">
+      <div className="relative h-72 overflow-hidden rounded-lg border border-white/10 bg-black/40">
         <div ref={containerRef} className="absolute inset-0" />
         {(!enabled || !hasData) && !loading && !error && (
           <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">

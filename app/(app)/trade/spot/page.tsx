@@ -215,7 +215,6 @@ export default function SpotTradePage() {
   const [price, setPrice] = useState('');
   const [errorBanner, setErrorBanner] = useState('');
   const [slippageBps, setSlippageBps] = useState(getDefaultSpotSlippageBps());
-  const [chartActive, setChartActive] = useState(false);
   const [lastBalanceError, setLastBalanceError] = useState<string | null>(null);
 
   const amountInputRef = useRef<HTMLInputElement | null>(null);
@@ -242,14 +241,14 @@ export default function SpotTradePage() {
   }, [t.common.genericError]);
 
   const loadOrderbook = useCallback(
-    async (marketSymbol: string) => {
+    async (marketSymbol: string, options: { suppressError?: boolean } = {}) => {
       if (!marketSymbol) return;
       setLoadingBook(true);
       const params = new URLSearchParams({ market: marketSymbol });
       const res = await apiFetch<OrderbookResponse>(`/spot/orderbook?${params.toString()}`);
       setLoadingBook(false);
       if (!res.ok) {
-        setErrorBanner(res.error || t.common.genericError);
+        if (!options.suppressError) setErrorBanner(res.error || t.common.genericError);
         return;
       }
       setErrorBanner('');
@@ -260,12 +259,12 @@ export default function SpotTradePage() {
   );
 
   const loadOrders = useCallback(
-    async (marketSymbol: string) => {
+    async (marketSymbol: string, options: { suppressError?: boolean } = {}) => {
       if (!marketSymbol) return;
       const params = new URLSearchParams({ market: marketSymbol });
       const res = await apiFetch<{ orders: SpotOrder[]; trades: any[] }>(`/spot/orders?${params.toString()}`);
       if (!res.ok) {
-        setErrorBanner(res.error || t.common.genericError);
+        if (!options.suppressError) setErrorBanner(res.error || t.common.genericError);
         return;
       }
       setErrorBanner('');
@@ -287,11 +286,11 @@ export default function SpotTradePage() {
     [t.common.genericError, t.spotTrade.notifications.filled, toast]
   );
 
-  const loadBalances = useCallback(async () => {
+  const loadBalances = useCallback(async (options: { suppressError?: boolean } = {}) => {
     const res = await apiFetch<WalletAssetsResponse>('/wallet/assets');
     if (!res.ok) {
       const message = `${res.error || t.common.genericError}${res.data ? ` (${(res.data as any)?.error?.code || ''})` : ''}`.trim();
-      setErrorBanner(message);
+      if (!options.suppressError) setErrorBanner(message);
       setLastBalanceError(message);
       return;
     }
@@ -328,7 +327,7 @@ export default function SpotTradePage() {
   useEffect(() => {
     if (!selectedMarket || streamConnected) return;
     const interval = window.setInterval(() => {
-      loadOrderbook(selectedMarket);
+      loadOrderbook(selectedMarket, { suppressError: true });
     }, 2000);
     return () => window.clearInterval(interval);
   }, [selectedMarket, loadOrderbook, streamConnected]);
@@ -336,8 +335,8 @@ export default function SpotTradePage() {
   useEffect(() => {
     if (!selectedMarket || streamConnected) return;
     const interval = window.setInterval(() => {
-      loadOrders(selectedMarket);
-      loadBalances();
+      loadOrders(selectedMarket, { suppressError: true });
+      loadBalances({ suppressError: true });
     }, 5000);
     return () => window.clearInterval(interval);
   }, [selectedMarket, loadOrders, loadBalances, streamConnected]);
@@ -380,10 +379,6 @@ export default function SpotTradePage() {
     const unsubscribe = subscribeSpotSlippage((value) => setSlippageBps(value));
     return unsubscribe;
   }, []);
-
-  useEffect(() => {
-    setChartActive(trades.length > 0);
-  }, [trades]);
 
   const selectedMarketMeta = useMemo(() => markets.find((m) => m.symbol === selectedMarket) || null, [markets, selectedMarket]);
 
@@ -714,9 +709,12 @@ export default function SpotTradePage() {
       toast({ message: t.spotTrade.notifications.cancelledNoLiquidity, variant: 'error' });
     setAmount('');
     if (formType === 'limit') setPrice('');
-    loadOrderbook(selectedMarket);
-    loadOrders(selectedMarket);
-    loadBalances();
+    setErrorBanner('');
+    await Promise.all([
+      loadOrderbook(selectedMarket, { suppressError: true }),
+      loadOrders(selectedMarket, { suppressError: true }),
+      loadBalances({ suppressError: true }),
+    ]);
   };
 
   const handleCancel = async (id: number) => {
@@ -729,9 +727,11 @@ export default function SpotTradePage() {
       return;
     }
     toast({ message: t.spotTrade.notifications.cancelled, variant: 'success' });
-    loadOrderbook(selectedMarket);
-    loadOrders(selectedMarket);
-    loadBalances();
+    await Promise.all([
+      loadOrderbook(selectedMarket, { suppressError: true }),
+      loadOrders(selectedMarket, { suppressError: true }),
+      loadBalances({ suppressError: true }),
+    ]);
   };
 
   if (user === null) return null;
@@ -758,7 +758,6 @@ export default function SpotTradePage() {
                   setSelectedMarket(e.target.value);
                   setAmount('');
                   setPrice('');
-                  setChartActive(false);
                   setErrorBanner('');
                 }}
                 className="w-full p-2 rounded bg-black/20 border border-white/20 text-sm"
@@ -955,7 +954,7 @@ export default function SpotTradePage() {
               quoteAsset={quoteSymbol}
               title={t.spotTrade.chart.title}
               emptyLabel={t.spotTrade.chart.empty}
-              enabled={chartActive}
+              enabled={!!selectedMarket}
             />
             <div className="bg-white/5 rounded-xl p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
