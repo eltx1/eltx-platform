@@ -538,6 +538,56 @@ export default function SpotTradePage() {
     t.spotTrade.errors,
   ]);
 
+  const mapSpotOrderError = useCallback(
+    (code?: string, fallback?: string) => {
+      if (!code) return fallback || t.spotTrade.errors.failed;
+      switch (code) {
+        case 'MARKET_NOT_FOUND':
+          return t.spotTrade.errors.marketNotFound;
+        case 'PRICE_REQUIRED':
+          return t.spotTrade.errors.priceRequired;
+        case 'INVALID_AMOUNT':
+          return t.spotTrade.errors.invalidAmount;
+        case 'INVALID_PRICE':
+          return t.spotTrade.errors.invalidPrice;
+        case 'AMOUNT_TOO_SMALL':
+          return t.spotTrade.errors.amountTooSmall;
+        case 'INSUFFICIENT_BALANCE':
+          return t.spotTrade.errors.insufficientBalance;
+        case 'INSUFFICIENT_LIQUIDITY':
+        case 'NO_LIQUIDITY':
+          return t.spotTrade.errors.insufficientLiquidity;
+        case 'SLIPPAGE_EXCEEDED':
+          return t.spotTrade.errors.slippageExceeded;
+        case 'PRICE_DEVIATION_EXCEEDED':
+          return t.spotTrade.errors.priceDeviationExceeded;
+        case 'FOK_INCOMPLETE':
+          return t.spotTrade.errors.fokIncomplete;
+        case 'ORDER_NOT_FOUND':
+          return t.spotTrade.errors.orderNotFound;
+        case 'ORDER_NOT_OPEN':
+          return t.spotTrade.errors.orderNotOpen;
+        default:
+          return fallback || t.spotTrade.errors.failed;
+      }
+    },
+    [
+      t.spotTrade.errors.amountTooSmall,
+      t.spotTrade.errors.failed,
+      t.spotTrade.errors.fokIncomplete,
+      t.spotTrade.errors.insufficientBalance,
+      t.spotTrade.errors.insufficientLiquidity,
+      t.spotTrade.errors.invalidAmount,
+      t.spotTrade.errors.invalidPrice,
+      t.spotTrade.errors.marketNotFound,
+      t.spotTrade.errors.orderNotFound,
+      t.spotTrade.errors.orderNotOpen,
+      t.spotTrade.errors.priceDeviationExceeded,
+      t.spotTrade.errors.priceRequired,
+      t.spotTrade.errors.slippageExceeded,
+    ]
+  );
+
   const makerPercentLabel = useMemo(() => trimDecimal(new Decimal(fees.maker || 0).div(100).toFixed(2)), [fees.maker]);
   const takerPercentLabel = useMemo(() => trimDecimal(new Decimal(fees.taker || 0).div(100).toFixed(2)), [fees.taker]);
   const feeRateLabel = useMemo(
@@ -640,14 +690,9 @@ export default function SpotTradePage() {
     setPlacing(false);
     idempotencyKeyRef.current = null;
     if (!res.ok) {
-      const code = (res.data as any)?.error?.code;
-      const friendly =
-        code === 'INSUFFICIENT_LIQUIDITY'
-          ? t.spotTrade.errors.insufficientLiquidity
-          : code === 'INSUFFICIENT_BALANCE'
-          ? t.spotTrade.errors.insufficientBalance
-          : res.error || t.spotTrade.errors.failed;
-      const suffix = code && friendly === res.error ? ` (${code})` : '';
+      const code = (res.data as any)?.error?.code as string | undefined;
+      const friendly = mapSpotOrderError(code, res.error || undefined);
+      const suffix = code && friendly === (res.error || t.spotTrade.errors.failed) ? ` (${code})` : '';
       toast({ message: `${friendly}${suffix}`, variant: 'error' });
       return;
     }
@@ -665,8 +710,10 @@ export default function SpotTradePage() {
   const handleCancel = async (id: number) => {
     const res = await apiFetch<{ ok: boolean }>(`/spot/orders/${id}/cancel`, { method: 'POST' });
     if (!res.ok) {
-      const code = (res.data as any)?.error?.code;
-      toast({ message: `${res.error || t.common.genericError}${code ? ` (${code})` : ''}`, variant: 'error' });
+      const code = (res.data as any)?.error?.code as string | undefined;
+      const friendly = mapSpotOrderError(code, res.error || t.common.genericError);
+      const suffix = code && friendly === (res.error || t.common.genericError) ? ` (${code})` : '';
+      toast({ message: `${friendly}${suffix}`, variant: 'error' });
       return;
     }
     toast({ message: t.spotTrade.notifications.cancelled, variant: 'success' });
