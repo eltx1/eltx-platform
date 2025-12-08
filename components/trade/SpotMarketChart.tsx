@@ -93,20 +93,28 @@ export default function SpotMarketChart({
       setCandles([]);
       setError(null);
       latestRequestRef.current = '';
-      return;
+      return undefined;
     }
-    const key = `${marketSymbol}-${timeframe}`;
-    const cached = cacheRef.current[key];
-    const now = Date.now();
-    if (cached) {
-      setCandles(cached.data);
-      setLastUpdated(cached.fetchedAt);
-      if (now - cached.fetchedAt > CACHE_TTL_MS) {
+
+    const maybeLoadCandles = () => {
+      const key = `${marketSymbol}-${timeframe}`;
+      const cached = cacheRef.current[key];
+      const now = Date.now();
+
+      if (cached) {
+        setCandles(cached.data);
+        setLastUpdated(cached.fetchedAt);
+      }
+
+      if (!cached || now - cached.fetchedAt >= CACHE_TTL_MS) {
         fetchCandles(marketSymbol, timeframe);
       }
-      return;
-    }
-    fetchCandles(marketSymbol, timeframe);
+    };
+
+    maybeLoadCandles();
+
+    const refreshInterval = setInterval(maybeLoadCandles, Math.max(10_000, CACHE_TTL_MS / 2));
+    return () => clearInterval(refreshInterval);
   }, [marketSymbol, timeframe, fetchCandles, enabled]);
 
   const candlestickData = useMemo<CandlestickData<UTCTimestamp>[]>(() => {
