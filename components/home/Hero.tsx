@@ -5,12 +5,13 @@ import Image from 'next/image';
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { useAuth } from '../../app/lib/auth';
+import { LogIn, Sparkles, UserPlus } from 'lucide-react';
 
 export default function Hero() {
   const { user } = useAuth();
-  const primaryHref = user ? '/dashboard' : '/signup';
-  const primaryLabel = user ? 'Dashboard' : 'Create account / Sign in';
-  const secondaryHref = '#swap-eltx';
+  const signupHref = user ? '/dashboard' : '/signup';
+  const loginHref = user ? '/dashboard' : '/login';
+  const swapHref = '#swap-eltx';
   const [logoError, setLogoError] = useState(false);
   return (
     <section className="relative overflow-hidden text-white py-20 md:py-28">
@@ -63,17 +64,31 @@ export default function Hero() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
-            className="flex flex-col sm:flex-row gap-3 justify-center md:justify-start"
+            className="flex flex-col sm:flex-row flex-wrap gap-3 justify-center md:justify-start"
           >
             <Link
-              href={primaryHref}
-              className="px-6 py-3 rounded-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-500 text-white font-semibold shadow-lg shadow-purple-900/40 hover:opacity-90 hover:scale-[1.01] transition-transform"
+              href={signupHref}
+              className="group relative inline-flex items-center gap-3 rounded-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-500 px-6 py-3 text-base font-semibold shadow-lg shadow-purple-900/50 transition-transform hover:scale-105"
             >
-              {primaryLabel}
+              <span className="absolute inset-0 rounded-full bg-white/15 opacity-0 blur transition-opacity group-hover:opacity-100" />
+              <span className="relative inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
+                <UserPlus className="h-4 w-4" />
+              </span>
+              <span className="relative">{user ? 'Go to dashboard' : 'Create account'}</span>
+              <Sparkles className="relative h-4 w-4" />
             </Link>
             <Link
-              href={secondaryHref}
-              className="px-6 py-3 rounded-full border border-white/15 bg-white/10 text-white font-semibold hover:bg-white/20 transition-colors"
+              href={loginHref}
+              className="inline-flex items-center gap-3 rounded-full border border-white/15 bg-white/10 px-6 py-3 text-base font-semibold text-white shadow-inner shadow-black/30 transition hover:border-white/30 hover:bg-white/15"
+            >
+              <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/10">
+                <LogIn className="h-4 w-4" />
+              </span>
+              <span>{user ? 'Return to account' : 'Sign in'}</span>
+            </Link>
+            <Link
+              href={swapHref}
+              className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-6 py-3 text-base font-semibold text-white/90 shadow-inner shadow-black/40 transition hover:border-cyan-300/50 hover:text-white"
             >
               Buy ELTX now
             </Link>

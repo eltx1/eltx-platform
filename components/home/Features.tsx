@@ -2,6 +2,7 @@
 
 import { Shield, Zap, Network, Coins } from 'lucide-react';
 import { motion } from 'framer-motion';
+import SectionCta from './SectionCta';
 
 
 const data = [
@@ -49,6 +50,13 @@ export default function Features() {
             </motion.div>
           );
         })}
+      </div>
+      <div className="max-w-6xl mx-auto px-4 mt-10">
+        <SectionCta
+          eyebrow="Secure onboarding"
+          title="Ready to use ELTX features?"
+          copy="Sign up to unlock dashboard tracking, staking, and swaps. If you already created your account, sign in to continue."
+        />
       </div>
     </section>
   );

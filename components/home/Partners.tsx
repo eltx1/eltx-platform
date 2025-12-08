@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import Image from 'next/image';
+import SectionCta from './SectionCta';
 
 const partners = [
   {
@@ -77,6 +78,11 @@ export default function Partners() {
             </motion.div>
           ))}
         </div>
+        <SectionCta
+          eyebrow="Grow with us"
+          title="Start building on ELTX"
+          copy="Sign up to join our partner ecosystem or log in to keep collaborating with the networks already live."
+        />
       </div>
     </section>
   );

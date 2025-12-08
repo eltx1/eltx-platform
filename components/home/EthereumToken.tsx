@@ -2,6 +2,7 @@
 
 import { Copy, ExternalLink, Network } from 'lucide-react';
 import { useState } from 'react';
+import SectionCta from './SectionCta';
 
 const CONTRACT_ADDRESS = '0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c';
 
@@ -61,6 +62,11 @@ export default function EthereumToken() {
           </div>
         </div>
       </div>
+      <SectionCta
+        eyebrow="Stay ready"
+        title="Keep your ELTX close"
+        copy="Use your account to manage the ELTX contract, track balances, and access swaps without leaving the platform."
+      />
     </section>
   );
 }

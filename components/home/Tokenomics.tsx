@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import type { CSSProperties } from 'react';
+import SectionCta from './SectionCta';
 
 const distribution = [
   { label: 'Community Rewards & Airdrops', percent: 25, color: '#a855f7' },
@@ -59,6 +60,13 @@ export default function Tokenomics() {
           ))}
         </ul>
       </motion.div>
+      <div className="max-w-6xl mx-auto px-4 mt-10">
+        <SectionCta
+          eyebrow="Token utility"
+          title="Be part of the economics"
+          copy="Sign up or log in to participate in staking, governance, and liquidity actions tied to these tokenomics."
+        />
+      </div>
     </section>
   );
 }

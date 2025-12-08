@@ -1,6 +1,7 @@
 'use client';
 
 import { ShieldCheck, Sparkles, Gauge, Expand } from 'lucide-react';
+import SectionCta from './SectionCta';
 
 const pillars = [
   {
@@ -58,6 +59,11 @@ export default function About() {
             );
           })}
         </div>
+        <SectionCta
+          eyebrow="Join ELTX"
+          title="Create your profile in minutes"
+          copy="Open an account and get instant access to dashboards, wallets, and secure swaps. Already with us? Sign in to continue where you left off."
+        />
       </div>
     </section>
   );
