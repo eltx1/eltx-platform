@@ -4314,7 +4314,7 @@ app.get('/spot/candles', walletLimiter, async (req, res, next) => {
       `SELECT price_wei, base_amount_wei, created_at
        FROM spot_trades
        WHERE market_id=? AND created_at >= ?
-       ORDER BY created_at ASC
+       ORDER BY created_at DESC
        LIMIT ?`,
       [marketRow.id, sinceDate, fetchLimit]
     );
@@ -4331,7 +4331,9 @@ app.get('/spot/candles', walletLimiter, async (req, res, next) => {
     const amountPlaces = Math.min(8, Number(marketRow.amount_precision || 8));
     const bucketMap = new Map();
 
-    for (const row of tradeRows) {
+    const tradesChronological = [...tradeRows].reverse();
+
+    for (const row of tradesChronological) {
       const createdAt = new Date(row.created_at);
       const timestamp = Math.floor(createdAt.getTime() / 1000);
       if (!Number.isFinite(timestamp)) continue;
