@@ -8,7 +8,8 @@ export type ApiResponse<T> = {
 };
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
   const base = process.env.NEXT_PUBLIC_API_BASE || '';
-  const url = `${base}${path}`;
+  const shouldBypassBase = path.startsWith('/api/') || /^https?:\/\//.test(path);
+  const url = shouldBypassBase ? path : `${base}${path}`;
   try {
     const res = await fetch(url, {
       credentials: 'include',
