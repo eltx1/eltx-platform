@@ -140,9 +140,15 @@ export default function SpotMarketChart({
           autosize: true,
           theme: 'dark',
           style: mode === 'line' ? 8 : 1,
-          hide_top_toolbar: false,
+          hide_top_toolbar: true,
+          hide_side_toolbar: true,
+          withdateranges: false,
           hide_legend: true,
           locale: lang,
+          overrides: {
+            'symbolWatermarkProperties.transparency': 90,
+            'symbolWatermarkProperties.color': 'rgba(255,255,255,0)',
+          },
         });
 
         widgetRef.current = widget;
@@ -219,7 +225,7 @@ export default function SpotMarketChart({
         </div>
       </div>
       <div className="relative h-72 overflow-hidden rounded-lg border border-white/10 bg-black/40">
-        <div id={containerIdRef.current} className="absolute inset-0" />
+        <div id={containerIdRef.current} className="absolute inset-0 z-0 tradingview-chart" />
         {(!enabled || !hasMarket) && !loading && !error && (
           <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{emptyLabel}</div>
         )}
