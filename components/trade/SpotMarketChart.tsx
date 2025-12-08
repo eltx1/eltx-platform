@@ -20,10 +20,12 @@ type TradingViewWidget = {
   onChartReady: (cb: () => void) => void;
 };
 
+type TradingViewWidgetConstructor = new (config: Record<string, unknown>) => TradingViewWidget;
+
 declare global {
   interface Window {
     TradingView?: {
-      widget: (config: Record<string, unknown>) => TradingViewWidget;
+      widget: TradingViewWidgetConstructor;
     };
   }
 }
