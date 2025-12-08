@@ -120,6 +120,7 @@ type WalletAssetsResponse = {
 type ValidationState = { valid: boolean; message: string | null };
 
 const ZERO = new Decimal(0);
+const MARKET_PRIORITY = ['ELTX/USDC', 'ELTX/USDT', 'ELTX/BNB', 'ELTX/ETH'];
 
 function trimDecimal(value: string): string {
   if (!value) return '0';
@@ -142,6 +143,17 @@ function safeDecimal(value: string | number | null | undefined): Decimal {
 function formatWithPrecision(value: Decimal, precision: number): string {
   const places = Math.min(Math.max(0, precision), 8);
   return trimDecimal(value.toFixed(places, Decimal.ROUND_DOWN));
+}
+
+function sortMarkets(markets: SpotMarket[]): SpotMarket[] {
+  const prioritize = (symbol: string) =>
+    MARKET_PRIORITY.includes(symbol) ? MARKET_PRIORITY.indexOf(symbol) : Number.MAX_SAFE_INTEGER;
+  return [...markets].sort((a, b) => {
+    const rankA = prioritize(a.symbol);
+    const rankB = prioritize(b.symbol);
+    if (rankA !== rankB) return rankA - rankB;
+    return a.symbol.localeCompare(b.symbol);
+  });
 }
 
 function exceedsPrecision(raw: string, precision?: number | null): boolean {
@@ -223,7 +235,7 @@ export default function SpotTradePage() {
       return;
     }
     setErrorBanner('');
-    setMarkets(res.data.markets);
+    setMarkets(sortMarkets(res.data.markets));
     const makerBps = res.data.fees?.maker_bps ?? 0;
     const takerBps = res.data.fees?.taker_bps ?? makerBps;
     setFees({ maker: Number.isFinite(makerBps) ? makerBps : 0, taker: Number.isFinite(takerBps) ? takerBps : 0 });
