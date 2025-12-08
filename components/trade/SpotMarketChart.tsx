@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CandlestickData, IChartApi, ISeriesApi, LineData, UTCTimestamp } from 'lightweight-charts';
-import { AreaSeries, CandlestickSeries, ColorType, createChart } from 'lightweight-charts';
+import { ColorType, createChart } from 'lightweight-charts';
 import { apiFetch } from '../../app/lib/api';
 import { dict, useLang } from '../../app/lib/i18n';
 
@@ -163,23 +163,24 @@ export default function SpotMarketChart({
       },
     });
 
-    const areaSeries = chart.addSeries(AreaSeries, {
+    const areaSeries = chart.addAreaSeries({
       lineColor: '#38bdf8',
       topColor: 'rgba(56, 189, 248, 0.25)',
       bottomColor: 'rgba(56, 189, 248, 0.05)',
       lineWidth: 2,
-      visible: initialModeRef.current === 'line',
+      priceLineVisible: false,
     });
+    areaSeries.applyOptions({ visible: initialModeRef.current === 'line' });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
+    const candleSeries = chart.addCandlestickSeries({
       upColor: '#22c55e',
       downColor: '#ef4444',
       wickUpColor: '#22c55e',
       wickDownColor: '#ef4444',
       borderVisible: false,
       priceLineVisible: false,
-      visible: initialModeRef.current === 'candles',
     });
+    candleSeries.applyOptions({ visible: initialModeRef.current === 'candles' });
 
     chartRef.current = chart;
     areaSeriesRef.current = areaSeries;
