@@ -20,10 +20,12 @@ type TradingViewWidget = {
   onChartReady: (cb: () => void) => void;
 };
 
+type TradingViewWidgetConstructor = new (config: Record<string, unknown>) => TradingViewWidget;
+
 declare global {
   interface Window {
     TradingView?: {
-      widget: (config: Record<string, unknown>) => TradingViewWidget;
+      widget: TradingViewWidgetConstructor;
     };
   }
 }
@@ -133,7 +135,7 @@ export default function SpotMarketChart({
           throw new Error('TradingView widget unavailable');
         }
 
-        const widget = window.TradingView.widget({
+        const widget = new window.TradingView.widget({
           symbol,
           interval: toTradingViewInterval(timeframe),
           container_id: containerId,
