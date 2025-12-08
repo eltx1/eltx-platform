@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CandlestickData, IChartApi, ISeriesApi, LineData, UTCTimestamp } from 'lightweight-charts';
-import { ColorType, createChart } from 'lightweight-charts';
+import { AreaSeries, CandlestickSeries, ColorType, createChart } from 'lightweight-charts';
 import { apiFetch } from '../../app/lib/api';
 import { dict, useLang } from '../../app/lib/i18n';
 
@@ -163,28 +163,61 @@ export default function SpotMarketChart({
       },
     });
 
-    const areaSeries = chart.addAreaSeries({
-      lineColor: '#38bdf8',
-      topColor: 'rgba(56, 189, 248, 0.25)',
-      bottomColor: 'rgba(56, 189, 248, 0.05)',
-      lineWidth: 2,
-      priceLineVisible: false,
-    });
+    const areaSeries =
+      typeof (chart as any).addSeries === 'function'
+        ? (chart as any).addSeries(AreaSeries, {
+            lineColor: '#38bdf8',
+            topColor: 'rgba(56, 189, 248, 0.25)',
+            bottomColor: 'rgba(56, 189, 248, 0.05)',
+            lineWidth: 2,
+            priceLineVisible: false,
+          })
+        : (chart as any).addAreaSeries?.({
+            lineColor: '#38bdf8',
+            topColor: 'rgba(56, 189, 248, 0.25)',
+            bottomColor: 'rgba(56, 189, 248, 0.05)',
+            lineWidth: 2,
+            priceLineVisible: false,
+          });
+    if (!areaSeries) {
+      setError(t.common.genericError);
+      chart.remove();
+      return undefined;
+    }
+
     areaSeries.applyOptions({ visible: initialModeRef.current === 'line' });
 
-    const candleSeries = chart.addCandlestickSeries({
-      upColor: '#22c55e',
-      downColor: '#ef4444',
-      wickUpColor: '#22c55e',
-      wickDownColor: '#ef4444',
-      borderVisible: false,
-      priceLineVisible: false,
-    });
+    const candleSeries =
+      typeof (chart as any).addSeries === 'function'
+        ? (chart as any).addSeries(CandlestickSeries, {
+            upColor: '#22c55e',
+            downColor: '#ef4444',
+            wickUpColor: '#22c55e',
+            wickDownColor: '#ef4444',
+            borderVisible: false,
+            priceLineVisible: false,
+          })
+        : (chart as any).addCandlestickSeries?.({
+            upColor: '#22c55e',
+            downColor: '#ef4444',
+            wickUpColor: '#22c55e',
+            wickDownColor: '#ef4444',
+            borderVisible: false,
+            priceLineVisible: false,
+          });
+    if (!candleSeries) {
+      setError(t.common.genericError);
+      chart.remove();
+      return undefined;
+    }
     candleSeries.applyOptions({ visible: initialModeRef.current === 'candles' });
 
+    const areaSeriesTyped = areaSeries as ISeriesApi<'Area'>;
+    const candleSeriesTyped = candleSeries as ISeriesApi<'Candlestick'>;
+
     chartRef.current = chart;
-    areaSeriesRef.current = areaSeries;
-    candleSeriesRef.current = candleSeries;
+    areaSeriesRef.current = areaSeriesTyped;
+    candleSeriesRef.current = candleSeriesTyped;
 
     const handleResize = () => {
       if (!containerRef.current) return;
