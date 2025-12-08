@@ -294,10 +294,8 @@ export default function SpotTradePage() {
       setLastBalanceError(message);
       return;
     }
-    if (lastBalanceError) {
-      setLastBalanceError(null);
-      setErrorBanner('');
-    }
+    setErrorBanner('');
+    if (lastBalanceError) setLastBalanceError(null);
     const map: Record<string, WalletAsset> = {};
     res.data.assets.forEach((asset) => {
       map[(asset.symbol || '').toUpperCase()] = asset;
@@ -358,6 +356,7 @@ export default function SpotTradePage() {
         if (payload.balances) setBalances(payload.balances);
         if (payload.fees)
           setFees({ maker: Number(payload.fees.maker_bps || 0), taker: Number(payload.fees.taker_bps || 0) });
+        setErrorBanner('');
         setStreamConnected(true);
       } catch (err) {
         console.error('Failed to parse spot stream payload', err);
