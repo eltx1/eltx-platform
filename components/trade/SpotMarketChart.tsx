@@ -325,9 +325,38 @@ export default function SpotMarketChart({
   const locale = lang === 'ar' ? 'ar-EG' : 'en-US';
   const activeCandle = hoverCandle || chartData.candles[chartData.candles.length - 1];
 
+  const formatPrice = (value: number | string | null | undefined, fallback = '—') => {
+    const decimal = safeDecimal(value);
+    if (!decimal.isFinite()) return fallback;
+    const precision = Math.min(Math.max(pricePrecision, 2), 12);
+    return decimal.toFixed(precision);
+  };
+
+  const formatCompact = (value: number | string | null | undefined, fallback = '—') => {
+    const decimal = safeDecimal(value);
+    if (!decimal.isFinite()) return fallback;
+    const abs = decimal.abs();
+    if (abs.greaterThan(1_000_000)) return decimal.toFixed(0);
+    if (abs.lessThan(0.000001)) return decimal.toFixed(8);
+    if (abs.lessThan(1)) return decimal.toFixed(6);
+    return decimal.toFixed(2);
+  };
+
+  const priceChange = useMemo(() => {
+    if (!chartData.candles.length) return { value: 0, percent: 0, isUp: true };
+    const first = chartData.candles[0];
+    const last = chartData.candles[chartData.candles.length - 1];
+    const start = safeDecimal(first.open);
+    const end = safeDecimal(last.close);
+    if (!start.isFinite() || start.isZero()) return { value: 0, percent: 0, isUp: true };
+    const value = end.minus(start);
+    const percent = value.div(start).mul(100);
+    return { value: value.toNumber(), percent: percent.toNumber(), isUp: !value.isNeg() };
+  }, [chartData.candles]);
+
   return (
-    <div className="bg-white/5 rounded-xl p-4 space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="bg-white/5 rounded-xl p-4 space-y-4 shadow-lg">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <div className="text-sm font-semibold opacity-80">{title}</div>
           {pairLabel && <div className="text-xs opacity-70">{pairLabel}</div>}
@@ -336,55 +365,62 @@ export default function SpotMarketChart({
             {chartData.stats.lastUpdate ? formatUpdateTimestamp(chartData.stats.lastUpdate, locale) : t.spotTrade.chart.updatedNever}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 text-xs">
-          <div className="flex rounded-full bg-white/10 p-1 shadow-inner">
-            {timeframeButtons.map((btn) => (
-              <button
-                key={btn.value}
-                className={`px-3 py-1 rounded-full transition ${
-                  timeframe === btn.value && enabled
-                    ? 'bg-white text-black shadow'
-                    : enabled
-                    ? 'text-white/70 hover:text-white'
-                    : 'text-white/30 cursor-not-allowed'
-                }`}
-                onClick={() => enabled && setTimeframe(btn.value)}
-                disabled={!enabled}
-              >
-                {btn.label}
-              </button>
-            ))}
+
+        <div className="flex flex-col items-start sm:items-end gap-1">
+          <div className={`text-2xl font-bold leading-none ${priceChange.isUp ? 'text-green-400' : 'text-red-400'}`}>
+            {formatPrice(chartData.stats.lastPrice)}
+          </div>
+          <div className="text-xs opacity-80">
+            {`${formatPrice(priceChange.value, '0')} (${safeDecimal(priceChange.percent).toFixed(2)}%)`}
+          </div>
+          <div className="flex flex-wrap gap-2 text-xs">
+            <div className="flex rounded-full bg-white/10 p-1 shadow-inner">
+              {timeframeButtons.map((btn) => (
+                <button
+                  key={btn.value}
+                  className={`px-3 py-1 rounded-full transition ${
+                    timeframe === btn.value && enabled
+                      ? 'bg-white text-black shadow'
+                      : enabled
+                      ? 'text-white/80 hover:text-white'
+                      : 'text-white/30 cursor-not-allowed'
+                  }`}
+                  onClick={() => enabled && setTimeframe(btn.value)}
+                  disabled={!enabled}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <div className="lg:col-span-3 relative rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
-          <div className="relative aspect-[4/3] sm:aspect-[16/9] min-h-[260px] w-full">
+        <div className="lg:col-span-3 relative rounded-xl border border-white/10 bg-gradient-to-b from-white/5 to-black/40 overflow-hidden">
+          <div className="relative aspect-[4/3] sm:aspect-[16/9] min-h-[300px] w-full">
             <div ref={containerRef} className="absolute inset-0 w-full h-full" />
           </div>
           {(!enabled || (!chartData.candles.length && !loading)) && (
             <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{emptyLabel}</div>
           )}
           {activeCandle && (
-            <div className="pointer-events-none absolute left-3 top-3 rounded bg-black/60 px-3 py-2 text-[11px] text-white shadow">
-              <div className="font-semibold mb-1">
-                {new Date((activeCandle.time as number) * 1000).toLocaleString(locale, {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  month: 'short',
-                  day: '2-digit',
-                })}
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-black/70 backdrop-blur px-4 py-3 text-[11px] text-white">
+              <div>
+                <div className="opacity-70">{t.spotTrade.chart.open}</div>
+                <div className="font-semibold">{formatPrice(activeCandle.open)}</div>
               </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                <span className="opacity-70">{t.spotTrade.chart.open}</span>
-                <span className="text-right">{activeCandle.open.toFixed(pricePrecision)}</span>
-                <span className="opacity-70">{t.spotTrade.chart.high}</span>
-                <span className="text-right">{activeCandle.high.toFixed(pricePrecision)}</span>
-                <span className="opacity-70">{t.spotTrade.chart.low}</span>
-                <span className="text-right">{activeCandle.low.toFixed(pricePrecision)}</span>
-                <span className="opacity-70">{t.spotTrade.chart.close}</span>
-                <span className="text-right">{activeCandle.close.toFixed(pricePrecision)}</span>
+              <div>
+                <div className="opacity-70">{t.spotTrade.chart.high}</div>
+                <div className="font-semibold">{formatPrice(activeCandle.high)}</div>
+              </div>
+              <div>
+                <div className="opacity-70">{t.spotTrade.chart.low}</div>
+                <div className="font-semibold">{formatPrice(activeCandle.low)}</div>
+              </div>
+              <div>
+                <div className="opacity-70">{t.spotTrade.chart.close}</div>
+                <div className="font-semibold">{formatPrice(activeCandle.close)}</div>
               </div>
             </div>
           )}
@@ -394,26 +430,28 @@ export default function SpotMarketChart({
         </div>
 
         <div className="space-y-3">
-          <div className="rounded-lg bg-white/5 border border-white/10 p-3 text-xs space-y-1">
-            <div className="flex justify-between">
-              <span className="opacity-70">{t.spotTrade.chart.high}</span>
-              <span className="font-semibold">{chartData.stats.high ?? '—'}</span>
+          <div className="rounded-xl bg-white/5 border border-white/10 p-3 text-xs space-y-3 shadow-inner">
+            <div className="grid grid-cols-2 gap-y-2">
+              <div className="opacity-70">{t.spotTrade.chart.high}</div>
+              <div className="text-right font-semibold">{formatPrice(chartData.stats.high)}</div>
+              <div className="opacity-70">{t.spotTrade.chart.low}</div>
+              <div className="text-right font-semibold">{formatPrice(chartData.stats.low)}</div>
+              <div className="opacity-70">{t.spotTrade.chart.vwap}</div>
+              <div className="text-right font-semibold">{formatPrice(chartData.stats.vwap, '—')}</div>
+              <div className="opacity-70">{t.spotTrade.lastPrice}</div>
+              <div className="text-right font-semibold">{formatPrice(chartData.stats.lastPrice)}</div>
             </div>
-            <div className="flex justify-between">
-              <span className="opacity-70">{t.spotTrade.chart.low}</span>
-              <span className="font-semibold">{chartData.stats.low ?? '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="opacity-70">{t.spotTrade.chart.vwap}</span>
-              <span className="font-semibold">{chartData.stats.vwap ? chartData.stats.vwap.toFixed(4) : '—'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="opacity-70">{t.spotTrade.lastPrice}</span>
-              <span className="font-semibold">{chartData.stats.lastPrice ?? '—'}</span>
+            <div className="text-[11px] opacity-70 text-right">
+              {new Date(chartData.stats.lastUpdate || Date.now()).toLocaleString(locale, {
+                hour: '2-digit',
+                minute: '2-digit',
+                month: 'short',
+                day: '2-digit',
+              })}
             </div>
           </div>
 
-          <div className="rounded-lg bg-white/5 border border-white/10 p-3 text-xs space-y-2">
+          <div className="rounded-xl bg-white/5 border border-white/10 p-3 text-xs space-y-3 shadow-inner">
             <div className="flex justify-between items-center">
               <span className="font-semibold opacity-80">{t.spotTrade.chart.flow}</span>
               <span className="text-[11px] opacity-70">{t.spotTrade.chart.updated}</span>
@@ -428,9 +466,15 @@ export default function SpotMarketChart({
                 style={{ width: `${sellBiasPercent}%` }}
               />
             </div>
-            <div className="flex justify-between">
-              <span className="text-green-300">{t.spotTrade.chart.buyers}</span>
-              <span className="text-red-300">{t.spotTrade.chart.sellers}</span>
+            <div className="flex justify-between text-[11px] opacity-80">
+              <div>
+                <div className="text-green-300 font-semibold">{t.spotTrade.chart.buyers}</div>
+                <div>{formatCompact(chartData.stats.buyVolume)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-red-300 font-semibold">{t.spotTrade.chart.sellers}</div>
+                <div>{formatCompact(chartData.stats.sellVolume)}</div>
+              </div>
             </div>
             <div className="flex justify-between text-[11px] opacity-80">
               <span>{buyBiasPercent.toFixed(1)}%</span>
