@@ -298,11 +298,12 @@ export default function SpotMarketChart({
   useEffect(() => {
     if (!chartRef.current || !priceSeriesRef.current) return;
     const handler = (param: any) => {
-      if (!param || !param.time) {
+      if (!param || param.time === undefined || param.time === null) {
         setHoverCandle(null);
         return;
       }
-      const candle = candleByTime.get(param.time as number) || null;
+      const candleTime = param.time as Time;
+      const candle = candleByTime.get(candleTime) ?? null;
       setHoverCandle(candle);
     };
     chartRef.current.subscribeCrosshairMove(handler);
