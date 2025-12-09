@@ -302,7 +302,7 @@ export default function SpotMarketChart({
         setHoverCandle(null);
         return;
       }
-      const candle = candleByTime.get(param.time as Time) || null;
+      const candle = candleByTime.get(param.time as number) || null;
       setHoverCandle(candle);
     };
     chartRef.current.subscribeCrosshairMove(handler);
