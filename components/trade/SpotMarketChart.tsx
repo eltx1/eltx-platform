@@ -1,8 +1,17 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AreaSeries, ColorType, HistogramSeries, IChartApi, ISeriesApi, Time, createChart } from 'lightweight-charts';
+import {
+  CandlestickSeries,
+  ColorType,
+  HistogramSeries,
+  IChartApi,
+  ISeriesApi,
+  Time,
+  createChart,
+} from 'lightweight-charts';
 import Decimal from 'decimal.js';
+import { apiFetch } from '../../app/lib/api';
 import { dict, useLang } from '../../app/lib/i18n';
 
 type Timeframe = '5m' | '1h' | '1d';
@@ -13,6 +22,22 @@ type TradePoint = {
   base_amount: string;
   taker_side: 'buy' | 'sell' | string;
   created_at: string;
+};
+
+type CandlePoint = {
+  time: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+};
+
+type CandleResponse = {
+  ok: boolean;
+  market: { symbol: string; base_asset: string; quote_asset: string };
+  interval: Timeframe;
+  candles: CandlePoint[];
 };
 
 type SpotMarketChartProps = {
@@ -26,14 +51,19 @@ type SpotMarketChartProps = {
   enabled?: boolean;
 };
 
-type AggregatedPoint = {
+type CandleChartPoint = {
   time: Time;
-  value: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
 };
 
-type VolumePoint = AggregatedPoint & { color: string };
-
-const DEFAULT_VOLUME_COLOR = 'rgba(148, 163, 184, 0.55)';
+type VolumePoint = {
+  time: Time;
+  value: number;
+  color: string;
+};
 
 function toMillis(timeframe: Timeframe): number {
   switch (timeframe) {
@@ -82,10 +112,13 @@ export default function SpotMarketChart({
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const priceSeriesRef = useRef<ISeriesApi<'Area', Time> | null>(null);
+  const priceSeriesRef = useRef<ISeriesApi<'Candlestick', Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram', Time> | null>(null);
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
+  const [loading, setLoading] = useState(false);
+  const [candles, setCandles] = useState<CandlePoint[]>([]);
+  const [hoverCandle, setHoverCandle] = useState<CandleChartPoint | null>(null);
 
   const pairLabel = useMemo(() => {
     if (baseAsset && quoteAsset) return `${baseAsset}/${quoteAsset}`;
@@ -105,10 +138,29 @@ export default function SpotMarketChart({
     return withinWindow.length ? withinWindow : sorted;
   }, [timeframe, trades]);
 
+  useEffect(() => {
+    let active = true;
+    if (!marketSymbol || !enabled) {
+      setCandles([]);
+      return;
+    }
+    setLoading(true);
+    apiFetch<CandleResponse>(
+      `/spot/candles?market=${encodeURIComponent(marketSymbol)}&interval=${timeframe}&limit=200`
+    ).then((res) => {
+      if (!active) return;
+      if (res.ok && res.data?.candles) setCandles(res.data.candles);
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [enabled, marketSymbol, timeframe]);
+
   const chartData = useMemo(() => {
-    if (!enabled || !filtered.length) {
+    if (!enabled) {
       return {
-        pricePoints: [] as AggregatedPoint[],
+        candles: [] as CandleChartPoint[],
         volumePoints: [] as VolumePoint[],
         stats: {
           high: null,
@@ -122,77 +174,52 @@ export default function SpotMarketChart({
       };
     }
 
-    const now = Date.now();
-    const windowMs = toMillis(timeframe);
-    const start = Math.max(now - windowMs, new Date(filtered[0].created_at).getTime());
-    const bucketCount = 24;
-    const bucketMs = Math.max(Math.floor(windowMs / bucketCount), 60 * 1000);
+    const parsedCandles: CandleChartPoint[] = candles
+      .map((candle) => ({
+        time: candle.time as Time,
+        open: safeDecimal(candle.open).toNumber(),
+        high: safeDecimal(candle.high).toNumber(),
+        low: safeDecimal(candle.low).toNumber(),
+        close: safeDecimal(candle.close).toNumber(),
+      }))
+      .filter((candle) => Number.isFinite(candle.open) && Number.isFinite(candle.high));
 
-    let cursor = 0;
-    let lastPrice = safeDecimal(filtered[0].price).toNumber();
-    const pricePoints: AggregatedPoint[] = [];
-    const volumePoints: VolumePoint[] = [];
-    let buyVolume = new Decimal(0);
-    let sellVolume = new Decimal(0);
-    let vwapNumerator = new Decimal(0);
-    let totalVolume = new Decimal(0);
+    const volumePoints: VolumePoint[] = candles.map((candle) => {
+      const open = safeDecimal(candle.open);
+      const close = safeDecimal(candle.close);
+      const isUp = close.greaterThanOrEqualTo(open);
+      return {
+        time: candle.time as Time,
+        value: safeDecimal(candle.volume).toNumber(),
+        color: isUp ? 'rgba(34,197,94,0.65)' : 'rgba(239,68,68,0.65)',
+      };
+    });
 
-    for (let bucketStart = start; bucketStart <= now; bucketStart += bucketMs) {
-      const bucketEnd = bucketStart + bucketMs;
-      const bucketTrades: TradePoint[] = [];
-      while (cursor < filtered.length) {
-        const tradeTime = new Date(filtered[cursor].created_at).getTime();
-        if (tradeTime >= bucketEnd) break;
-        bucketTrades.push(filtered[cursor]);
-        cursor += 1;
-      }
-
-      if (bucketTrades.length) {
-        const closingTrade = bucketTrades[bucketTrades.length - 1];
-        lastPrice = safeDecimal(closingTrade.price).toNumber();
-      }
-
-      const bucketVolume = bucketTrades.reduce(
-        (acc, trade) => {
-          const amount = safeDecimal(trade.base_amount);
-          const side = trade.taker_side?.toLowerCase() === 'sell' ? 'sell' : 'buy';
-          if (side === 'sell') {
-            acc.sell = acc.sell.plus(amount);
-          } else {
-            acc.buy = acc.buy.plus(amount);
-          }
-          vwapNumerator = vwapNumerator.plus(safeDecimal(trade.price).mul(amount));
-          totalVolume = totalVolume.plus(amount);
-          return acc;
-        },
-        { buy: new Decimal(0), sell: new Decimal(0) }
-      );
-
-      buyVolume = buyVolume.plus(bucketVolume.buy);
-      sellVolume = sellVolume.plus(bucketVolume.sell);
-
-      const netVolume = bucketVolume.buy.minus(bucketVolume.sell);
-      const color = netVolume.greaterThanOrEqualTo(0)
-        ? 'rgba(52, 211, 153, 0.65)'
-        : 'rgba(248, 113, 113, 0.65)';
-
-      const pointTime = Math.floor(bucketEnd / 1000) as Time;
-
-      pricePoints.push({ time: pointTime, value: lastPrice });
-      volumePoints.push({
-        time: pointTime,
-        value: netVolume.toNumber(),
-        color: bucketTrades.length ? color : DEFAULT_VOLUME_COLOR,
-      });
-    }
-
-    const highs = pricePoints.map((p) => p.value);
+    const highs = parsedCandles.map((p) => p.high);
     const high = highs.length ? Math.max(...highs) : null;
     const low = highs.length ? Math.min(...highs) : null;
-    const vwap = totalVolume.gt(0) ? vwapNumerator.div(totalVolume).toNumber() : lastPrice;
+
+    const buyVolume = filtered.reduce((acc, trade) => {
+      const amount = safeDecimal(trade.base_amount);
+      return trade.taker_side?.toLowerCase() === 'sell' ? acc : acc.plus(amount);
+    }, new Decimal(0));
+    const sellVolume = filtered.reduce((acc, trade) => {
+      const amount = safeDecimal(trade.base_amount);
+      return trade.taker_side?.toLowerCase() === 'sell' ? acc.plus(amount) : acc;
+    }, new Decimal(0));
+
+    const vwapNumerator = filtered.reduce(
+      (acc, trade) => acc.plus(safeDecimal(trade.price).mul(safeDecimal(trade.base_amount))),
+      new Decimal(0)
+    );
+    const totalVolume = filtered.reduce((acc, trade) => acc.plus(safeDecimal(trade.base_amount)), new Decimal(0));
+    const vwap = totalVolume.gt(0) ? vwapNumerator.div(totalVolume).toNumber() : null;
+
+    const lastCandle = parsedCandles[parsedCandles.length - 1];
+    const lastUpdate = candles.length ? (candles[candles.length - 1].time as number) * 1000 : null;
 
     return {
-      pricePoints,
+      candles: parsedCandles,
       volumePoints,
       stats: {
         high,
@@ -200,11 +227,13 @@ export default function SpotMarketChart({
         vwap,
         buyVolume: buyVolume.toNumber(),
         sellVolume: sellVolume.toNumber(),
-        lastPrice,
-        lastUpdate: new Date(filtered[filtered.length - 1].created_at).getTime(),
+        lastPrice: lastCandle?.close ?? null,
+        lastUpdate,
       },
     };
-  }, [enabled, filtered, timeframe]);
+  }, [candles, enabled, filtered]);
+
+  const candleByTime = useMemo(() => new Map(chartData.candles.map((c) => [c.time, c])), [chartData.candles]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -214,19 +243,22 @@ export default function SpotMarketChart({
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#e2e8f0' },
       rightPriceScale: { borderVisible: false },
       leftPriceScale: { borderVisible: false, visible: false },
-      timeScale: { borderVisible: false, secondsVisible: false },
+      timeScale: { borderVisible: false, secondsVisible: false, lockVisibleTimeRangeOnResize: true },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
+        vertLines: { color: 'rgba(255,255,255,0.06)' },
+        horzLines: { color: 'rgba(255,255,255,0.06)' },
       },
-      crosshair: { mode: 0 },
+      crosshair: { mode: 1 },
     });
 
-    const area = chart.addSeries(AreaSeries, {
-      lineColor: '#7dd3fc',
-      topColor: 'rgba(125, 211, 252, 0.35)',
-      bottomColor: 'rgba(14, 165, 233, 0.08)',
-      priceLineVisible: false,
+    const candlesSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#22c55e',
+      downColor: '#ef4444',
+      wickUpColor: '#22c55e',
+      wickDownColor: '#ef4444',
+      borderUpColor: '#22c55e',
+      borderDownColor: '#ef4444',
+      priceLineVisible: true,
     });
     const histogram = chart.addSeries(HistogramSeries, {
       priceScaleId: 'volume',
@@ -234,19 +266,17 @@ export default function SpotMarketChart({
       base: 0,
     });
     chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
+    chart.timeScale().applyOptions({ barSpacing: 8, rightOffset: 2, fixLeftEdge: true });
 
     chartRef.current = chart;
-    priceSeriesRef.current = area;
+    priceSeriesRef.current = candlesSeries;
     volumeSeriesRef.current = histogram;
 
-    const resize = () => {
-      if (!containerRef.current) return;
-      const { clientWidth, clientHeight } = containerRef.current;
-      chart.applyOptions({ width: clientWidth, height: Math.max(clientHeight, 220) });
-    };
-    resize();
-
-    const observer = new ResizeObserver(() => resize());
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry || !entry.contentRect.height) return;
+      chart.applyOptions({ height: entry.contentRect.height, width: entry.contentRect.width });
+    });
     observer.observe(containerRef.current);
 
     return () => {
@@ -260,10 +290,26 @@ export default function SpotMarketChart({
 
   useEffect(() => {
     if (!chartRef.current || !priceSeriesRef.current || !volumeSeriesRef.current) return;
-    priceSeriesRef.current.setData(chartData.pricePoints);
-    volumeSeriesRef.current.setData(chartData.volumePoints);
+    priceSeriesRef.current.setData(chartData.candles);
+    volumeSeriesRef.current.setData(chartData.volumePoints.length ? chartData.volumePoints : []);
     chartRef.current.timeScale().fitContent();
   }, [chartData]);
+
+  useEffect(() => {
+    if (!chartRef.current || !priceSeriesRef.current) return;
+    const handler = (param: any) => {
+      if (!param || !param.time) {
+        setHoverCandle(null);
+        return;
+      }
+      const candle = candleByTime.get(param.time as number) || null;
+      setHoverCandle(candle);
+    };
+    chartRef.current.subscribeCrosshairMove(handler);
+    return () => {
+      chartRef.current?.unsubscribeCrosshairMove(handler);
+    };
+  }, [candleByTime]);
 
   const timeframeButtons: { value: Timeframe; label: string }[] = [
     { value: '5m', label: t.spotTrade.chart.timeframes['5m'] },
@@ -276,6 +322,7 @@ export default function SpotMarketChart({
   const sellBiasPercent = 100 - buyBiasPercent;
 
   const locale = lang === 'ar' ? 'ar-EG' : 'en-US';
+  const activeCandle = hoverCandle || chartData.candles[chartData.candles.length - 1];
 
   return (
     <div className="bg-white/5 rounded-xl p-4 space-y-4">
@@ -311,10 +358,37 @@ export default function SpotMarketChart({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <div className="lg:col-span-3 relative h-[55vw] min-h-[240px] sm:h-80 overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
-          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
-          {(!enabled || !chartData.pricePoints.length) && (
+        <div className="lg:col-span-3 relative rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
+          <div className="relative aspect-[4/3] sm:aspect-[16/9] min-h-[260px] w-full">
+            <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+          </div>
+          {(!enabled || (!chartData.candles.length && !loading)) && (
             <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{emptyLabel}</div>
+          )}
+          {activeCandle && (
+            <div className="pointer-events-none absolute left-3 top-3 rounded bg-black/60 px-3 py-2 text-[11px] text-white shadow">
+              <div className="font-semibold mb-1">
+                {new Date((activeCandle.time as number) * 1000).toLocaleString(locale, {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  month: 'short',
+                  day: '2-digit',
+                })}
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                <span className="opacity-70">{t.spotTrade.chart.open}</span>
+                <span className="text-right">{activeCandle.open.toFixed(pricePrecision)}</span>
+                <span className="opacity-70">{t.spotTrade.chart.high}</span>
+                <span className="text-right">{activeCandle.high.toFixed(pricePrecision)}</span>
+                <span className="opacity-70">{t.spotTrade.chart.low}</span>
+                <span className="text-right">{activeCandle.low.toFixed(pricePrecision)}</span>
+                <span className="opacity-70">{t.spotTrade.chart.close}</span>
+                <span className="text-right">{activeCandle.close.toFixed(pricePrecision)}</span>
+              </div>
+            </div>
+          )}
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70 bg-black/30">{t.trade.loading}</div>
           )}
         </div>
 
