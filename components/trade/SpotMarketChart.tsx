@@ -7,6 +7,7 @@ import {
   HistogramSeries,
   IChartApi,
   ISeriesApi,
+  LineSeries,
   Time,
   createChart,
 } from 'lightweight-charts';
@@ -114,11 +115,13 @@ export default function SpotMarketChart({
   const chartRef = useRef<IChartApi | null>(null);
   const priceSeriesRef = useRef<ISeriesApi<'Candlestick', Time> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram', Time> | null>(null);
+  const fallbackLineSeriesRef = useRef<ISeriesApi<'Line', Time> | null>(null);
 
   const [timeframe, setTimeframe] = useState<Timeframe>('1h');
   const [loading, setLoading] = useState(false);
   const [candles, setCandles] = useState<CandlePoint[]>([]);
   const [hoverCandle, setHoverCandle] = useState<CandleChartPoint | null>(null);
+  const [hasIntersected, setHasIntersected] = useState(false);
 
   const pairLabel = useMemo(() => {
     if (baseAsset && quoteAsset) return `${baseAsset}/${quoteAsset}`;
@@ -235,11 +238,62 @@ export default function SpotMarketChart({
 
   const candleByTime = useMemo(() => new Map(chartData.candles.map((c) => [c.time, c])), [chartData.candles]);
 
+  const fallbackLinePoints = useMemo(() => {
+    const points = filtered
+      .map((trade) => ({
+        time: Math.floor(new Date(trade.created_at).getTime() / 1000) as Time,
+        value: safeDecimal(trade.price).toNumber(),
+      }))
+      .filter((point) => Number.isFinite(point.value))
+      .sort((a, b) => (a.time as number) - (b.time as number));
+
+    return points.length >= 2 ? points : [];
+  }, [filtered]);
+
   useEffect(() => {
     if (!containerRef.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setHasIntersected(true);
+        }
+      },
+      { threshold: 0.1 }
+    );
 
-    const chart = createChart(containerRef.current, {
-      autoSize: true,
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || chartRef.current || !hasIntersected) return;
+
+    const containerEl = containerRef.current;
+
+    const ensureSize = (): { width: number; height: number } | null => {
+      const { clientWidth, clientHeight } = containerEl;
+      if (!clientWidth || !clientHeight) return null;
+      return { width: clientWidth, height: clientHeight };
+    };
+
+    let frame: number | null = null;
+    let initialSize = ensureSize();
+
+    if (!initialSize) {
+      frame = window.requestAnimationFrame(() => {
+        initialSize = ensureSize();
+        if (initialSize) {
+          chartRef.current?.applyOptions({ width: initialSize.width, height: initialSize.height });
+        }
+      });
+    }
+
+    const fallbackSize = initialSize || { width: Math.max(containerEl.clientWidth, 320) || 360, height: 360 };
+
+    const chart = createChart(containerEl, {
+      autoSize: false,
+      width: fallbackSize.width,
+      height: fallbackSize.height,
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#e2e8f0' },
       rightPriceScale: { borderVisible: false },
       leftPriceScale: { borderVisible: false, visible: false },
@@ -249,6 +303,8 @@ export default function SpotMarketChart({
         horzLines: { color: 'rgba(255,255,255,0.06)' },
       },
       crosshair: { mode: 1 },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true },
+      handleScale: { axisPressedMouseMove: { time: true, price: true }, mouseWheel: true, pinch: true },
     });
 
     const candlesSeries = chart.addSeries(CandlestickSeries, {
@@ -265,35 +321,72 @@ export default function SpotMarketChart({
       priceFormat: { type: 'volume' },
       base: 0,
     });
+    const fallbackLine = chart.addSeries(LineSeries, {
+      color: '#60a5fa',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: true,
+    });
     chart.priceScale('volume').applyOptions({ scaleMargins: { top: 0.75, bottom: 0 } });
     chart.timeScale().applyOptions({ barSpacing: 8, rightOffset: 2, fixLeftEdge: true });
 
     chartRef.current = chart;
     priceSeriesRef.current = candlesSeries;
     volumeSeriesRef.current = histogram;
+    fallbackLineSeriesRef.current = fallbackLine;
+
+    let autosized = false;
 
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
       if (!entry || !entry.contentRect.height) return;
       chart.applyOptions({ height: entry.contentRect.height, width: entry.contentRect.width });
+      if (!autosized) {
+        chart.applyOptions({ autoSize: true });
+        autosized = true;
+      }
     });
-    observer.observe(containerRef.current);
+    observer.observe(containerEl);
+
+    const handleViewportChange = () => {
+      if (!chartRef.current) return;
+      const size = ensureSize();
+      if (size) chartRef.current.applyOptions(size);
+    };
+
+    window.addEventListener('orientationchange', handleViewportChange);
+    window.addEventListener('resize', handleViewportChange);
+    document.addEventListener('visibilitychange', handleViewportChange);
 
     return () => {
+      if (frame) window.cancelAnimationFrame(frame);
       observer.disconnect();
+      window.removeEventListener('orientationchange', handleViewportChange);
+      window.removeEventListener('resize', handleViewportChange);
+      document.removeEventListener('visibilitychange', handleViewportChange);
       chart.remove();
       chartRef.current = null;
       priceSeriesRef.current = null;
       volumeSeriesRef.current = null;
+      fallbackLineSeriesRef.current = null;
     };
-  }, []);
+  }, [hasIntersected]);
 
   useEffect(() => {
-    if (!chartRef.current || !priceSeriesRef.current || !volumeSeriesRef.current) return;
-    priceSeriesRef.current.setData(chartData.candles);
-    volumeSeriesRef.current.setData(chartData.volumePoints.length ? chartData.volumePoints : []);
-    chartRef.current.timeScale().fitContent();
-  }, [chartData]);
+    if (!chartRef.current || !priceSeriesRef.current || !volumeSeriesRef.current || !fallbackLineSeriesRef.current) return;
+
+    const hasCandles = chartData.candles.length > 0;
+    const hasFallbackLine = !hasCandles && fallbackLinePoints.length > 0;
+
+    priceSeriesRef.current.setData(hasCandles ? chartData.candles : []);
+    volumeSeriesRef.current.setData(hasCandles ? chartData.volumePoints : []);
+
+    fallbackLineSeriesRef.current.applyOptions({ visible: hasFallbackLine });
+    fallbackLineSeriesRef.current.setData(hasFallbackLine ? fallbackLinePoints : []);
+
+    if (hasCandles || hasFallbackLine) chartRef.current.timeScale().fitContent();
+  }, [chartData, fallbackLinePoints]);
 
   useEffect(() => {
     if (!chartRef.current || !priceSeriesRef.current) return;
@@ -354,6 +447,9 @@ export default function SpotMarketChart({
     return { value: value.toNumber(), percent: percent.toNumber(), isUp: !value.isNeg() };
   }, [chartData.candles]);
 
+  const showEmptyState = !enabled || (!chartData.candles.length && !loading && fallbackLinePoints.length === 0);
+  const containerMinHeight = { minHeight: 'min(60vh, 520px)' } as const;
+
   return (
     <div className="bg-white/5 rounded-xl p-4 space-y-4 shadow-lg">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -397,12 +493,14 @@ export default function SpotMarketChart({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <div className="lg:col-span-3 relative rounded-xl border border-white/10 bg-gradient-to-b from-white/5 to-black/40 overflow-hidden">
-          <div className="relative aspect-[4/3] sm:aspect-[16/9] min-h-[300px] w-full">
-            <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+        <div className="lg:col-span-3 relative rounded-xl border border-white/10 bg-gradient-to-b from-white/5 to-black/40 overflow-visible lg:overflow-hidden">
+          <div className="relative w-full" style={containerMinHeight}>
+            <div ref={containerRef} className="absolute inset-0 w-full h-full p-1 sm:p-2" />
           </div>
-          {(!enabled || (!chartData.candles.length && !loading)) && (
-            <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{emptyLabel}</div>
+          {showEmptyState && (
+            <div className="absolute inset-0 flex items-center justify-center text-xs opacity-80 bg-black/40 backdrop-blur">
+              <span className="text-center px-4">{emptyLabel}</span>
+            </div>
           )}
           {activeCandle && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 grid grid-cols-2 sm:grid-cols-4 gap-3 bg-black/70 backdrop-blur px-4 py-3 text-[11px] text-white">

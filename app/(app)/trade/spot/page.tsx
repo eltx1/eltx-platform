@@ -747,63 +747,75 @@ export default function SpotTradePage() {
       ) : markets.length === 0 ? (
         <div className="text-sm opacity-80">{t.spotTrade.noMarkets}</div>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[360px,1fr]">
-          <div className="space-y-4 bg-white/5 rounded-xl p-4">
-            <div>
-              <label className="block text-xs mb-1 opacity-70">{t.spotTrade.market}</label>
-              <select
-                value={selectedMarket}
-                onChange={(e) => {
-                  setSelectedMarket(e.target.value);
-                  setAmount('');
-                  setPrice('');
-                  setErrorBanner('');
-                }}
-                className="w-full p-2 rounded bg-black/20 border border-white/20 text-sm"
-              >
-                {markets.map((m) => (
-                  <option key={m.symbol} value={m.symbol}>
-                    {m.symbol}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex gap-2 text-sm">
-              <button
-                className={`flex-1 py-2 rounded font-medium transition ${
-                  formSide === 'buy' ? 'bg-green-600 text-white shadow-lg' : 'bg-white/10'
-                }`}
-                onClick={() => setFormSide('buy')}
-              >
-                {t.spotTrade.buy}
-              </button>
-              <button
-                className={`flex-1 py-2 rounded font-medium transition ${
-                  formSide === 'sell' ? 'bg-red-600 text-white shadow-lg' : 'bg-white/10'
-                }`}
-                onClick={() => setFormSide('sell')}
-              >
-                {t.spotTrade.sell}
-              </button>
-            </div>
-            <div className="flex gap-2 text-sm">
-              <button
-                className={`flex-1 py-2 rounded font-medium transition ${
-                  formType === 'limit' ? 'bg-white text-black shadow' : 'bg-white/10 text-white'
-                }`}
-                onClick={() => setFormType('limit')}
-              >
-                {t.spotTrade.limit}
-              </button>
-              <button
-                className={`flex-1 py-2 rounded font-medium transition ${
-                  formType === 'market' ? 'bg-white text-black shadow' : 'bg-white/10 text-white'
-                }`}
-                onClick={() => setFormType('market')}
-              >
-                {t.spotTrade.marketOrder}
-              </button>
-            </div>
+        <div className="space-y-6">
+          <SpotMarketChart
+            marketSymbol={selectedMarket}
+            baseAsset={baseSymbol}
+            quoteAsset={quoteSymbol}
+            pricePrecision={pricePrecision}
+            title={t.spotTrade.chart.title}
+            emptyLabel={t.spotTrade.chart.empty}
+            trades={trades}
+            enabled={!!selectedMarket}
+          />
+
+          <div className="grid gap-6 xl:grid-cols-[360px,1fr]">
+            <div className="space-y-4 bg-white/5 rounded-xl p-4">
+              <div>
+                <label className="block text-xs mb-1 opacity-70">{t.spotTrade.market}</label>
+                <select
+                  value={selectedMarket}
+                  onChange={(e) => {
+                    setSelectedMarket(e.target.value);
+                    setAmount('');
+                    setPrice('');
+                    setErrorBanner('');
+                  }}
+                  className="w-full p-2 rounded bg-black/20 border border-white/20 text-sm"
+                >
+                  {markets.map((m) => (
+                    <option key={m.symbol} value={m.symbol}>
+                      {m.symbol}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex gap-2 text-sm">
+                <button
+                  className={`flex-1 py-2 rounded font-medium transition ${
+                    formSide === 'buy' ? 'bg-green-600 text-white shadow-lg' : 'bg-white/10'
+                  }`}
+                  onClick={() => setFormSide('buy')}
+                >
+                  {t.spotTrade.buy}
+                </button>
+                <button
+                  className={`flex-1 py-2 rounded font-medium transition ${
+                    formSide === 'sell' ? 'bg-red-600 text-white shadow-lg' : 'bg-white/10'
+                  }`}
+                  onClick={() => setFormSide('sell')}
+                >
+                  {t.spotTrade.sell}
+                </button>
+              </div>
+              <div className="flex gap-2 text-sm">
+                <button
+                  className={`flex-1 py-2 rounded font-medium transition ${
+                    formType === 'limit' ? 'bg-white text-black shadow' : 'bg-white/10 text-white'
+                  }`}
+                  onClick={() => setFormType('limit')}
+                >
+                  {t.spotTrade.limit}
+                </button>
+                <button
+                  className={`flex-1 py-2 rounded font-medium transition ${
+                    formType === 'market' ? 'bg-white text-black shadow' : 'bg-white/10 text-white'
+                  }`}
+                  onClick={() => setFormType('market')}
+                >
+                  {t.spotTrade.marketOrder}
+                </button>
+              </div>
             {selectedMarketMeta && (
               <div className="space-y-1 text-xs">
                 <div>
@@ -945,19 +957,9 @@ export default function SpotTradePage() {
                 {placing ? t.spotTrade.placing : t.spotTrade.placeOrder}
               </button>
             </div>
-          </div>
-          <div className="space-y-6">
-            <SpotMarketChart
-              marketSymbol={selectedMarket}
-              baseAsset={baseSymbol}
-              quoteAsset={quoteSymbol}
-              pricePrecision={pricePrecision}
-              title={t.spotTrade.chart.title}
-              emptyLabel={t.spotTrade.chart.empty}
-              trades={trades}
-              enabled={!!selectedMarket}
-            />
-            <div className="bg-white/5 rounded-xl p-4 space-y-3">
+            </div>
+            <div className="space-y-6">
+              <div className="bg-white/5 rounded-xl p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                 <h2 className="font-semibold opacity-80">{t.spotTrade.orderbook.title}</h2>
                 <div className="flex flex-wrap gap-3">
@@ -1035,7 +1037,7 @@ export default function SpotTradePage() {
                 </div>
               </div>
             </div>
-            <div className="bg-white/5 rounded-xl p-4">
+              <div className="bg-white/5 rounded-xl p-4">
               <h2 className="text-sm font-semibold opacity-80 mb-2">{t.spotTrade.trades.title}</h2>
               <div className="grid grid-cols-4 gap-2 text-[11px] font-semibold opacity-70 mb-1">
                 <span>{t.spotTrade.trades.columns.time}</span>
@@ -1060,7 +1062,7 @@ export default function SpotTradePage() {
                 )}
               </div>
             </div>
-            <div className="bg-white/5 rounded-xl p-4">
+              <div className="bg-white/5 rounded-xl p-4">
               <h2 className="text-sm font-semibold opacity-80 mb-2">{t.spotTrade.orders.title}</h2>
               {orders.length === 0 ? (
                 <div className="text-xs opacity-70">{t.spotTrade.orders.empty}</div>
@@ -1098,6 +1100,7 @@ export default function SpotTradePage() {
                   ))}
                 </div>
               )}
+            </div>
             </div>
           </div>
         </div>
