@@ -210,6 +210,7 @@ export default function SpotMarketChart({
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      autoSize: true,
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#e2e8f0' },
       rightPriceScale: { borderVisible: false },
       leftPriceScale: { borderVisible: false, visible: false },
@@ -241,7 +242,7 @@ export default function SpotMarketChart({
     const resize = () => {
       if (!containerRef.current) return;
       const { clientWidth, clientHeight } = containerRef.current;
-      chart.applyOptions({ width: clientWidth, height: clientHeight });
+      chart.applyOptions({ width: clientWidth, height: Math.max(clientHeight, 220) });
     };
     resize();
 
@@ -310,8 +311,8 @@ export default function SpotMarketChart({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-4">
-        <div className="lg:col-span-3 relative h-80 overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
-          <div ref={containerRef} className="absolute inset-0" />
+        <div className="lg:col-span-3 relative h-[55vw] min-h-[240px] sm:h-80 overflow-hidden rounded-lg border border-white/10 bg-gradient-to-b from-white/5 to-black/40">
+          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
           {(!enabled || !chartData.pricePoints.length) && (
             <div className="absolute inset-0 flex items-center justify-center text-xs opacity-70">{emptyLabel}</div>
           )}
