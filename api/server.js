@@ -451,13 +451,14 @@ const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const IS_PROD = process.env.NODE_ENV === 'production';
 const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || (IS_PROD ? '.eltx.online' : undefined);
+const USER_SESSION_TTL_SECONDS = Math.max(300, Number(process.env.SESSION_TTL_SECONDS || 60 * 60 * 24 * 7));
 const sessionCookie = {
   httpOnly: true,
   sameSite: IS_PROD ? 'none' : 'lax',
   secure: IS_PROD,
   domain: COOKIE_DOMAIN,
   path: '/',
-  maxAge: 1000 * 60 * 60,
+  maxAge: USER_SESSION_TTL_SECONDS * 1000,
 };
 
 const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 2));
@@ -1678,6 +1679,10 @@ async function requireUser(req) {
     [token]
   );
   if (!rows.length) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
+  await pool.query('UPDATE sessions SET expires_at = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE id = ?', [
+    USER_SESSION_TTL_SECONDS,
+    token,
+  ]);
   return rows[0].id;
 }
 
@@ -1949,8 +1954,8 @@ app.post('/auth/signup', async (req, res, next) => {
     await conn.query('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)', [u.insertId, hash]);
     const token = crypto.randomUUID();
     await conn.query(
-      'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
-      [token, u.insertId]
+      'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
+      [token, u.insertId, USER_SESSION_TTL_SECONDS]
     );
     const wallets = [];
     for (const cid of SUPPORTED_CHAINS) {
@@ -1996,10 +2001,10 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
       const valid = await argon2.verify(rows[0].password_hash, password);
       if (valid) {
         const token = crypto.randomUUID();
-        await pool.query('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))', [
-          token,
-          userId,
-        ]);
+        await pool.query(
+          'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
+          [token, userId, USER_SESSION_TTL_SECONDS]
+        );
         await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 1)', [userId, req.ip]);
         const wallets = [];
         for (const cid of SUPPORTED_CHAINS) {
