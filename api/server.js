@@ -210,7 +210,7 @@ app.use((req, res, next) => {
   next();
 });
 app.use('/stripe/webhook', express.raw({ type: 'application/json' }));
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 // ensure wallet routes are not cached
 const noCache = (req, res, next) => {
@@ -546,6 +546,16 @@ const AdminTransactionsQuerySchema = PaginationSchema.extend({
   type: z.enum(['deposits', 'transfers', 'swaps', 'spot', 'fiat']).default('deposits'),
 });
 
+const AdminKycQuerySchema = z.object({
+  status: z.enum(['pending', 'approved', 'rejected']).optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+const AdminKycDecisionSchema = z.object({
+  status: z.enum(['approved', 'rejected']),
+  rejection_reason: z.string().max(500).optional(),
+});
+
 const SpotRiskSettingsSchema = z
   .object({
     max_slippage_bps: z.coerce.number().int().min(0).max(10000).optional(),
@@ -805,6 +815,44 @@ function presentAdminRow(row) {
   if (!row) return null;
   const { password_hash, ...rest } = row;
   return rest;
+}
+
+function parseBase64File(file) {
+  const base64 = file?.base64 || '';
+  const cleaned = base64.includes(',') ? base64.split(',').pop() : base64;
+  let buffer = Buffer.from(cleaned || '', 'base64');
+  if (!buffer.length) throw { status: 400, code: 'BAD_INPUT', message: 'Invalid document file' };
+  if (buffer.byteLength > MAX_KYC_FILE_BYTES)
+    throw {
+      status: 413,
+      code: 'FILE_TOO_LARGE',
+      message: `Document must be smaller than ${Math.round(MAX_KYC_FILE_BYTES / (1024 * 1024))}MB`,
+    };
+  return { buffer, name: file.name, mime: file.type || 'application/octet-stream' };
+}
+
+function presentKycRow(row, { includeDocument = false } = {}) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    email: row.email,
+    username: row.username,
+    status: row.status,
+    full_name: row.full_name,
+    country: row.country,
+    document_type: row.document_type,
+    document_number: row.document_number,
+    document_filename: row.document_filename,
+    document_mime: row.document_mime,
+    rejection_reason: row.rejection_reason,
+    reviewed_by: row.reviewed_by,
+    reviewer_username: row.reviewer_username,
+    reviewed_at: row.reviewed_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    document_base64: includeDocument && row.document_data ? row.document_data.toString('base64') : undefined,
+  };
 }
 
 async function getPlatformSettingValue(name, defaultValue = '0', conn = pool) {
@@ -1585,6 +1633,21 @@ const StripeSessionSchema = z.object({
   expected_price_eltx: z.string().optional(),
 });
 
+const MAX_KYC_FILE_BYTES = 8 * 1024 * 1024; // 8MB
+
+const KycSubmissionSchema = z.object({
+  full_name: z.string().min(3).max(200),
+  country: z.string().min(2).max(120),
+  document_type: z.string().min(2).max(120),
+  document_number: z.string().min(3).max(120),
+  agreement: z.literal(true, { errorMap: () => ({ message: 'You must accept the KYC & AML policy' }) }),
+  document_file: z.object({
+    name: z.string().min(1).max(255),
+    type: z.string().min(1).max(120),
+    base64: z.string().min(20),
+  }),
+});
+
 const AiChatSchema = z.object({
   messages: z
     .array(
@@ -1979,6 +2042,68 @@ app.get('/auth/me', async (req, res, next) => {
     if (!rows.length) return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
     res.json(rows[0]);
   } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/kyc/me', async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT kr.*, au.username AS reviewer_username
+         FROM kyc_requests kr
+         LEFT JOIN admin_users au ON kr.reviewed_by = au.id
+        WHERE kr.user_id = ?
+        LIMIT 1`,
+      [userId]
+    );
+    if (!rows.length) {
+      return res.json({ ok: true, status: 'none', request: null, can_resubmit: true });
+    }
+    const request = presentKycRow(rows[0]);
+    res.json({ ok: true, status: request.status, request, can_resubmit: request.status === 'rejected' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/kyc/submit', async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const payload = KycSubmissionSchema.parse(req.body || {});
+    const file = parseBase64File(payload.document_file);
+
+    await pool.query(
+      `INSERT INTO kyc_requests (user_id, full_name, country, document_type, document_number, document_filename, document_mime, document_data, status, rejection_reason, reviewed_by, reviewed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL)
+       ON DUPLICATE KEY UPDATE
+         full_name=VALUES(full_name),
+         country=VALUES(country),
+         document_type=VALUES(document_type),
+         document_number=VALUES(document_number),
+         document_filename=VALUES(document_filename),
+         document_mime=VALUES(document_mime),
+         document_data=VALUES(document_data),
+         status='pending',
+         rejection_reason=NULL,
+         reviewed_by=NULL,
+         reviewed_at=NULL`,
+      [userId, payload.full_name, payload.country, payload.document_type, payload.document_number, file.name, file.mime, file.buffer]
+    );
+
+    const [rows] = await pool.query(
+      `SELECT kr.*, au.username AS reviewer_username FROM kyc_requests kr LEFT JOIN admin_users au ON kr.reviewed_by = au.id WHERE kr.user_id=? LIMIT 1`,
+      [userId]
+    );
+    const request = presentKycRow(rows[0]);
+    res.json({ ok: true, status: request.status, request, can_resubmit: request.status === 'rejected' });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      const missing = err.errors
+        .filter((e) => e.code === 'invalid_type' && e.received === 'undefined')
+        .map((e) => e.path[0]);
+      return next({ status: 400, code: 'BAD_INPUT', message: err.errors[0]?.message || 'Invalid input', details: { missing } });
+    }
     next(err);
   }
 });
@@ -2656,6 +2781,64 @@ app.post('/admin/users/:id/balances/adjust', async (req, res, next) => {
     next(err);
   } finally {
     if (conn) conn.release();
+  }
+});
+
+app.get('/admin/kyc/requests', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { status, limit } = AdminKycQuerySchema.parse(req.query || {});
+    const params = [];
+    let sql =
+      'SELECT kr.*, u.email, u.username, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by';
+    if (status) {
+      sql += ' WHERE kr.status = ?';
+      params.push(status);
+    }
+    sql += ' ORDER BY kr.created_at DESC LIMIT ?';
+    params.push(limit);
+    const [rows] = await pool.query(sql, params);
+    res.json({ ok: true, requests: rows.map((row) => presentKycRow(row, { includeDocument: true })) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid filters', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.patch('/admin/kyc/requests/:id', async (req, res, next) => {
+  const requestId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(requestId) || requestId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid request id' });
+  try {
+    const admin = await requireAdmin(req);
+    const payload = AdminKycDecisionSchema.parse(req.body || {});
+    if (payload.status === 'rejected' && !payload.rejection_reason)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Rejection reason is required' });
+
+    const [[existing]] = await pool.query(
+      'SELECT kr.*, u.email, u.username, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by WHERE kr.id=?',
+      [requestId]
+    );
+    if (!existing) return next({ status: 404, code: 'NOT_FOUND', message: 'KYC request not found' });
+
+    await pool.query(
+      'UPDATE kyc_requests SET status=?, rejection_reason=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?',
+      [payload.status, payload.status === 'rejected' ? payload.rejection_reason : null, admin.id, requestId]
+    );
+
+    const [[updated]] = await pool.query(
+      'SELECT kr.*, u.email, u.username, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by WHERE kr.id=?',
+      [requestId]
+    );
+
+    res.json({ ok: true, request: presentKycRow(updated, { includeDocument: true }) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
   }
 });
 

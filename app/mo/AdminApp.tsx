@@ -6,6 +6,7 @@ import {
   CreditCard,
   Coins,
   DollarSign,
+  Download,
   HelpCircle,
   KeyRound,
   Layers,
@@ -21,6 +22,7 @@ import {
   Trash2,
   UserPlus,
   Users,
+  XCircle,
   Wallet,
 } from 'lucide-react';
 import { apiFetch } from '../lib/api';
@@ -37,7 +39,18 @@ interface Admin {
   last_login_at?: string | null;
 }
 
-type Section = 'overview' | 'admins' | 'users' | 'transactions' | 'staking' | 'pricing' | 'fees' | 'ai' | 'faq' | 'stripe';
+type Section =
+  | 'overview'
+  | 'admins'
+  | 'users'
+  | 'kyc'
+  | 'transactions'
+  | 'staking'
+  | 'pricing'
+  | 'fees'
+  | 'ai'
+  | 'faq'
+  | 'stripe';
 
 interface SummaryResponse {
   summary: {
@@ -106,6 +119,26 @@ type AiSettings = { daily_free_messages: number; message_price_eltx: string };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
+type AdminKycRequest = {
+  id: number;
+  user_id: number;
+  email?: string | null;
+  username?: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  full_name: string;
+  country: string;
+  document_type: string;
+  document_number: string;
+  document_filename?: string | null;
+  document_mime?: string | null;
+  document_base64?: string | null;
+  rejection_reason?: string | null;
+  reviewer_username?: string | null;
+  reviewed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 type SwapPricingRow = {
   asset: string;
   price_eltx: string;
@@ -144,6 +177,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
   { id: 'users', label: 'Customers', icon: Wallet },
+  { id: 'kyc', label: 'KYC & AML', icon: ShieldCheck },
   { id: 'transactions', label: 'Transactions', icon: LineChart },
   { id: 'staking', label: 'Staking', icon: Layers },
   { id: 'fees', label: 'Fees', icon: Coins },
@@ -1181,6 +1215,185 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
             <Users className="mb-3 h-10 w-10 text-blue-400" />
             Select a user to see full details.
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KycPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [requests, setRequests] = useState<AdminKycRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const query = filter === 'all' ? '' : `?status=${filter}`;
+    const res = await apiFetch<{ requests: AdminKycRequest[] }>(`/admin/kyc/requests${query}`);
+    if (res.ok) {
+      setRequests(res.data.requests || []);
+    } else {
+      onNotify(res.error || 'Failed to load KYC requests', 'error');
+    }
+    setLoading(false);
+  }, [filter, onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const badgeClass = (status: AdminKycRequest['status']) => {
+    const base = 'rounded-full px-3 py-1 text-xs font-semibold';
+    if (status === 'approved') return `${base} bg-emerald-500/10 text-emerald-200`;
+    if (status === 'pending') return `${base} bg-amber-500/10 text-amber-200`;
+    return `${base} bg-red-500/10 text-red-200`;
+  };
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  };
+
+  const handleDecision = async (row: AdminKycRequest, status: 'approved' | 'rejected') => {
+    let reason: string | undefined;
+    if (status === 'rejected') {
+      reason = window.prompt('سبب الرفض / Rejection reason') || '';
+      if (!reason.trim()) {
+        onNotify('Rejection reason is required', 'error');
+        return;
+      }
+    }
+    const res = await apiFetch<{ request: AdminKycRequest }>(`/admin/kyc/requests/${row.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, rejection_reason: reason?.trim() }),
+    });
+    if (res.ok) {
+      onNotify('KYC request updated', 'success');
+      setRequests((prev) => prev.map((r) => (r.id === row.id ? res.data.request : r)));
+    } else {
+      onNotify(res.error || 'Failed to update request', 'error');
+    }
+  };
+
+  const handleDownload = (row: AdminKycRequest) => {
+    if (!row.document_base64) {
+      onNotify('No document available for this request', 'error');
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = `data:${row.document_mime || 'application/octet-stream'};base64,${row.document_base64}`;
+    link.download = row.document_filename || `kyc-${row.user_id}.bin`;
+    link.click();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold">KYC & AML requests</h3>
+          <p className="text-sm text-white/60">راجع طلبات التحقق ووافق أو ارفض مع ملاحظات واضحة.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as typeof filter)}
+            className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs focus:border-blue-500 focus:outline-none"
+          >
+            <option value="pending">Pending</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="all">All</option>
+          </select>
+          <button
+            onClick={load}
+            className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+          >
+            <RefreshCw className="h-3 w-3" /> Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/5">
+        {loading ? (
+          <div className="flex h-56 items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+          </div>
+        ) : requests.length ? (
+          <table className="min-w-full divide-y divide-white/10 text-sm">
+            <thead className="bg-white/5 text-xs uppercase text-white/60">
+              <tr>
+                <th className="px-3 py-2 text-left">User</th>
+                <th className="px-3 py-2 text-left">Name & Country</th>
+                <th className="px-3 py-2 text-left">Document</th>
+                <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Submitted</th>
+                <th className="px-3 py-2 text-left">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-white/10">
+              {requests.map((row) => (
+                <tr key={row.id} className="align-top">
+                  <td className="px-3 py-3">
+                    <div className="font-semibold">#{row.user_id}</div>
+                    <div className="text-xs text-white/60">{row.email || row.username || '—'}</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="font-semibold">{row.full_name}</div>
+                    <div className="text-xs text-white/60">{row.country}</div>
+                    <div className="text-xs text-white/50">{row.document_type} — {row.document_number}</div>
+                    {row.rejection_reason && (
+                      <div className="mt-2 rounded-lg bg-red-500/10 p-2 text-xs text-red-100">
+                        <div className="font-semibold">Rejection reason</div>
+                        <div>{row.rejection_reason}</div>
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="text-xs text-white/70">{row.document_filename || 'No file name'}</div>
+                    <button
+                      onClick={() => handleDownload(row)}
+                      className="mt-2 flex items-center gap-1 text-xs text-blue-200 hover:text-blue-100"
+                    >
+                      <Download className="h-3 w-3" /> Download
+                    </button>
+                  </td>
+                  <td className="px-3 py-3">
+                    <span className={badgeClass(row.status)}>{row.status}</span>
+                    {row.reviewer_username && (
+                      <div className="mt-1 text-[11px] text-white/50">Reviewed by {row.reviewer_username}</div>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-xs text-white/70">
+                    <div>Created: {formatDate(row.created_at)}</div>
+                    <div>Updated: {formatDate(row.updated_at)}</div>
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-col gap-2">
+                      <button
+                        onClick={() => handleDecision(row, 'approved')}
+                        className="flex items-center gap-2 rounded-full border border-emerald-500/50 px-3 py-1 text-xs text-emerald-100 transition hover:border-emerald-300"
+                        disabled={row.status === 'approved'}
+                      >
+                        <ShieldCheck className="h-3 w-3" /> Approve
+                      </button>
+                      <button
+                        onClick={() => handleDecision(row, 'rejected')}
+                        className="flex items-center gap-2 rounded-full border border-red-500/50 px-3 py-1 text-xs text-red-100 transition hover:border-red-300"
+                      >
+                        <XCircle className="h-3 w-3" /> Reject
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="p-6 text-sm text-white/60">No KYC requests found for this filter.</div>
         )}
       </div>
     </div>
@@ -2675,6 +2888,7 @@ export default function AdminApp() {
           {active === 'overview' && <OverviewPanel onError={(msg) => notify(msg, 'error')} />}
           {active === 'admins' && <AdminUsersPanel admin={admin} onNotify={notify} />}
           {active === 'users' && <UsersPanel onNotify={notify} />}
+          {active === 'kyc' && <KycPanel onNotify={notify} />}
           {active === 'transactions' && <TransactionsPanel onNotify={notify} />}
           {active === 'staking' && <StakingPanel onNotify={notify} />}
           {active === 'fees' && <FeesPanel onNotify={notify} />}
