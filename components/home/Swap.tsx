@@ -4,7 +4,7 @@ import { ArrowRightLeft, Link2 } from 'lucide-react';
 import SectionCta from './SectionCta';
 
 const UNISWAP_URL =
-  'https://app.uniswap.org/explore/tokens/ethereum/0x1D8c1B91956E85F7CB1f2753E6226b93e5101A6c?inputCurrency=NATIVE&embed=1&theme=dark';
+  'https://app.uniswap.org/swap?outputChain=mainnet&inputCurrency=NATIVE&outputCurrency=0x1d8c1b91956e85f7cb1f2753e6226b93e5101a6c&embed=1&theme=dark';
 
 export default function Swap() {
   return (
@@ -46,7 +46,7 @@ export default function Swap() {
               <iframe
                 src={UNISWAP_URL}
                 title="Swap ELTX"
-                className="w-full h-[900px] md:h-[1000px] rounded-lg"
+                className="w-full h-[1100px] md:h-[1200px] rounded-lg"
                 allow="clipboard-read; clipboard-write; accelerometer; autoplay; gyroscope"
               />
             </div>
