@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS kyc_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  full_name VARCHAR(255) NOT NULL,
+  country VARCHAR(120) NOT NULL,
+  document_type VARCHAR(120) NOT NULL,
+  document_number VARCHAR(120) NOT NULL,
+  document_filename VARCHAR(255) DEFAULT NULL,
+  document_mime VARCHAR(120) DEFAULT NULL,
+  document_data LONGBLOB NOT NULL,
+  status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+  rejection_reason TEXT DEFAULT NULL,
+  reviewed_by INT UNSIGNED DEFAULT NULL,
+  reviewed_at DATETIME DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_kyc_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_kyc_admin FOREIGN KEY (reviewed_by) REFERENCES admin_users(id) ON DELETE SET NULL,
+  UNIQUE KEY kyc_requests_user_unique (user_id),
+  INDEX idx_kyc_status (status)
+);
