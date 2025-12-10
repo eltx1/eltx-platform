@@ -1,26 +1,8 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { dict, useLang } from '../lib/i18n';
+const WHITEPAPER_URL =
+  'https://docs.google.com/document/d/1GvKvPaaUwEH7oVHFG7AnQsAlfQCr7yeM/edit?usp=sharing&ouid=105525474968747453793&rtpof=true&sd=true';
 
 export default function DocsPage() {
-  const { lang } = useLang();
-  const t = dict[lang];
-  const linkText = { en: 'Read the white paper', ar: 'اقرأ الورقة البيضاء' }[lang];
-  const url =
-    'https://docs.google.com/document/d/1GvKvPaaUwEH7oVHFG7AnQsAlfQCr7yeM/edit?tab=t.0';
-  return (
-    <div className="p-4 space-y-4">
-      <h1 className="text-xl font-semibold">{t.footer.docs}</h1>
-      <p className="opacity-80 text-sm">
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-yellow-500 hover:underline"
-        >
-          {linkText}
-        </a>
-      </p>
-    </div>
-  );
+  redirect(WHITEPAPER_URL);
 }
