@@ -8,6 +8,7 @@ import {
   ReceiptText,
   CreditCard,
   HelpCircle,
+  ShieldCheck,
   Settings,
   Coins,
   ArrowLeftRight,
@@ -204,8 +205,14 @@ export default function DashboardPage() {
         <div className="pt-8 border-t border-white/10">
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/80">Profile</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-            <SectionCard title="Settings" href="/settings" icon={Settings} />
-            <SectionCard title="FAQ" href="/faq" icon={HelpCircle} />
+            <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
+            <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
+            <SectionCard
+              title={t.dashboard.cards.kyc.title}
+              subtitle={t.dashboard.cards.kyc.subtitle}
+              href="/kyc"
+              icon={ShieldCheck}
+            />
           </div>
         </div>
       </div>
