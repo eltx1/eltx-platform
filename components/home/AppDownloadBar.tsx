@@ -12,8 +12,8 @@ export default function AppDownloadBar() {
   const [logoError, setLogoError] = useState(false);
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 px-4 sm:bottom-6">
-      <div className="pointer-events-auto mx-auto max-w-5xl rounded-full border border-white/10 bg-black/75 backdrop-blur-xl shadow-2xl shadow-black/40">
+    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:pb-6">
+      <div className="pointer-events-auto mx-auto max-w-5xl rounded-full border border-white/15 bg-black shadow-2xl shadow-black/50 ring-1 ring-white/5">
         <div className="flex items-center justify-between gap-4 px-4 py-3 sm:gap-6 md:px-6">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             {!logoError ? (
