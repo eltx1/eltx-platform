@@ -1,7 +1,6 @@
 'use client';
 
 import { Download } from 'lucide-react';
-import Link from 'next/link';
 import Image from 'next/image';
 import { useState } from 'react';
 import { dict, useLang } from '../../app/lib/i18n';
@@ -35,14 +34,15 @@ export default function AppDownloadBar() {
               <p className="text-xs text-white/70 leading-snug line-clamp-2">{t.home.app.copy}</p>
             </div>
           </div>
-          <Link
+          <a
             href={t.home.app.downloadUrl}
             target="_blank"
+            rel="noreferrer"
             className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-purple-700 via-fuchsia-600 to-cyan-400 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-900/40 transition hover:scale-105"
           >
             <Download className="h-4 w-4" />
             <span>{t.home.app.cta}</span>
-          </Link>
+          </a>
         </div>
       </div>
     </div>
