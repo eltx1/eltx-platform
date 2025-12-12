@@ -7,13 +7,20 @@ import About from '../components/home/About';
 import EthereumToken from '../components/home/EthereumToken';
 import Swap from '../components/home/Swap';
 import Partners from '../components/home/Partners';
+import UserTrust from '../components/home/UserTrust';
+import MarketSpotlight from '../components/home/MarketSpotlight';
+import AppDownloadBar from '../components/home/AppDownloadBar';
+import { getHomeOverview } from './lib/home-data';
 
 
-export default function Page(){
+export default async function Page(){
+  const overview = await getHomeOverview();
   return(
     <main className="flex flex-col">
       <Hero />
+      <UserTrust userCount={overview.userCount} />
       <About />
+      <MarketSpotlight markets={overview.markets} />
       <Industries />
       <Features />
       <EthereumToken />
@@ -21,6 +28,7 @@ export default function Page(){
       <Tokenomics />
       <Roadmap />
       <Partners />
+      <AppDownloadBar />
 
     </main>
   );

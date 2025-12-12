@@ -397,6 +397,41 @@ export const dict = {
         },
       },
     },
+    home: {
+      trust: {
+        eyebrow: 'Community',
+        subtitle: 'users trust ELTX every day.',
+        copy: 'We are scaling fast with secure infrastructure, audited smart contracts, and dedicated support across regions.',
+        highlights: [
+          { title: '24/7 reliability', copy: 'Cloud uptime, live monitoring, and resilient rails.' },
+          { title: 'Security first', copy: 'Audited contracts and strict operational controls.' },
+          { title: 'Global ready', copy: 'Optimized for cross-border remittances and partners.' },
+          { title: 'Human support', copy: 'Real people ready to help at every step.' },
+        ],
+        downloadCta: 'Download ELTX app',
+      },
+      market: {
+        eyebrow: 'Market',
+        title: 'Market pulse',
+        copy: 'Live snapshots for ELTX and the top coins, with graceful fallbacks if any provider slows down.',
+        cta: 'Get the app',
+        fresh: 'Live now',
+        sourceLabel: {
+          spot: 'Spot price',
+          coingecko: 'CoinGecko',
+          cache: 'Cached',
+          fallback: 'Offline copy',
+          unknown: 'Updating',
+        },
+      },
+      app: {
+        short: 'ELTX',
+        title: 'ELTX App',
+        copy: 'Trade, pay, and manage your wallet on the go.',
+        cta: 'Download',
+        downloadUrl: 'https://play.google.com/store/apps/details?id=online.eltx.app',
+      },
+    },
     nav: {
       home: 'Home',
       faq: 'FAQ',
@@ -908,6 +943,41 @@ export const dict = {
           active: 'نشط',
           matured: 'مستحق',
         },
+      },
+    },
+    home: {
+      trust: {
+        eyebrow: 'المجتمع',
+        subtitle: 'مستخدم بيختار ELTX كل يوم.',
+        copy: 'بننمو بسرعة ببنية قوية، عقود ذكية متراجعة، ودعم بشري متوفر في كل منطقة.',
+        highlights: [
+          { title: 'جاهزية 24/7', copy: 'سيرفرات مستقرة ومراقبة لحظية.' },
+          { title: 'أمان أولاً', copy: 'عقود ذكية متراجعة وضوابط تشغيل صارمة.' },
+          { title: 'جاهز للعالمية', copy: 'متظبط للتحويلات عبر الحدود والشراكات.' },
+          { title: 'دعم بشري', copy: 'فريق خدمة عملاء جاهز يساعدك في أي خطوة.' },
+        ],
+        downloadCta: 'حمّل تطبيق ELTX',
+      },
+      market: {
+        eyebrow: 'السوق',
+        title: 'نبض السوق',
+        copy: 'أسعار مباشرة لـ ELTX وأهم العملات، مع بدائل تلقائية لو أي مزود اتأخر.',
+        cta: 'حمّل التطبيق',
+        fresh: 'مباشر دلوقتي',
+        sourceLabel: {
+          spot: 'سعر السبوت',
+          coingecko: 'CoinGecko',
+          cache: 'نسخة مخزنة',
+          fallback: 'نسخة احتياطية',
+          unknown: 'جاري التحديث',
+        },
+      },
+      app: {
+        short: 'ELTX',
+        title: 'تطبيق ELTX',
+        copy: 'تداول وحوّل وادير محفظتك من الموبايل.',
+        cta: 'تحميل',
+        downloadUrl: 'https://play.google.com/store/apps/details?id=online.eltx.app',
       },
     },
     nav: {
