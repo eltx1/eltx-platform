@@ -400,15 +400,20 @@ export const dict = {
     home: {
       trust: {
         eyebrow: 'Community',
-        subtitle: 'users trust ELTX every day.',
-        copy: 'We are scaling fast with secure infrastructure, audited smart contracts, and dedicated support across regions.',
-        highlights: [
-          { title: '24/7 reliability', copy: 'Cloud uptime, live monitoring, and resilient rails.' },
-          { title: 'Security first', copy: 'Audited contracts and strict operational controls.' },
-          { title: 'Global ready', copy: 'Optimized for cross-border remittances and partners.' },
-          { title: 'Human support', copy: 'Real people ready to help at every step.' },
+        headline: 'Users trust ELTX',
+        subtitle: 'users choose ELTX every day.',
+        copy:
+          'Verified users, audited smart contracts, and real humans watching uptime so you can see the numbers for yourself.',
+        badges: ['Audited smart contracts', 'Identity-verified on-ramps', 'Live status + monitoring'],
+        metrics: [
+          { value: '99.98%', label: 'Platform uptime', note: 'Monitored around the clock' },
+          { value: '65+', label: 'Active markets & corridors', note: 'Expanding weekly with partners' },
+          { value: '24/7', label: 'Human support', note: 'Fast replies in English & Arabic' },
         ],
         downloadCta: 'Download ELTX app',
+        statusCta: 'View live status',
+        verifiedUsersLabel: 'Verified users',
+        growthBadge: 'Growing every week',
       },
       market: {
         eyebrow: 'Market',
@@ -948,15 +953,19 @@ export const dict = {
     home: {
       trust: {
         eyebrow: 'المجتمع',
+        headline: 'المستخدمين واثقين في ELTX',
         subtitle: 'مستخدم بيختار ELTX كل يوم.',
-        copy: 'بننمو بسرعة ببنية قوية، عقود ذكية متراجعة، ودعم بشري متوفر في كل منطقة.',
-        highlights: [
-          { title: 'جاهزية 24/7', copy: 'سيرفرات مستقرة ومراقبة لحظية.' },
-          { title: 'أمان أولاً', copy: 'عقود ذكية متراجعة وضوابط تشغيل صارمة.' },
-          { title: 'جاهز للعالمية', copy: 'متظبط للتحويلات عبر الحدود والشراكات.' },
-          { title: 'دعم بشري', copy: 'فريق خدمة عملاء جاهز يساعدك في أي خطوة.' },
+        copy: 'مستخدمين موثقين، عقود ذكية متراجعة، وبنيتنا شغالة وتحت المراقبة عشان تشوف الأرقام بنفسك.',
+        badges: ['عقود ذكية متراجعة', 'تفعيل بهويات موثقة', 'لوحة حالة لحظية'],
+        metrics: [
+          { value: '99.98%', label: 'جاهزية المنصة', note: 'مراقبة 24/7' },
+          { value: '65+', label: 'أسواق وممرات نشطة', note: 'بتكبر أسبوعياً مع الشركاء' },
+          { value: '24/7', label: 'دعم بشري', note: 'رد سريع بالإنجليزي والعربي' },
         ],
         downloadCta: 'حمّل تطبيق ELTX',
+        statusCta: 'شوف الحالة الحية',
+        verifiedUsersLabel: 'مستخدمين موثقين',
+        growthBadge: 'بننمو كل أسبوع',
       },
       market: {
         eyebrow: 'السوق',
