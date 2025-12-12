@@ -11,12 +11,14 @@ import UserTrust from '../components/home/UserTrust';
 import MarketSpotlight from '../components/home/MarketSpotlight';
 import AppDownloadBar from '../components/home/AppDownloadBar';
 import { getHomeOverview } from './lib/home-data';
+import ScrollToTopOnLoad from '../components/ScrollToTopOnLoad';
 
 
 export default async function Page(){
   const overview = await getHomeOverview();
   return(
     <main className="flex flex-col">
+      <ScrollToTopOnLoad />
       <Hero />
       <UserTrust userCount={overview.userCount} />
       <About />
