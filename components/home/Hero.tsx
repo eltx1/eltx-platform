@@ -11,7 +11,6 @@ export default function Hero() {
   const { user } = useAuth();
   const signupHref = user ? '/dashboard' : '/signup';
   const loginHref = user ? '/dashboard' : '/login';
-  const swapHref = '#swap-eltx';
   const [logoError, setLogoError] = useState(false);
   return (
     <section className="relative overflow-hidden text-white py-20 md:py-28">
@@ -85,12 +84,6 @@ export default function Hero() {
                 <LogIn className="h-4 w-4" />
               </span>
               <span>{user ? 'Return to account' : 'Sign in'}</span>
-            </Link>
-            <Link
-              href={swapHref}
-              className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-6 py-3 text-base font-semibold text-white/90 shadow-inner shadow-black/40 transition hover:border-cyan-300/50 hover:text-white"
-            >
-              Buy ELTX now
             </Link>
           </motion.div>
           <div className="flex flex-wrap justify-center md:justify-start gap-3 text-xs md:text-sm opacity-90">
