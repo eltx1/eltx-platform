@@ -30,7 +30,7 @@ export default function UserTrust({ userCount }: { userCount: number }) {
           className="overflow-hidden rounded-3xl border border-white/10 bg-black/60 shadow-2xl shadow-purple-900/40 backdrop-blur-xl"
         >
           <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-purple-500 via-fuchsia-500 to-cyan-400" />
-          <div className="grid items-center gap-8 px-6 py-8 md:grid-cols-[1.1fr_0.9fr] md:px-10">
+          <div className="px-6 py-8 md:px-10">
             <div className="space-y-5">
               <div className="flex flex-wrap items-center gap-3 text-[11px] uppercase tracking-[0.24em] text-purple-100/80">
                 <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
@@ -96,21 +96,6 @@ export default function UserTrust({ userCount }: { userCount: number }) {
                   </span>
                 ))}
               </div>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 md:gap-4">
-              {t.home.trust.metrics.map((item) => (
-                <div
-                  key={item.label}
-                  className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-5 shadow-lg shadow-black/30"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-br from-purple-500/10 via-transparent to-cyan-400/10" />
-                  <div className="relative space-y-1">
-                    <p className="text-2xl font-bold leading-tight text-white">{item.value}</p>
-                    <p className="text-sm text-white/80">{item.label}</p>
-                    <p className="text-xs text-white/60 line-clamp-2">{item.note}</p>
-                  </div>
-                </div>
-              ))}
             </div>
           </div>
         </motion.div>
