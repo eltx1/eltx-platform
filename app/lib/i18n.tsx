@@ -405,11 +405,6 @@ export const dict = {
         copy:
           'Verified users, audited smart contracts, and real humans watching uptime so you can see the numbers for yourself.',
         badges: ['Audited smart contracts', 'Identity-verified on-ramps', 'Live status + monitoring'],
-        metrics: [
-          { value: '99.98%', label: 'Platform uptime', note: 'Monitored around the clock' },
-          { value: '65+', label: 'Active markets & corridors', note: 'Expanding weekly with partners' },
-          { value: '24/7', label: 'Human support', note: 'Fast replies in English & Arabic' },
-        ],
         downloadCta: 'Download ELTX app',
         statusCta: 'View live status',
         verifiedUsersLabel: 'Verified users',
@@ -957,11 +952,6 @@ export const dict = {
         subtitle: 'مستخدم بيختار ELTX كل يوم.',
         copy: 'مستخدمين موثقين، عقود ذكية متراجعة، وبنيتنا شغالة وتحت المراقبة عشان تشوف الأرقام بنفسك.',
         badges: ['عقود ذكية متراجعة', 'تفعيل بهويات موثقة', 'لوحة حالة لحظية'],
-        metrics: [
-          { value: '99.98%', label: 'جاهزية المنصة', note: 'مراقبة 24/7' },
-          { value: '65+', label: 'أسواق وممرات نشطة', note: 'بتكبر أسبوعياً مع الشركاء' },
-          { value: '24/7', label: 'دعم بشري', note: 'رد سريع بالإنجليزي والعربي' },
-        ],
         downloadCta: 'حمّل تطبيق ELTX',
         statusCta: 'شوف الحالة الحية',
         verifiedUsersLabel: 'مستخدمين موثقين',
