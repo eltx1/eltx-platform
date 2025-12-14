@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { ArrowDown, ArrowUp, Download, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -18,14 +19,11 @@ function formatChange(value: number | null | undefined) {
   return `${fixed}%`;
 }
 
-const COIN_BRANDING: Record<
-  string,
-  { gradient: string; ring: string; glyph?: string; image?: string; textClass?: string }
-> = {
+const COIN_BRANDING: Record<string, { gradient: string; ring: string; glyph?: string; fallbackImage?: string; textClass?: string }> = {
   ELTX: {
     gradient: 'from-purple-500 via-fuchsia-500 to-cyan-400',
     ring: 'shadow-purple-500/50',
-    image: '/assets/img/logo.jpeg',
+    fallbackImage: '/assets/img/logo.jpeg',
   },
   BTC: {
     gradient: 'from-amber-500 via-orange-500 to-yellow-400',
@@ -53,7 +51,8 @@ const COIN_BRANDING: Record<
   },
 };
 
-function CoinAvatar({ symbol }: { symbol: string }) {
+function CoinAvatar({ symbol, logoUrl }: { symbol: string; logoUrl?: string | null }) {
+  const [broken, setBroken] = useState(false);
   const branding = COIN_BRANDING[symbol] ?? {
     gradient: 'from-slate-600 via-slate-700 to-slate-900',
     ring: 'shadow-black/40',
@@ -61,18 +60,24 @@ function CoinAvatar({ symbol }: { symbol: string }) {
     textClass: 'text-white',
   };
 
+  const displayImage = !broken ? logoUrl ?? branding.fallbackImage : undefined;
+
   return (
     <div
       className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br md:h-11 md:w-11 md:rounded-2xl ${branding.gradient} shadow-lg ${branding.ring}`}
     >
       <div className="absolute inset-0 opacity-70" />
-      {branding.image ? (
+      {displayImage ? (
         <Image
-          src={branding.image}
+          src={displayImage}
           alt={`${symbol} logo`}
           width={48}
           height={48}
           className="h-full w-full object-cover"
+          sizes="44px"
+          unoptimized
+          loader={({ src }) => src}
+          onError={() => setBroken(true)}
         />
       ) : (
         <span className={`relative text-base font-bold drop-shadow md:text-lg ${branding.textClass ?? 'text-white'}`}>

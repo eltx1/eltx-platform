@@ -10,6 +10,7 @@ export type HomeMarketEntry = {
   change24h?: number | null;
   source: 'spot' | 'coingecko' | 'cache' | 'fallback' | 'unknown';
   updatedAt: string | null;
+  logoUrl?: string | null;
 };
 
 const CACHE_TABLE_SQL = `
@@ -23,11 +24,11 @@ const CACHE_TABLE_SQL = `
 `;
 
 const MARKET_ASSETS = [
-  { symbol: 'ELTX', label: 'ELTX', provider: 'internal' as const },
-  { symbol: 'BTC', label: 'Bitcoin', provider: 'coingecko' as const, providerId: 'bitcoin' },
-  { symbol: 'ETH', label: 'Ethereum', provider: 'coingecko' as const, providerId: 'ethereum' },
-  { symbol: 'BNB', label: 'BNB', provider: 'coingecko' as const, providerId: 'binancecoin' },
-  { symbol: 'SOL', label: 'Solana', provider: 'coingecko' as const, providerId: 'solana' },
+  { symbol: 'ELTX', label: 'ELTX', provider: 'internal' as const, logoSetting: 'market_logo_eltx_url' },
+  { symbol: 'BTC', label: 'Bitcoin', provider: 'coingecko' as const, providerId: 'bitcoin', logoSetting: 'market_logo_btc_url' },
+  { symbol: 'ETH', label: 'Ethereum', provider: 'coingecko' as const, providerId: 'ethereum', logoSetting: 'market_logo_eth_url' },
+  { symbol: 'BNB', label: 'BNB', provider: 'coingecko' as const, providerId: 'binancecoin', logoSetting: 'market_logo_bnb_url' },
+  { symbol: 'SOL', label: 'Solana', provider: 'coingecko' as const, providerId: 'solana', logoSetting: 'market_logo_sol_url' },
 ];
 
 const MARKET_CACHE_TTL_MS = 60 * 1000;
@@ -37,6 +38,18 @@ let pendingMarkets: Promise<HomeMarketEntry[]> | null = null;
 
 async function ensureCacheTable(db: Pool) {
   await db.query(CACHE_TABLE_SQL);
+}
+
+async function fetchMarketLogos(db: Pool): Promise<Record<string, string | null>> {
+  const logoSettings = MARKET_ASSETS.map((asset) => asset.logoSetting).filter(Boolean) as string[];
+  if (!logoSettings.length) return {};
+
+  const [rows] = await db.query('SELECT name, value FROM platform_settings WHERE name IN (?)', [logoSettings]);
+  const map: Record<string, string | null> = {};
+  for (const row of rows as any[]) {
+    map[String(row.name)] = row.value ?? null;
+  }
+  return map;
 }
 
 async function fetchUserCount(db: Pool): Promise<number> {
@@ -148,6 +161,7 @@ async function buildMarketEntries(): Promise<HomeMarketEntry[]> {
 
   pendingMarkets = (async () => {
     const cache = await readCache(db);
+    const logos = await fetchMarketLogos(db).catch(() => ({}));
     const external = await fetchCoingeckoPrices().catch(() => ({}));
     const eltxPrice = await fetchEltxPrice(db).catch(() => null);
     const result: HomeMarketEntry[] = [];
@@ -185,6 +199,7 @@ async function buildMarketEntries(): Promise<HomeMarketEntry[]> {
         change24h: change ?? null,
         source,
         updatedAt: cacheEntry?.updatedAt ?? null,
+        logoUrl: asset.logoSetting ? logos[asset.logoSetting] ?? null : null,
       });
     }
 
