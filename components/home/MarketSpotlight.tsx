@@ -19,7 +19,10 @@ function formatChange(value: number | null | undefined) {
   return `${fixed}%`;
 }
 
-const COIN_BRANDING: Record<string, { gradient: string; ring: string; glyph?: string; fallbackImage?: string; textClass?: string }> = {
+const COIN_BRANDING: Record<
+  string,
+  { gradient: string; ring: string; glyph?: string; fallbackImage?: string; textClass?: string; image?: string }
+> = {
   ELTX: {
     gradient: 'from-purple-500 via-fuchsia-500 to-cyan-400',
     ring: 'shadow-purple-500/50',
@@ -60,7 +63,7 @@ function CoinAvatar({ symbol, logoUrl }: { symbol: string; logoUrl?: string | nu
     textClass: 'text-white',
   };
 
-  const displayImage = !broken ? logoUrl ?? branding.fallbackImage : undefined;
+  const displayImage = !broken ? logoUrl ?? branding.image ?? branding.fallbackImage : undefined;
 
   return (
     <div
