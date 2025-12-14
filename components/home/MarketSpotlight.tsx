@@ -28,21 +28,25 @@ const COIN_BRANDING: Record<string, { gradient: string; ring: string; glyph?: st
   BTC: {
     gradient: 'from-amber-500 via-orange-500 to-yellow-400',
     ring: 'shadow-amber-500/50',
+    image: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
     textClass: 'text-amber-50',
   },
   ETH: {
     gradient: 'from-slate-400 via-indigo-400 to-purple-500',
     ring: 'shadow-indigo-500/40',
+    image: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
     textClass: 'text-slate-50',
   },
   BNB: {
     gradient: 'from-yellow-300 via-amber-400 to-orange-500',
     ring: 'shadow-yellow-400/50',
+    image: 'https://assets.coingecko.com/coins/images/825/large/binance-coin-logo.png',
     textClass: 'text-amber-900',
   },
   SOL: {
     gradient: 'from-emerald-400 via-teal-300 to-purple-400',
     ring: 'shadow-emerald-500/40',
+    image: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
     textClass: 'text-emerald-50',
   },
 };
@@ -130,7 +134,7 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
                 </div>
                 <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
                   <div className="flex flex-1 items-center gap-3 md:gap-4">
-                    <CoinAvatar symbol={item.symbol} logoUrl={item.logoUrl} />
+                    <CoinAvatar symbol={item.symbol} />
                     <div className="space-y-0.5">
                       <p className="text-sm font-semibold text-white md:text-base">{item.label}</p>
                       <p className="text-[10px] uppercase tracking-[0.28em] text-white/60 md:text-[11px]">{item.symbol}</p>
