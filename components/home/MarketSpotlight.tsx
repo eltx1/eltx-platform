@@ -30,25 +30,25 @@ const COIN_BRANDING: Record<
   BTC: {
     gradient: 'from-amber-500 via-orange-500 to-yellow-400',
     ring: 'shadow-amber-500/50',
-    glyph: '₿',
+    image: 'https://assets.coingecko.com/coins/images/1/large/bitcoin.png',
     textClass: 'text-amber-50',
   },
   ETH: {
     gradient: 'from-slate-400 via-indigo-400 to-purple-500',
     ring: 'shadow-indigo-500/40',
-    glyph: '⬢',
+    image: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png',
     textClass: 'text-slate-50',
   },
   BNB: {
     gradient: 'from-yellow-300 via-amber-400 to-orange-500',
     ring: 'shadow-yellow-400/50',
-    glyph: '◆',
+    image: 'https://assets.coingecko.com/coins/images/825/large/binance-coin-logo.png',
     textClass: 'text-amber-900',
   },
   SOL: {
     gradient: 'from-emerald-400 via-teal-300 to-purple-400',
     ring: 'shadow-emerald-500/40',
-    glyph: 'S',
+    image: 'https://assets.coingecko.com/coins/images/4128/large/solana.png',
     textClass: 'text-emerald-50',
   },
 };
@@ -63,7 +63,7 @@ function CoinAvatar({ symbol }: { symbol: string }) {
 
   return (
     <div
-      className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br md:h-12 md:w-12 md:rounded-2xl ${branding.gradient} shadow-lg ${branding.ring}`}
+      className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br md:h-11 md:w-11 md:rounded-2xl ${branding.gradient} shadow-lg ${branding.ring}`}
     >
       <div className="absolute inset-0 opacity-70" />
       {branding.image ? (
@@ -90,10 +90,10 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
   const appLink = t.home.app.downloadUrl;
 
   return (
-    <section className="relative overflow-hidden bg-[#040508] py-12 px-3 text-white md:py-16 md:px-6">
+    <section className="relative overflow-hidden bg-[#040508] py-10 px-3 text-white md:py-14 md:px-6">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(122,69,255,0.22),transparent_35%),_radial-gradient(circle_at_80%_10%,rgba(0,204,255,0.18),transparent_38%)]" />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-purple-500 via-fuchsia-500 to-cyan-400 opacity-60" />
-      <div className="relative mx-auto max-w-6xl space-y-8 md:space-y-10">
+      <div className="relative mx-auto max-w-5xl space-y-6 md:space-y-8">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between md:gap-4">
           <div className="space-y-2.5 md:space-y-3">
             <div className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-purple-50 md:gap-2 md:text-[11px]">
@@ -114,54 +114,47 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
             <span>{t.home.market.cta}</span>
           </Link>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
+        <div className="grid gap-3 md:gap-4">
           {markets.map((item) => {
             const changeLabel = formatChange(item.change24h);
             const isUp = (item.change24h ?? 0) >= 0;
             return (
               <div
                 key={item.symbol}
-                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 via-white/0 to-white/5 p-3 shadow-xl shadow-black/30 transition hover:-translate-y-1 sm:p-4"
+                className="group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 via-white/0 to-white/5 px-3 py-2.5 shadow-lg shadow-black/30 transition hover:-translate-y-0.5 md:px-4 md:py-3"
               >
                 <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
                   <div className="absolute -right-12 -top-16 h-32 w-32 rounded-full bg-cyan-500/15 blur-2xl" />
                   <div className="absolute -left-12 -bottom-10 h-28 w-28 rounded-full bg-purple-600/20 blur-2xl" />
                 </div>
-                <div className="relative flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
+                <div className="relative flex flex-col gap-3 md:flex-row md:items-center md:gap-4">
+                  <div className="flex flex-1 items-center gap-3 md:gap-4">
                     <CoinAvatar symbol={item.symbol} />
                     <div className="space-y-0.5">
-                      <p className="text-xs font-semibold text-white md:text-sm">{item.label}</p>
+                      <p className="text-sm font-semibold text-white md:text-base">{item.label}</p>
                       <p className="text-[10px] uppercase tracking-[0.28em] text-white/60 md:text-[11px]">{item.symbol}</p>
                     </div>
                   </div>
-                  {changeLabel ? (
-                    <div
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-inner shadow-black/30 ${
-                        isUp ? 'bg-emerald-500/20 text-emerald-100' : 'bg-rose-500/20 text-rose-100'
-                      }`}
-                    >
-                      {isUp ? <ArrowUp className="h-3.5 w-3.5 md:h-4 md:w-4" /> : <ArrowDown className="h-3.5 w-3.5 md:h-4 md:w-4" />}
-                      <span>{changeLabel}</span>
+                  <div className="flex flex-1 items-center justify-between gap-2 md:justify-end md:gap-4">
+                    <div className="text-left md:text-right">
+                      <p className="text-lg font-bold md:text-xl">{formatUsd(item.priceUsd)}</p>
+                      <p className="text-[11px] text-white/60 md:text-xs">{t.home.market.sourceLabel[item.source] ?? t.home.market.sourceLabel.unknown}</p>
                     </div>
-                  ) : (
-                    <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/80">
-                      <Sparkles className="h-3.5 w-3.5" />
-                      <span>{t.home.market.fresh}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="relative mt-3 flex items-end justify-between gap-3 sm:mt-4">
-                  <div>
-                    <p className="text-lg font-bold md:text-2xl">{formatUsd(item.priceUsd)}</p>
-                    <p className="text-[11px] text-white/60 md:text-xs">{t.home.market.sourceLabel[item.source] ?? t.home.market.sourceLabel.unknown}</p>
-                  </div>
-                  <div className="flex flex-col items-end gap-1 text-right text-[10px] text-white/60 md:text-[11px]">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-black/40 px-2 py-1 font-semibold uppercase tracking-[0.18em] text-white/70">
-                      <span className="h-1.5 w-1.5 rounded-full bg-gradient-to-r from-purple-400 to-cyan-300" />
-                      Live
-                    </span>
-                    <span className="text-[10px] text-white/50 md:text-[11px]">{t.home.app.short}</span>
+                    {changeLabel ? (
+                      <div
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-inner shadow-black/30 ${
+                          isUp ? 'bg-emerald-500/20 text-emerald-100' : 'bg-rose-500/20 text-rose-100'
+                        }`}
+                      >
+                        {isUp ? <ArrowUp className="h-3.5 w-3.5 md:h-4 md:w-4" /> : <ArrowDown className="h-3.5 w-3.5 md:h-4 md:w-4" />}
+                        <span>{changeLabel}</span>
+                      </div>
+                    ) : (
+                      <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs text-white/80">
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>{t.home.market.fresh}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
