@@ -506,6 +506,13 @@ export const dict = {
       logout: 'Logout',
       language: 'Language',
     },
+    appNav: {
+      home: 'Home',
+      wallet: 'Wallet',
+      spotTrade: 'Spot trade',
+      pay: 'Pay',
+      earn: 'Earn',
+    },
     footer: {
       about: 'About',
       docs: 'Docs',
@@ -1110,6 +1117,13 @@ export const dict = {
       settings: 'الإعدادات',
       logout: 'تسجيل الخروج',
       language: 'اللغة',
+    },
+    appNav: {
+      home: 'الرئيسية',
+      wallet: 'المحفظة',
+      spotTrade: 'تداول فوري',
+      pay: 'إرسال',
+      earn: 'الأرباح',
     },
     footer: {
       about: 'حول',
