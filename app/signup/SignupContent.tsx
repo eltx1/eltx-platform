@@ -21,9 +21,15 @@ export default function SignupContent() {
     e.preventDefault();
     setError('');
     setLoading(true);
+
+    const sanitizedEmail = email.trim();
+    const rawUsername = sanitizedEmail.split('@')[0] || 'user';
+    const cleanedUsername = rawUsername.replace(/[^a-zA-Z0-9._-]/g, '') || 'user';
+    const username = cleanedUsername.length >= 3 ? cleanedUsername.slice(0, 32) : `${cleanedUsername}123`;
+
     const res = await apiFetch<any>('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email: sanitizedEmail, password, language: lang, username }),
     });
     if (!res.ok) {
       const err = (res.data as any)?.error;
