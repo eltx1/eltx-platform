@@ -2,7 +2,15 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CandlestickChart, Home, Send, Sparkles, Wallet } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CandlestickChart,
+  Home,
+  Receipt,
+  Send,
+  Sparkles,
+  Wallet,
+} from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
 
 function NavItem({
@@ -19,8 +27,8 @@ function NavItem({
   return (
     <Link
       href={href}
-      className={`flex flex-col items-center gap-1 text-[11px] transition-colors ${
-        active ? 'text-white' : 'text-white/70 hover:text-white'
+      className={`flex flex-col items-center gap-1 text-[11px] font-medium transition-colors ${
+        active ? 'text-indigo-700' : 'text-slate-500 hover:text-slate-700'
       }`}
       aria-label={label}
     >
@@ -41,13 +49,15 @@ export default function AppBottomNav() {
     { href: '/dashboard', label: t.appNav.home, icon: Home },
     { href: '/wallet', label: t.appNav.wallet, icon: Wallet },
     { href: '/pay', label: t.appNav.pay, icon: Send },
-    { href: '/earn', label: t.appNav.earn, icon: Sparkles },
+    { href: '/transactions', label: t.appNav.transactions, icon: Receipt },
+    { href: '/staking', label: t.appNav.staking, icon: Sparkles },
+    { href: '/trade', label: t.appNav.swap, icon: ArrowLeftRight },
   ];
 
   return (
-    <nav className="md:hidden fixed inset-x-3 bottom-4 z-40">
-      <div className="relative">
-        <div className="flex items-center justify-between rounded-3xl border border-white/10 bg-white/5 px-5 py-3 backdrop-blur-2xl shadow-[0_12px_45px_rgba(99,102,241,0.28)]">
+    <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 px-4 pb-4">
+      <div className="relative max-w-3xl mx-auto">
+        <div className="grid grid-cols-6 items-center rounded-[24px] border border-white/20 bg-white/95 px-3 py-3 text-slate-700 shadow-[0_18px_70px_rgba(104,48,238,0.32)] backdrop-blur-xl">
           {items.map((item) => (
             <NavItem key={item.href} {...item} active={isActive(item.href)} />
           ))}
@@ -56,9 +66,9 @@ export default function AppBottomNav() {
         <Link
           href="/trade/spot"
           aria-label={t.appNav.spotTrade}
-          className="absolute -top-5 left-1/2 -translate-x-1/2"
+          className="absolute -top-8 left-1/2 -translate-x-1/2"
         >
-          <div className="h-14 w-14 rounded-full bg-gradient-to-tr from-indigo-500 via-violet-500 to-purple-400 shadow-[0_16px_40px_rgba(109,40,217,0.45)] grid place-items-center ring-4 ring-neutral-950">
+          <div className="grid h-16 w-16 place-items-center rounded-full bg-gradient-to-tr from-indigo-600 via-violet-600 to-purple-500 shadow-[0_24px_55px_rgba(109,40,217,0.55)] ring-8 ring-white">
             <CandlestickChart className="h-6 w-6 text-white" strokeWidth={2.25} />
           </div>
           <span className="sr-only">{t.appNav.spotTrade}</span>
