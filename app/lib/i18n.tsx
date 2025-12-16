@@ -511,6 +511,9 @@ export const dict = {
       wallet: 'Wallet',
       spotTrade: 'Spot trade',
       pay: 'Pay',
+      transactions: 'Transactions',
+      staking: 'Staking',
+      swap: 'Swap',
       earn: 'Earn',
     },
     footer: {
@@ -1123,6 +1126,9 @@ export const dict = {
       wallet: 'المحفظة',
       spotTrade: 'تداول فوري',
       pay: 'إرسال',
+      transactions: 'المعاملات',
+      staking: 'الستاكينج',
+      swap: 'المبادلة',
       earn: 'الأرباح',
     },
     footer: {
