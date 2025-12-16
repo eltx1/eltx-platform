@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  CandlestickChart,
+  ArrowLeftRight,
   CreditCard,
   Home,
   Sparkles,
@@ -22,17 +22,29 @@ function NavItem({
   icon: typeof Home;
   active: boolean;
 }) {
-  const iconColor = active ? 'text-violet-600' : 'text-slate-500';
-  const labelColor = active ? 'text-violet-700' : 'text-slate-500';
-
   return (
     <Link
       href={href}
       aria-label={label}
-      className="flex flex-col items-center gap-1 text-[11px] font-medium"
+      aria-current={active ? 'page' : undefined}
+      className="group flex flex-col items-center gap-1 text-[11px] font-semibold tracking-tight"
     >
-      <Icon className={`h-6 w-6 ${iconColor}`} strokeWidth={2.25} />
-      <span className={`leading-none ${labelColor}`}>{label}</span>
+      <div
+        className={`grid h-11 w-11 place-items-center rounded-2xl transition-all duration-200 ${
+          active
+            ? 'bg-violet-50 text-violet-600 shadow-[0_10px_26px_rgba(124,58,237,0.15)] ring-1 ring-violet-100'
+            : 'text-slate-500 hover:text-slate-700'
+        }`}
+      >
+        <Icon className="h-6 w-6" strokeWidth={2.25} />
+      </div>
+      <span
+        className={`leading-none transition-colors duration-150 ${
+          active ? 'text-slate-900' : 'text-slate-500 group-hover:text-slate-700'
+        }`}
+      >
+        {label}
+      </span>
     </Link>
   );
 }
@@ -56,33 +68,39 @@ export default function AppBottomNav() {
   const rightItems = navItems.slice(2);
 
   return (
-    <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2 px-4">
+    <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 px-4 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-3">
       <div className="relative mx-auto max-w-3xl">
-        <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white px-6 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-1 items-center gap-8 pr-10">
-            {leftItems.map((item) => (
-              <NavItem key={item.href} {...item} active={isActive(item.href)} />
-            ))}
-          </div>
+        <div className="relative overflow-hidden rounded-[26px] border border-slate-200/80 bg-white/90 shadow-[0_14px_34px_rgba(15,23,42,0.14)] backdrop-blur-xl">
+          <div className="relative flex items-center justify-between px-6 py-4">
+            <div className="flex flex-1 items-center gap-6 pr-12">
+              {leftItems.map((item) => (
+                <NavItem key={item.href} {...item} active={isActive(item.href)} />
+              ))}
+            </div>
 
-          <div className="flex flex-1 items-center justify-end gap-8 pl-10">
-            {rightItems.map((item) => (
-              <NavItem key={item.href} {...item} active={isActive(item.href)} />
-            ))}
+            <div className="flex flex-1 items-center justify-end gap-6 pl-12">
+              {rightItems.map((item) => (
+                <NavItem key={item.href} {...item} active={isActive(item.href)} />
+              ))}
+            </div>
           </div>
         </div>
 
         <Link
           href="/trade/spot"
           aria-label={t.appNav.spotTrade}
-          className="absolute -top-7 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 text-center"
+          className="absolute -top-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 text-center"
         >
-          <div className={`grid h-16 w-16 place-items-center rounded-full bg-violet-600 shadow-[0_14px_28px_rgba(109,40,217,0.35)] ring-8 ring-white ${tradeActive ? 'shadow-[0_20px_35px_rgba(109,40,217,0.45)]' : ''}`}>
-            <div className="grid h-11 w-11 place-items-center rounded-full bg-white text-violet-600 shadow-[0_10px_20px_rgba(109,40,217,0.28)]">
-              <CandlestickChart className="h-6 w-6" strokeWidth={2.25} />
-            </div>
+          <div
+            className={`grid h-16 w-16 place-items-center rounded-full bg-gradient-to-b from-violet-500 to-violet-600 shadow-[0_18px_32px_rgba(124,58,237,0.4)] ring-[10px] ring-white ${
+              tradeActive ? 'shadow-[0_24px_40px_rgba(124,58,237,0.45)] scale-[1.03]' : ''
+            } transition-transform duration-150`}
+          >
+            <ArrowLeftRight className="h-7 w-7 text-white" strokeWidth={2.4} />
           </div>
-          <span className="text-[11px] font-semibold leading-none text-violet-700">{t.appNav.spotTrade}</span>
+          <span className="text-[11px] font-semibold leading-none text-slate-900 drop-shadow-sm">
+            {t.appNav.spotTrade}
+          </span>
         </Link>
       </div>
     </nav>
