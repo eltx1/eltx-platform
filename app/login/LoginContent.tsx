@@ -9,7 +9,7 @@ import { useToast } from '../lib/toast';
 import { useAuth } from '../lib/auth';
 
 export default function LoginContent() {
-  const [identifier, setIdentifier] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -37,8 +37,7 @@ export default function LoginContent() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const body = identifier.includes('@') ? { email: identifier, password } : { username: identifier, password };
-    const res = await apiFetch<any>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
+    const res = await apiFetch<any>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
     if (!res.ok) {
       const err = (res.data as any)?.error;
       if (err?.code === 'INVALID_CREDENTIALS') {
@@ -125,19 +124,19 @@ export default function LoginContent() {
               </div>
             )}
             <div className="space-y-2">
-              <label className="text-sm text-white/70" htmlFor="identifier">
-                {t.auth.common.emailOrUsername}
+              <label className="text-sm text-white/70" htmlFor="email">
+                {t.auth.common.email}
               </label>
               <input
-                id="identifier"
+                id="email"
                 className={`p-3 rounded-xl bg-black/40 border focus:outline-none focus:ring-2 focus:ring-purple-500/80 transition ${
                   error ? 'border-red-500' : 'border-white/20'
                 }`}
                 placeholder={t.auth.common.emailPlaceholder}
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error}
-                autoComplete="username"
+                autoComplete="email"
               />
             </div>
             <div className="space-y-2">

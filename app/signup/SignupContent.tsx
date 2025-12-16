@@ -9,7 +9,6 @@ import { useToast } from '../lib/toast';
 
 export default function SignupContent() {
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -24,7 +23,7 @@ export default function SignupContent() {
     setLoading(true);
     const res = await apiFetch<any>('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ email, username, password }),
+      body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
       const err = (res.data as any)?.error;
@@ -118,22 +117,6 @@ export default function SignupContent() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!error}
                 autoComplete="email"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm text-white/70" htmlFor="username">
-                {t.auth.common.username}
-              </label>
-              <input
-                id="username"
-                className={`p-3 rounded-xl bg-black/40 border focus:outline-none focus:ring-2 focus:ring-emerald-500/80 transition ${
-                  error ? 'border-red-500' : 'border-white/20'
-                }`}
-                placeholder={t.auth.signup.usernamePlaceholder}
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                aria-invalid={!!error}
-                autoComplete="username"
               />
             </div>
             <div className="space-y-2">

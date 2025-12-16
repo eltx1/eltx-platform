@@ -474,19 +474,13 @@ const adminSessionCookie = {
 const SignupSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
-  username: z.string().trim().min(3),
   language: z.string().trim().optional(),
 });
 
-const LoginSchema = z
-  .object({
-    email: z.string().trim().toLowerCase().email().optional(),
-    username: z.string().trim().min(3).optional(),
-    password: z.string().min(8),
-  })
-  .refine((d) => d.email || d.username, {
-    message: 'Email or username required',
-  });
+const LoginSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  password: z.string().min(8),
+});
 
 const AdminLoginSchema = z.object({
   identifier: z.string().min(3),
@@ -531,6 +525,23 @@ const UserUpdateSchema = z
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
   });
+
+function normalizeUsernameFromEmail(email) {
+  const [local] = email.split('@');
+  const cleaned = (local || 'user').toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'user';
+  return cleaned.slice(0, 48);
+}
+
+async function generateUsernameFromEmail(conn, email) {
+  const base = normalizeUsernameFromEmail(email);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const suffix = attempt === 0 ? '' : `_${crypto.randomInt(0, 10_000).toString().padStart(4, '0')}`;
+    const candidate = `${base}${suffix}`.slice(0, 64);
+    const [[existing]] = await conn.query('SELECT 1 FROM users WHERE username=? LIMIT 1', [candidate]);
+    if (!existing) return candidate;
+  }
+  return `${base}_${crypto.randomUUID().slice(0, 8)}`.slice(0, 64);
+}
 
 const AdminPasswordResetSchema = z.object({
   password: z.string().min(8),
@@ -1943,9 +1954,10 @@ app.get('/fiat/stripe/session/:sessionId', walletLimiter, async (req, res, next)
 app.post('/auth/signup', async (req, res, next) => {
   let conn;
   try {
-    const { email, password, username, language } = SignupSchema.parse(req.body);
+    const { email, password, language } = SignupSchema.parse(req.body);
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    const username = await generateUsernameFromEmail(conn, email);
     const [u] = await conn.query(
       'INSERT INTO users (email, username, language) VALUES (?, ?, ?)',
       [email, username, language || 'en']
@@ -1979,7 +1991,7 @@ app.post('/auth/signup', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message, details: { missing, issues } });
     }
     if (err.code === 'ER_DUP_ENTRY') {
-      return next({ status: 409, code: 'USER_EXISTS', message: 'Email or username already exists' });
+      return next({ status: 409, code: 'USER_EXISTS', message: 'Email already exists' });
     }
     next(err);
   } finally {
@@ -1990,11 +2002,10 @@ app.post('/auth/signup', async (req, res, next) => {
 app.post('/auth/login', loginLimiter, async (req, res, next) => {
   let userId = null;
   try {
-    const { email, username, password } = LoginSchema.parse(req.body);
-    const field = email ? 'email' : 'username';
+    const { email, password } = LoginSchema.parse(req.body);
     const [rows] = await pool.query(
-      `SELECT users.id, uc.password_hash FROM users JOIN user_credentials uc ON users.id=uc.user_id WHERE users.${field}=?`,
-      [email || username]
+      'SELECT users.id, uc.password_hash FROM users JOIN user_credentials uc ON users.id=uc.user_id WHERE users.email=?',
+      [email]
     );
     if (rows.length) {
       userId = rows[0].id;
