@@ -23,7 +23,7 @@ export const dict = {
       signup: {
         title: 'Sign Up',
         success: 'Account created successfully. Please sign in.',
-        exists: 'Email or username already exists.',
+        exists: 'Email already exists.',
         genericError: 'Something went wrong. Please try again.',
         ready: 'Your account is ready. Sign in now.',
         badge: 'New to ELTX? Create your secure account',
@@ -56,7 +56,7 @@ export const dict = {
       login: {
         title: 'Login',
         success: 'Welcome back!',
-        invalid: 'Invalid email/username or password.',
+        invalid: 'Invalid email or password.',
         genericError: 'Something went wrong. Please try again.',
         badge: 'Secure access to your ELTX account',
         headline: 'Login & stay ahead of the market',
@@ -608,8 +608,8 @@ export const dict = {
       },
     },
     errors: {
-      userExists: 'Email or username already exists.',
-      invalid: 'Invalid email/username or password.',
+      userExists: 'Email already exists.',
+      invalid: 'Invalid email or password.',
       generic: 'Something went wrong. Please try again.',
     },
   },
@@ -631,7 +631,7 @@ export const dict = {
       signup: {
         title: 'إنشاء حساب',
         success: 'تم إنشاء الحساب بنجاح. برجاء تسجيل الدخول.',
-        exists: 'البريد الإلكتروني أو اسم المستخدم موجود بالفعل.',
+        exists: 'البريد الإلكتروني موجود بالفعل.',
         genericError: 'حدث خطأ. برجاء المحاولة مرة أخرى.',
         ready: 'تم تجهيز حسابك. سجّل الدخول الآن.',
         badge: 'لسه جديد؟ أنشئ حسابك الآمن على ELTX',
@@ -663,7 +663,7 @@ export const dict = {
       login: {
         title: 'تسجيل الدخول',
         success: 'مرحبًا بعودتك!',
-        invalid: 'البريد الإلكتروني/اسم المستخدم أو كلمة المرور غير صحيحة.',
+        invalid: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
         genericError: 'حدث خطأ. برجاء المحاولة مرة أخرى.',
         badge: 'دخول آمن لحسابك على ELTX',
         headline: 'سجّل دخولك وخليك سابق السوق',
