@@ -105,6 +105,17 @@ interface StripeStatusResponse {
   };
 }
 
+interface StripePricingResponse {
+  ok: boolean;
+  pricing: {
+    asset: string;
+    price_eltx: string;
+    min_usd: string;
+    max_usd: string | null;
+    updated_at?: string | null;
+  };
+}
+
 type FeeSettings = {
   swap_fee_bps: number;
   spot_trade_fee_bps?: number;
@@ -2672,6 +2683,10 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
   const [loadingPurchases, setLoadingPurchases] = useState(true);
   const [status, setStatus] = useState<StripeStatusResponse['status'] | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  const [pricing, setPricing] = useState<StripePricingResponse['pricing'] | null>(null);
+  const [pricingLoading, setPricingLoading] = useState(true);
+  const [pricingForm, setPricingForm] = useState({ price_eltx: '', min_usd: '', max_usd: '' });
+  const [savingPricing, setSavingPricing] = useState(false);
 
   const loadPurchases = useCallback(async () => {
     setLoadingPurchases(true);
@@ -2679,6 +2694,23 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
     if (res.ok) setPurchases(res.data.purchases);
     else onNotify(res.error || 'Failed to load purchases', 'error');
     setLoadingPurchases(false);
+  }, [onNotify]);
+
+  const loadPricing = useCallback(async () => {
+    setPricingLoading(true);
+    const res = await apiFetch<StripePricingResponse>('/admin/stripe/pricing');
+    if (res.ok) {
+      setPricing(res.data.pricing);
+      setPricingForm({
+        price_eltx: res.data.pricing.price_eltx,
+        min_usd: res.data.pricing.min_usd,
+        max_usd: res.data.pricing.max_usd || '',
+      });
+    } else {
+      setPricing(null);
+      onNotify(res.error || 'Failed to load Stripe pricing', 'error');
+    }
+    setPricingLoading(false);
   }, [onNotify]);
 
   const loadStatus = useCallback(async () => {
@@ -2692,12 +2724,44 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
   useEffect(() => {
     loadPurchases();
     loadStatus();
-  }, [loadPurchases, loadStatus]);
+    loadPricing();
+  }, [loadPurchases, loadStatus, loadPricing]);
 
   const refreshAll = useCallback(() => {
     loadStatus();
     loadPurchases();
-  }, [loadPurchases, loadStatus]);
+    loadPricing();
+  }, [loadPurchases, loadStatus, loadPricing]);
+
+  const handlePricingChange = (field: 'price_eltx' | 'min_usd' | 'max_usd', value: string) => {
+    setPricingForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const savePricing = async () => {
+    setSavingPricing(true);
+    const payload: Record<string, unknown> = {};
+
+    if (pricingForm.price_eltx.trim()) payload.price_eltx = pricingForm.price_eltx.trim();
+    if (pricingForm.min_usd.trim()) payload.min_usd = pricingForm.min_usd.trim();
+    payload.max_usd = pricingForm.max_usd.trim() ? pricingForm.max_usd.trim() : null;
+
+    const res = await apiFetch<StripePricingResponse>('/admin/stripe/pricing', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    setSavingPricing(false);
+    if (res.ok) {
+      setPricing(res.data.pricing);
+      setPricingForm({
+        price_eltx: res.data.pricing.price_eltx,
+        min_usd: res.data.pricing.min_usd,
+        max_usd: res.data.pricing.max_usd || '',
+      });
+      onNotify('Stripe price updated');
+    } else {
+      onNotify(res.error || 'Failed to update pricing', 'error');
+    }
+  };
 
   const envRows = [
     { label: 'STRIPE_PUBLISHABLE_KEY', value: status?.publishableKey || 'Not set' },
@@ -2757,6 +2821,74 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
           </div>
         ) : (
           <div className="p-4 text-sm text-white/70">Unable to read Stripe status.</div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5">
+        <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">
+          ELTX pricing (Stripe)
+        </div>
+        {pricingLoading ? (
+          <div className="flex h-56 items-center justify-center">
+            <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+          </div>
+        ) : pricing ? (
+          <div className="space-y-4 p-4 text-sm text-white/80">
+            <div className="grid gap-4 md:grid-cols-3">
+              <label className="space-y-2">
+                <span className="text-[11px] uppercase tracking-wide text-white/50">ELTX per USD</span>
+                <input
+                  type="text"
+                  value={pricingForm.price_eltx}
+                  onChange={(e) => handlePricingChange('price_eltx', e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                  placeholder="0.00"
+                  disabled={savingPricing}
+                />
+                <span className="block text-[11px] text-white/50">Current: {pricing.price_eltx}</span>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[11px] uppercase tracking-wide text-white/50">Minimum USD</span>
+                <input
+                  type="text"
+                  value={pricingForm.min_usd}
+                  onChange={(e) => handlePricingChange('min_usd', e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                  placeholder="10.00"
+                  disabled={savingPricing}
+                />
+                <span className="block text-[11px] text-white/50">Current: {pricing.min_usd}</span>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[11px] uppercase tracking-wide text-white/50">Maximum USD (blank = unlimited)</span>
+                <input
+                  type="text"
+                  value={pricingForm.max_usd}
+                  onChange={(e) => handlePricingChange('max_usd', e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                  placeholder="1000.00"
+                  disabled={savingPricing}
+                />
+                <span className="block text-[11px] text-white/50">Current: {pricing.max_usd ?? '∞'}</span>
+              </label>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/50">
+              <div>
+                <div>Asset: {pricing.asset}</div>
+                {pricing.updated_at && <div>Updated: {new Date(pricing.updated_at).toLocaleString()}</div>}
+              </div>
+              <button
+                onClick={savePricing}
+                disabled={savingPricing}
+                className="inline-flex items-center gap-2 rounded-full bg-indigo-500 px-4 py-2 text-xs font-semibold text-white shadow hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-white/10"
+              >
+                {savingPricing && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save pricing
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-4 text-sm text-white/70">Unable to load Stripe pricing.</div>
         )}
       </div>
 
