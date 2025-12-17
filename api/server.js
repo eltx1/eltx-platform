@@ -14,6 +14,7 @@ const { ethers } = require('ethers');
 const Decimal = require('decimal.js');
 const Stripe = require('stripe');
 const OpenAI = require('openai');
+const nodemailer = require('nodemailer');
 const { logMasterFingerprint, getMasterMnemonic } = require('../src/utils/hdWallet');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 const {
@@ -517,6 +518,15 @@ const AdminUsersQuerySchema = PaginationSchema.extend({
   q: z.string().max(191).optional(),
 });
 
+const EmailSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  from_address: z.string().trim().email().or(z.literal('')).optional(),
+  admin_recipients: z.union([z.string(), z.array(z.string().email())]).optional(),
+  user_welcome_enabled: z.boolean().optional(),
+  user_kyc_enabled: z.boolean().optional(),
+  admin_kyc_enabled: z.boolean().optional(),
+});
+
 const UserUpdateSchema = z
   .object({
     email: z.string().email().optional(),
@@ -861,6 +871,7 @@ function presentKycRow(row, { includeDocument = false } = {}) {
     user_id: row.user_id,
     email: row.email,
     username: row.username,
+    language: row.language,
     status: row.status,
     full_name: row.full_name,
     country: row.country,
@@ -891,6 +902,317 @@ async function setPlatformSettingValue(name, value, conn = pool) {
     'INSERT INTO platform_settings (name, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = VALUES(value)',
     [name, value]
   );
+}
+
+function parseBooleanSetting(value, fallback = false) {
+  const normalized = normalizeSettingValue(value);
+  if (normalized === null) return fallback;
+  const lower = normalized.toLowerCase();
+  if (['1', 'true', 'yes', 'on', 'enabled'].includes(lower)) return true;
+  if (['0', 'false', 'no', 'off', 'disabled'].includes(lower)) return false;
+  return fallback;
+}
+
+function escapeHtml(value) {
+  return (value || '')
+    .toString()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function parseEmailList(raw) {
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : raw.split(/[\n,]/);
+  return list
+    .map((item) => item.trim())
+    .filter((item) => item && /@/.test(item))
+    .slice(0, 20);
+}
+
+const EMAIL_SETTING_KEYS = {
+  enabled: 'email_enabled',
+  from: 'email_from_address',
+  adminRecipients: 'email_admin_recipients',
+  userWelcome: 'email_user_welcome_enabled',
+  userKyc: 'email_user_kyc_enabled',
+  adminKyc: 'email_admin_kyc_enabled',
+};
+
+const EMAIL_SETTINGS_CACHE_MS = 60 * 1000;
+let cachedEmailSettings = null;
+let cachedEmailLoadedAt = 0;
+let cachedTransporter = null;
+let cachedTransportSignature = '';
+const emailQueue = [];
+let emailQueueActive = false;
+
+function getSmtpStatus() {
+  const host = normalizeSettingValue(process.env.SMTP_HOST);
+  const port = Number(process.env.SMTP_PORT) || 587;
+  const user = normalizeSettingValue(process.env.SMTP_USER);
+  const pass = normalizeSettingValue(process.env.SMTP_PASS);
+  const from = normalizeSettingValue(process.env.SMTP_FROM) || user || null;
+  const missing = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS'].filter((key) => !process.env[key]);
+  return { host, port, user, pass, from, missing, ready: missing.length === 0 };
+}
+
+function buildTransporter(status) {
+  if (!status.ready) return null;
+  const signature = `${status.host}:${status.port}:${status.user}`;
+  if (cachedTransporter && cachedTransportSignature === signature) return cachedTransporter;
+  cachedTransportSignature = signature;
+  cachedTransporter = nodemailer.createTransport({
+    host: status.host,
+    port: status.port,
+    secure: status.port === 465,
+    auth: { user: status.user, pass: status.pass },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+  });
+  return cachedTransporter;
+}
+
+async function readEmailSettings(conn = pool, { forceReload = false } = {}) {
+  const useCache = conn === pool && !forceReload && cachedEmailSettings && Date.now() - cachedEmailLoadedAt < EMAIL_SETTINGS_CACHE_MS;
+  if (useCache) return cachedEmailSettings;
+
+  const enabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.enabled, '0', conn));
+  const fromSetting = normalizeSettingValue(await getPlatformSettingValue(EMAIL_SETTING_KEYS.from, '', conn));
+  const adminList = parseEmailList(await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminRecipients, '', conn));
+  const userWelcomeEnabled = parseBooleanSetting(
+    await getPlatformSettingValue(EMAIL_SETTING_KEYS.userWelcome, '1', conn),
+    true
+  );
+  const userKycEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.userKyc, '1', conn), true);
+  const adminKycEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminKyc, '1', conn), true);
+
+  const settings = {
+    enabled,
+    from: fromSetting || '',
+    adminRecipients: adminList,
+    userWelcomeEnabled,
+    userKycEnabled,
+    adminKycEnabled,
+  };
+
+  if (conn === pool) {
+    cachedEmailSettings = settings;
+    cachedEmailLoadedAt = Date.now();
+  }
+  return settings;
+}
+
+function invalidateEmailSettingsCache() {
+  cachedEmailLoadedAt = 0;
+  cachedEmailSettings = null;
+}
+
+function presentEmailSettings(settings) {
+  return {
+    enabled: !!settings.enabled,
+    from_address: settings.from || '',
+    admin_recipients: settings.adminRecipients || [],
+    user_welcome_enabled: !!settings.userWelcomeEnabled,
+    user_kyc_enabled: !!settings.userKycEnabled,
+    admin_kyc_enabled: !!settings.adminKycEnabled,
+  };
+}
+
+function wrapEmailHtml(title, bodyLines, lang = 'en') {
+  const direction = lang === 'ar' ? 'rtl' : 'ltr';
+  const align = lang === 'ar' ? 'right' : 'left';
+  const body = (bodyLines || [])
+    .map(
+      (line) =>
+        `<p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#e2e8f0;text-align:${align};">${escapeHtml(line)}</p>`
+    )
+    .join('');
+  return `<div dir="${direction}" style="font-family:Inter,Arial,sans-serif;background:#0b1221;padding:16px;color:#e2e8f0;">` +
+    `<div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,0.35);">` +
+    `<h2 style="margin:0 0 12px 0;color:#93c5fd;font-size:18px;text-align:${align};">${escapeHtml(title)}</h2>` +
+    body +
+    `</div><p style="color:#94a3b8;font-size:12px;margin:12px 0 0;text-align:${align};">ELTX Platform</p></div>`;
+}
+
+const EMAIL_TEMPLATE_BUILDERS = {
+  welcome: {
+    en: (data) => {
+      const username = data?.username || 'there';
+      const lines = [
+        `Hi ${username}, welcome to ELTX!`,
+        'Your account is live. You can switch between English and Arabic at any time from your settings.',
+        'If this wasn’t you, please contact support immediately.',
+      ];
+      return { subject: 'Welcome to ELTX', body: lines };
+    },
+    ar: (data) => {
+      const username = data?.username || 'صديقنا';
+      const lines = [
+        `اهلا يا ${username}، حسابك اتفعل على ELTX`,
+        'تقدر تبدل بين العربي والإنجليزي في أي وقت من الإعدادات.',
+        'لو الطلب دا مش ليك، كلّم الدعم فوراً.',
+      ];
+      return { subject: 'اهلا بيك في ELTX', body: lines };
+    },
+  },
+  'user-kyc-submitted': {
+    en: (data) => {
+      const lines = [
+        'We received your KYC submission and the team is reviewing it now.',
+        'You will get an email once a decision is made.',
+      ];
+      return { subject: 'We received your KYC request', body: lines };
+    },
+    ar: () => {
+      const lines = [
+        'استلمنا طلب التحقق بتاعك وفريقنا بيراجعه حالياً.',
+        'هنبعتلك ايميل أول ما يتم اتخاذ القرار.',
+      ];
+      return { subject: 'تم استلام مستندات التحقق', body: lines };
+    },
+  },
+  'user-kyc-approved': {
+    en: () => {
+      const lines = [
+        'Good news! Your KYC verification is approved.',
+        'You can continue using all features without interruption.',
+      ];
+      return { subject: 'Your KYC is approved', body: lines };
+    },
+    ar: () => {
+      const lines = ['تمت الموافقة على التحقق بتاعك.', 'تقدر تكمل استخدام كل المزايا بدون أي توقف.'];
+      return { subject: 'تمت الموافقة على KYC', body: lines };
+    },
+  },
+  'user-kyc-rejected': {
+    en: (data) => {
+      const reason = data?.reason ? `Reason: ${data.reason}` : 'Reason: Missing or invalid details.';
+      const lines = [
+        'We reviewed your KYC request but could not approve it this time.',
+        reason,
+        'You can resubmit your documents from the dashboard.',
+      ];
+      return { subject: 'Your KYC needs an update', body: lines };
+    },
+    ar: (data) => {
+      const reason = data?.reason ? `السبب: ${data.reason}` : 'السبب: بيانات ناقصة أو غير واضحة.';
+      const lines = ['راجعنا طلب التحقق لكن محتاج تعديل.', reason, 'تقدر تعيد الإرسال من الداشبورد.'];
+      return { subject: 'مطلوب تحديث مستندات التحقق', body: lines };
+    },
+  },
+  'admin-kyc-submitted': {
+    en: (data) => {
+      const details = [
+        `User ID: ${data?.userId ?? 'unknown'}`,
+        data?.email ? `Email: ${data.email}` : null,
+        data?.username ? `Username: ${data.username}` : null,
+        data?.fullName ? `Name: ${data.fullName}` : null,
+        data?.country ? `Country: ${data.country}` : null,
+      ].filter(Boolean);
+      const lines = ['A new KYC submission is waiting for review.', ...details];
+      return { subject: 'New KYC submission', body: lines };
+    },
+  },
+};
+
+function renderEmailTemplate(kind, language, data) {
+  const template = EMAIL_TEMPLATE_BUILDERS[kind];
+  if (!template) return null;
+  const lang = language === 'ar' ? 'ar' : 'en';
+  const builder = template[lang] || template.en;
+  if (!builder) return null;
+  const { subject, body } = builder(data || {});
+  return { subject, text: (body || []).join('\n'), html: wrapEmailHtml(subject, body || [], lang) };
+}
+
+const EMAIL_JOB_CONFIG = {
+  welcome: {
+    shouldSend: (settings) => settings.userWelcomeEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'user-kyc-submitted': {
+    shouldSend: (settings) => settings.userKycEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'user-kyc-approved': {
+    shouldSend: (settings) => settings.userKycEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'user-kyc-rejected': {
+    shouldSend: (settings) => settings.userKycEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'admin-kyc-submitted': {
+    shouldSend: (settings) => settings.adminKycEnabled && settings.adminRecipients.length > 0,
+    recipients: (_, settings) => settings.adminRecipients,
+  },
+};
+
+async function handleEmailJob(job) {
+  const settings = await readEmailSettings();
+  if (!settings.enabled) return;
+  const config = EMAIL_JOB_CONFIG[job.kind];
+  if (!config || !config.shouldSend(settings)) return;
+  const recipients = (config.recipients(job, settings) || []).filter(Boolean);
+  if (!recipients.length) return;
+
+  const smtpStatus = getSmtpStatus();
+  if (!smtpStatus.ready) {
+    console.warn(`[email] skipped ${job.kind}: missing SMTP config (${smtpStatus.missing.join(', ') || 'unknown'})`);
+    return;
+  }
+
+  const template = renderEmailTemplate(job.kind, job.language || 'en', job.data || {});
+  if (!template) return;
+
+  const transporter = buildTransporter(smtpStatus);
+  if (!transporter) return;
+
+  const from = settings.from || smtpStatus.from || smtpStatus.user || 'no-reply@localhost';
+  for (const to of recipients) {
+    try {
+      await transporter.sendMail({
+        from,
+        to,
+        subject: template.subject,
+        text: template.text,
+        html: template.html,
+        headers: {
+          'X-Request-Id': job.requestId || undefined,
+          'X-ELTX-Notification': job.kind,
+        },
+      });
+    } catch (err) {
+      console.error(`[email] failed to send ${job.kind} to ${to}`, err?.message || err);
+    }
+  }
+}
+
+async function processEmailQueue() {
+  if (emailQueueActive) return;
+  emailQueueActive = true;
+  while (emailQueue.length) {
+    const next = emailQueue.shift();
+    try {
+      await handleEmailJob(next);
+    } catch (err) {
+      console.error('[email] unexpected error', err?.message || err);
+    }
+  }
+  emailQueueActive = false;
+}
+
+function enqueueEmail(job) {
+  emailQueue.push(job);
+  if (!emailQueueActive) {
+    setImmediate(() => {
+      processEmailQueue();
+    });
+  }
 }
 
 async function readAiSettings(conn = pool) {
@@ -1978,6 +2300,13 @@ app.post('/auth/signup', async (req, res, next) => {
       wallets.push(await provisionUserAddress(conn, u.insertId, cid));
     }
     await conn.commit();
+    enqueueEmail({
+      kind: 'welcome',
+      to: email,
+      language: language || 'en',
+      data: { username },
+      requestId: req.requestId,
+    });
     res.cookie(COOKIE_NAME, token, sessionCookie);
     res.json({ ok: true, wallet: wallets[0], wallets });
   } catch (err) {
@@ -2111,11 +2440,34 @@ app.post('/kyc/submit', async (req, res, next) => {
       [userId, payload.full_name, payload.country, payload.document_type, payload.document_number, file.name, file.mime, file.buffer]
     );
 
+    const [[userRow]] = await pool.query('SELECT email, username, language FROM users WHERE id=? LIMIT 1', [userId]);
+
     const [rows] = await pool.query(
       `SELECT kr.*, au.username AS reviewer_username FROM kyc_requests kr LEFT JOIN admin_users au ON kr.reviewed_by = au.id WHERE kr.user_id=? LIMIT 1`,
       [userId]
     );
     const request = presentKycRow(rows[0]);
+
+    enqueueEmail({
+      kind: 'user-kyc-submitted',
+      to: userRow?.email,
+      language: userRow?.language || 'en',
+      data: { username: userRow?.username, fullName: payload.full_name },
+      requestId: req.requestId,
+    });
+    enqueueEmail({
+      kind: 'admin-kyc-submitted',
+      language: 'en',
+      data: {
+        userId,
+        email: userRow?.email,
+        username: userRow?.username,
+        fullName: payload.full_name,
+        country: payload.country,
+      },
+      requestId: req.requestId,
+    });
+
     res.json({ ok: true, status: request.status, request, can_resubmit: request.status === 'rejected' });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -2346,6 +2698,68 @@ app.patch('/admin/ai/settings', async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid AI settings', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.get('/admin/email/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const settings = presentEmailSettings(await readEmailSettings());
+    const smtp = getSmtpStatus();
+    res.json({
+      ok: true,
+      settings,
+      smtp: {
+        ready: smtp.ready,
+        missing: smtp.missing || [],
+        host: smtp.host,
+        from: smtp.from,
+        user: smtp.user,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/email/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = EmailSettingsSchema.parse(req.body || {});
+    const tasks = [];
+    if (payload.enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.enabled, payload.enabled ? '1' : '0'));
+    if (payload.from_address !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.from, payload.from_address || ''));
+    if (payload.admin_recipients !== undefined) {
+      const recipients = parseEmailList(payload.admin_recipients);
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminRecipients, recipients.join(',')));
+    }
+    if (payload.user_welcome_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userWelcome, payload.user_welcome_enabled ? '1' : '0'));
+    if (payload.user_kyc_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userKyc, payload.user_kyc_enabled ? '1' : '0'));
+    if (payload.admin_kyc_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminKyc, payload.admin_kyc_enabled ? '1' : '0'));
+    await Promise.all(tasks);
+    invalidateEmailSettingsCache();
+    const settings = presentEmailSettings(await readEmailSettings(pool, { forceReload: true }));
+    const smtp = getSmtpStatus();
+    res.json({
+      ok: true,
+      settings,
+      smtp: {
+        ready: smtp.ready,
+        missing: smtp.missing || [],
+        host: smtp.host,
+        from: smtp.from,
+        user: smtp.user,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid email settings', details: err.flatten() });
     next(err);
   }
 });
@@ -2894,7 +3308,7 @@ app.get('/admin/kyc/requests', async (req, res, next) => {
     const { status, limit } = AdminKycQuerySchema.parse(req.query || {});
     const params = [];
     let sql =
-      'SELECT kr.*, u.email, u.username, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by';
+      'SELECT kr.*, u.email, u.username, u.language, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by';
     if (status) {
       sql += ' WHERE kr.status = ?';
       params.push(status);
@@ -2922,7 +3336,7 @@ app.patch('/admin/kyc/requests/:id', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Rejection reason is required' });
 
     const [[existing]] = await pool.query(
-      'SELECT kr.*, u.email, u.username, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by WHERE kr.id=?',
+      'SELECT kr.*, u.email, u.username, u.language, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by WHERE kr.id=?',
       [requestId]
     );
     if (!existing) return next({ status: 404, code: 'NOT_FOUND', message: 'KYC request not found' });
@@ -2933,9 +3347,19 @@ app.patch('/admin/kyc/requests/:id', async (req, res, next) => {
     );
 
     const [[updated]] = await pool.query(
-      'SELECT kr.*, u.email, u.username, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by WHERE kr.id=?',
+      'SELECT kr.*, u.email, u.username, u.language, au.username AS reviewer_username FROM kyc_requests kr JOIN users u ON u.id = kr.user_id LEFT JOIN admin_users au ON au.id = kr.reviewed_by WHERE kr.id=?',
       [requestId]
     );
+
+    const userLanguage = updated?.language || 'en';
+    const decisionKind = payload.status === 'approved' ? 'user-kyc-approved' : 'user-kyc-rejected';
+    enqueueEmail({
+      kind: decisionKind,
+      to: updated?.email,
+      language: userLanguage,
+      data: { username: updated?.username, reason: payload.rejection_reason || '' },
+      requestId: req.requestId,
+    });
 
     res.json({ ok: true, request: presentKycRow(updated, { includeDocument: true }) });
   } catch (err) {
