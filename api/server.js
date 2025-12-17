@@ -5573,13 +5573,7 @@ async function getStripePricing(conn = pool) {
     } catch {}
   }
   if (!price) {
-    const base = Number.parseFloat(process.env.ELTX_PRICE_USD || '1');
-    const normalizedBase = Number.isFinite(base) && base > 0 ? base : 1;
-    try {
-      price = new Decimal(1).div(normalizedBase);
-    } catch {
-      price = new Decimal(1);
-    }
+    price = new Decimal(1);
   }
 
   let min = new Decimal(
