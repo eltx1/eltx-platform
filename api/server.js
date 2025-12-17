@@ -26,6 +26,7 @@ const {
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const STRIPE_BASE_FALLBACK = 'https://eltx.online';
+const STRIPE_PRICING_ASSET = 'USDC';
 
 const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
 const DEFAULT_SPOT_MAX_DEVIATION_BPS = 800n;
@@ -644,6 +645,16 @@ const AdminSpotMarketUpdateSchema = z
     price_precision: z.coerce.number().int().min(0).max(18).optional(),
     amount_precision: z.coerce.number().int().min(0).max(18).optional(),
     active: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No update fields provided',
+  });
+
+const AdminStripePricingUpdateSchema = z
+  .object({
+    price_eltx: z.string().optional(),
+    min_usd: z.string().optional(),
+    max_usd: z.string().nullable().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
@@ -2351,6 +2362,94 @@ app.get('/admin/stripe/status', async (req, res, next) => {
     await requireAdmin(req);
     res.json({ ok: true, status: getStripeStatusPayload('admin') });
   } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/stripe/pricing', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const pricing = await getStripePricing(pool);
+    res.json({
+      ok: true,
+      pricing: {
+        asset: pricing.asset,
+        price_eltx: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
+        min_usd: pricing.min.toFixed(2, Decimal.ROUND_UP),
+        max_usd: pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null,
+        updated_at: pricing.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/stripe/pricing', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const updates = AdminStripePricingUpdateSchema.parse(req.body || {});
+
+    const [[row]] = await pool.query('SELECT asset FROM asset_prices WHERE UPPER(asset)=? LIMIT 1', [
+      STRIPE_PRICING_ASSET,
+    ]);
+    if (!row) {
+      await pool.query('INSERT INTO asset_prices (asset, price_eltx, min_amount) VALUES (?, 1, 1)', [
+        STRIPE_PRICING_ASSET,
+      ]);
+    }
+
+    const fields = [];
+    const params = [];
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'price_eltx')) {
+      const normalized = normalizePositiveDecimal(updates.price_eltx, 18);
+      if (normalized === null)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ELTX price value' });
+      fields.push('price_eltx = ?');
+      params.push(normalized);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'min_usd')) {
+      const normalized = normalizePositiveDecimal(updates.min_usd, 18);
+      if (normalized === null)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid minimum purchase amount' });
+      fields.push('min_amount = ?');
+      params.push(normalized);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'max_usd')) {
+      if (updates.max_usd === null) {
+        fields.push('max_amount = NULL');
+      } else {
+        const normalized = normalizePositiveDecimal(updates.max_usd, 18);
+        if (normalized === null)
+          return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid maximum purchase amount' });
+        fields.push('max_amount = ?');
+        params.push(normalized);
+      }
+    }
+
+    if (fields.length) {
+      params.push(STRIPE_PRICING_ASSET);
+      await pool.query(`UPDATE asset_prices SET ${fields.join(', ')}, updated_at = NOW() WHERE UPPER(asset)=?`, params);
+    }
+
+    const pricing = await getStripePricing(pool);
+    res.json({
+      ok: true,
+      pricing: {
+        asset: pricing.asset,
+        price_eltx: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
+        min_usd: pricing.min.toFixed(2, Decimal.ROUND_UP),
+        max_usd: pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null,
+        updated_at: pricing.updatedAt,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid Stripe pricing', details: err.flatten() });
+    }
     next(err);
   }
 });
@@ -5463,7 +5562,7 @@ async function getStripePricing(conn = pool) {
   try {
     const [rows] = await conn.query(
       'SELECT asset, price_eltx, min_amount, max_amount, updated_at FROM asset_prices WHERE UPPER(asset)=? LIMIT 1',
-      ['USDC']
+      [STRIPE_PRICING_ASSET]
     );
     if (rows.length) row = rows[0];
   } catch (err) {
@@ -5512,7 +5611,7 @@ async function getStripePricing(conn = pool) {
     } catch {}
   }
 
-  return { asset: row?.asset || 'USDC', price, min, max, updatedAt: row?.updated_at || null };
+  return { asset: row?.asset || STRIPE_PRICING_ASSET, price, min, max, updatedAt: row?.updated_at || null };
 }
 
 function formatFiatPurchaseRow(row) {
