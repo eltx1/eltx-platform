@@ -13,11 +13,11 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
       aria-current={active ? 'page' : undefined}
       aria-selected={active}
       role="tab"
-      className="group relative flex h-[3.5rem] w-full flex-row items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 text-[11px] font-semibold tracking-tight transition-all duration-200 hover:border-white/20 hover:bg-white/10"
+      className="group relative flex h-[3.5rem] items-center justify-center gap-2 rounded-xl border border-white/5 px-3 text-[11px] font-semibold tracking-tight transition-all duration-200 hover:border-white/15 hover:bg-white/5"
       data-state={active ? 'active' : 'inactive'}
     >
       <div
-        className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl transition-all duration-200 ${
+        className={`grid h-10 w-10 place-items-center rounded-2xl transition-all duration-200 ${
           active
             ? 'bg-gradient-to-br from-violet-600/70 via-fuchsia-500/70 to-indigo-500/70 text-white shadow-[0_10px_30px_rgba(76,29,149,0.45)] ring-1 ring-violet-200/60'
             : 'bg-white/5 text-slate-300/80 ring-1 ring-white/10 group-hover:text-slate-100'
@@ -41,6 +41,13 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
           {label}
         </span>
       </div>
+      <span
+        className={`whitespace-nowrap text-xs leading-none transition-colors duration-150 ${
+          active ? 'text-white drop-shadow-[0_1px_8px_rgba(124,58,237,0.35)]' : 'text-slate-300/85 group-hover:text-slate-100'
+        }`}
+      >
+        {label}
+      </span>
       <span
         className="absolute inset-0 -z-10 rounded-2xl opacity-0 transition-opacity duration-200 group-data-[state=active]:opacity-100"
         aria-hidden
