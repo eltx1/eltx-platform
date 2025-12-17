@@ -535,6 +535,12 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_logo_btc_url'
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_logo_eth_url', '');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_logo_bnb_url', '');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_logo_sol_url', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_enabled', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_from_address', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_recipients', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_welcome_enabled', '1');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_kyc_enabled', '1');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_kyc_enabled', '1');
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

@@ -10,6 +10,7 @@ import {
   HelpCircle,
   KeyRound,
   Layers,
+  Bell,
   Loader2,
   LineChart,
   LogOut,
@@ -49,6 +50,7 @@ type Section =
   | 'pricing'
   | 'fees'
   | 'ai'
+  | 'notifications'
   | 'faq'
   | 'stripe';
 
@@ -130,6 +132,20 @@ type AiSettings = { daily_free_messages: number; message_price_eltx: string };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
+type EmailSettings = {
+  enabled: boolean;
+  from_address: string;
+  admin_recipients: string[];
+  user_welcome_enabled: boolean;
+  user_kyc_enabled: boolean;
+  admin_kyc_enabled: boolean;
+};
+
+type EmailSettingsResponse = {
+  settings: EmailSettings;
+  smtp: { ready: boolean; missing: string[]; host?: string | null; from?: string | null; user?: string | null };
+};
+
 type AdminKycRequest = {
   id: number;
   user_id: number;
@@ -193,6 +209,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'staking', label: 'Staking', icon: Layers },
   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'ai', label: 'AI', icon: Sparkles },
+  { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
@@ -370,6 +387,200 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
           <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : `${stats.eltx_spent} ELTX`}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [form, setForm] = useState<EmailSettings>({
+    enabled: false,
+    from_address: '',
+    admin_recipients: [],
+    user_welcome_enabled: true,
+    user_kyc_enabled: true,
+    admin_kyc_enabled: true,
+  });
+  const [adminRecipients, setAdminRecipients] = useState('');
+  const [smtp, setSmtp] = useState<EmailSettingsResponse['smtp']>({ ready: false, missing: [] });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<EmailSettingsResponse>('/admin/email/settings');
+    if (res.ok) {
+      setForm(res.data.settings);
+      setAdminRecipients(res.data.settings.admin_recipients.join(', '));
+      setSmtp(res.data.smtp);
+    } else {
+      onNotify(res.error || 'Failed to load email settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const recipients = adminRecipients
+      .split(/[,\n]/)
+      .map((r) => r.trim())
+      .filter(Boolean);
+    const payload = { ...form, admin_recipients: recipients };
+    const res = await apiFetch<EmailSettingsResponse>('/admin/email/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setForm(res.data.settings);
+      setAdminRecipients(res.data.settings.admin_recipients.join(', '));
+      setSmtp(res.data.smtp);
+      onNotify('Email settings updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update email settings', 'error');
+    }
+  };
+
+  const smtpMissing = smtp.missing?.filter(Boolean) || [];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="space-y-1">
+          <p className="text-xs uppercase tracking-wide text-white/60">Delivery controls</p>
+          <h2 className="text-xl font-semibold">Notifications via email</h2>
+          <p className="text-sm text-white/60">إدارة تنبيهات المستخدمين والإدمن بدون ما توقف المنصة.</p>
+        </div>
+        <button
+          onClick={load}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Sync
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex h-40 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase text-white/60">Email status</p>
+              <p className="mt-2 text-lg font-semibold">{form.enabled ? 'Enabled' : 'Disabled'}</p>
+              <p className="text-xs text-white/50">Master toggle for all notifications.</p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase text-white/60">SMTP</p>
+              <p className="mt-2 text-lg font-semibold">{smtp.ready ? 'Ready' : 'Missing config'}</p>
+              <p className="text-xs text-white/50">
+                {smtp.ready
+                  ? `Using ${smtp.user || 'SMTP user'}`
+                  : smtpMissing.length
+                    ? `Missing: ${smtpMissing.join(', ')}`
+                    : 'Set SMTP_HOST / SMTP_USER / SMTP_PASS'}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase text-white/60">Admin recipients</p>
+              <p className="mt-2 text-lg font-semibold">{form.admin_recipients.length}</p>
+              <p className="text-xs text-white/50">تنبيهات حرجة للإدمن (مثل KYC جديد).</p>
+            </div>
+          </div>
+
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner shadow-black/30"
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.enabled}
+                  onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+                />
+                <span>Enable email notifications</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.admin_kyc_enabled}
+                  onChange={(e) => setForm({ ...form, admin_kyc_enabled: e.target.checked })}
+                />
+                <span>Admin alerts for KYC submissions</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.user_welcome_enabled}
+                  onChange={(e) => setForm({ ...form, user_welcome_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>Welcome email on signup</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.user_kyc_enabled}
+                  onChange={(e) => setForm({ ...form, user_kyc_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>User emails for KYC status</span>
+              </label>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="space-y-2 text-sm text-white/70">
+                <span>From address</span>
+                <input
+                  type="email"
+                  value={form.from_address}
+                  onChange={(e) => setForm({ ...form, from_address: e.target.value })}
+                  placeholder="support@eltx.online"
+                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+                />
+                <p className="text-xs text-white/50">يتم استخدام SMTP_USER كبديل لو الحقل دا فاضي.</p>
+              </label>
+              <label className="space-y-2 text-sm text-white/70">
+                <span>Admin recipients (comma separated)</span>
+                <textarea
+                  rows={3}
+                  value={adminRecipients}
+                  onChange={(e) => setAdminRecipients(e.target.value)}
+                  placeholder="ops@eltx.online, security@eltx.online"
+                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+                />
+                <p className="text-xs text-white/50">هنبعت ليهم تنبيهات KYC أو اي اخطارات حرجة.</p>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-white/60">
+              <div className="space-y-1">
+                <p>الإرسال لا يوقف أي أكشن في المنصة لو الـ SMTP مش جاهز.</p>
+                <p>Toggle للتجربة قبل النشر.</p>
+              </div>
+              <button
+                type="submit"
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+              >
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                Save changes
+              </button>
+            </div>
+          </form>
+        </>
+      )}
     </div>
   );
 }
@@ -3025,6 +3236,7 @@ export default function AdminApp() {
           {active === 'staking' && <StakingPanel onNotify={notify} />}
           {active === 'fees' && <FeesPanel onNotify={notify} />}
           {active === 'ai' && <AiPanel onNotify={notify} />}
+          {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
           {active === 'stripe' && <StripePanel onNotify={notify} />}

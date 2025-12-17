@@ -90,6 +90,26 @@ After configuring the keys, register the webhook endpoint at the full API path
 host you expose as `NEXT_PUBLIC_API_BASE`—the **API** host, not the public frontend—to avoid 404
 responses from the website server. There is no extra path segment beyond `/stripe/webhook`.
 
+### Email notifications
+
+Email delivery reuses the existing SMTP environment variables (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`). The admin console at `/mo` now exposes a
+"Notifications" tab where you can toggle delivery and configure the sender plus admin
+recipients without redeploying.
+
+The following `platform_settings` keys back the runtime configuration. Insert or update them as
+needed:
+
+- `email_enabled`
+- `email_from_address`
+- `email_admin_recipients`
+- `email_user_welcome_enabled`
+- `email_user_kyc_enabled`
+- `email_admin_kyc_enabled`
+
+If SMTP credentials are missing, emails are skipped gracefully while the rest of the platform
+continues to run.
+
 #### Database migration
 
 The feature introduces a new table `fiat_purchases` plus additional metadata columns
