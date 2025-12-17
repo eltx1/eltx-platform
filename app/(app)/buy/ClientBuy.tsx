@@ -357,8 +357,6 @@ export default function ClientBuy() {
           </div>
         </div>
 
-        <p className="text-xs text-white/50">{t.buy.feeNotice}</p>
-
         {showStripeNotice && (
           <div className="flex items-start gap-3 rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100">
             <AlertCircle className="h-4 w-4 flex-shrink-0" />
