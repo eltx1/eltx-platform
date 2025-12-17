@@ -5548,56 +5548,40 @@ function isTruthyFlag(value) {
 
 async function ensureStripePricingRow(conn) {
   try {
-    const minVal = Number.isFinite(stripeMinPurchaseUsd) && stripeMinPurchaseUsd > 0 ? stripeMinPurchaseUsd : 10;
-    await conn.query('INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd) VALUES (1, 1, ?)', [minVal]);
+    await conn.query('INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd) VALUES (1, 1, 10)');
   } catch (err) {
     console.warn('[stripe] failed to initialize stripe_pricing row', err.message || err);
   }
 }
 
 async function getStripePricing(conn = pool) {
-  let row = null;
+  await ensureStripePricingRow(conn);
+
+  const [rows] = await conn.query('SELECT price_eltx, min_usd, max_usd, updated_at FROM stripe_pricing WHERE id=1 LIMIT 1');
+  const row = rows[0];
+
+  if (!row)
+    throw { status: 503, code: 'STRIPE_PRICING_MISSING', message: 'Stripe pricing is not configured.' };
+
+  let price;
   try {
-    await ensureStripePricingRow(conn);
-    const [rows] = await conn.query('SELECT price_eltx, min_usd, max_usd, updated_at FROM stripe_pricing WHERE id=1 LIMIT 1');
-    if (rows.length) row = rows[0];
-  } catch (err) {
-    console.warn('[stripe] failed to read stripe_pricing', err.message || err);
-  }
+    price = new Decimal(row.price_eltx);
+  } catch {}
+  if (!price || !price.isFinite() || price.lte(0))
+    throw { status: 503, code: 'STRIPE_PRICE_INVALID', message: 'Invalid Stripe ELTX price. Please configure pricing.' };
 
-  let price = null;
-  if (row?.price_eltx !== undefined && row.price_eltx !== null) {
-    try {
-      const candidate = new Decimal(row.price_eltx);
-      if (candidate.isFinite() && candidate.gt(0)) price = candidate;
-    } catch {}
-  }
-  if (!price) {
-    price = new Decimal(1);
-  }
-
-  let min = new Decimal(
-    Number.isFinite(stripeMinPurchaseUsd) && stripeMinPurchaseUsd > 0 ? stripeMinPurchaseUsd : 10
-  );
-  if (row?.min_usd !== undefined && row.min_usd !== null) {
-    try {
-      const dbMin = new Decimal(row.min_usd);
-      if (dbMin.isFinite() && dbMin.gt(min)) min = dbMin;
-    } catch {}
-  }
+  let min;
+  try {
+    min = new Decimal(row.min_usd);
+  } catch {}
+  if (!min || !min.isFinite() || min.lte(0))
+    throw { status: 503, code: 'STRIPE_MIN_INVALID', message: 'Invalid Stripe minimum amount. Please configure pricing.' };
 
   let max = null;
-  if (Number.isFinite(stripeMaxPurchaseUsd) && stripeMaxPurchaseUsd > 0) {
+  if (row.max_usd !== null && row.max_usd !== undefined) {
     try {
-      max = new Decimal(stripeMaxPurchaseUsd);
-    } catch {}
-  }
-  if (row?.max_usd !== undefined && row.max_usd !== null) {
-    try {
-      const dbMax = new Decimal(row.max_usd);
-      if (dbMax.isFinite() && dbMax.gt(0)) {
-        max = max ? Decimal.min(max, dbMax) : dbMax;
-      }
+      const candidate = new Decimal(row.max_usd);
+      if (candidate.isFinite() && candidate.gt(0)) max = candidate;
     } catch {}
   }
 
