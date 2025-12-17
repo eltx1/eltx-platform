@@ -13,7 +13,7 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
       aria-current={active ? 'page' : undefined}
       aria-selected={active}
       role="tab"
-      className="group relative flex flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold tracking-tight transition-all duration-200 hover:bg-white/5"
+      className="group relative flex flex-1 flex-col items-center justify-center gap-1 rounded-2xl px-2 py-2 text-[11px] font-semibold tracking-tight transition-all duration-200 hover:bg-white/5"
       data-state={active ? 'active' : 'inactive'}
     >
       <span
@@ -73,7 +73,7 @@ export default function AppBottomNav() {
     >
       <div className="relative overflow-hidden px-3 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_22%_20%,rgba(139,92,246,0.12),transparent_32%),radial-gradient(circle_at_80%_78%,rgba(109,40,217,0.16),transparent_30%)]" />
-        <div className="relative grid grid-cols-5 items-center gap-2">
+        <div className="relative flex items-center justify-between gap-2">
           {navItems.map((item) => (
             <NavItem
               key={item.href}
