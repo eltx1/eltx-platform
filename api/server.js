@@ -5548,7 +5548,7 @@ function isTruthyFlag(value) {
 
 async function ensureStripePricingRow(conn) {
   try {
-    await conn.query('INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd) VALUES (1, 1, 10)');
+    await conn.query('INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd, max_usd) VALUES (1, 1, 10, NULL)');
   } catch (err) {
     console.warn('[stripe] failed to initialize stripe_pricing row', err.message || err);
   }

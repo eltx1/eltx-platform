@@ -14,9 +14,7 @@ ALTER TABLE stripe_pricing
   ADD COLUMN IF NOT EXISTS max_usd DECIMAL(36,18) NULL DEFAULT NULL AFTER min_usd,
   ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER max_usd;
 
+-- seed a neutral row; actual Stripe pricing should be configured explicitly via admin/API
 INSERT INTO stripe_pricing (id, price_eltx, min_usd, max_usd)
-SELECT 1,
-       COALESCE((SELECT price_eltx FROM asset_prices WHERE UPPER(asset)='USDC' LIMIT 1), 1),
-       COALESCE((SELECT min_amount FROM asset_prices WHERE UPPER(asset)='USDC' LIMIT 1), 10),
-       (SELECT max_amount FROM asset_prices WHERE UPPER(asset)='USDC' LIMIT 1)
+SELECT 1, 1, 10, NULL
 WHERE NOT EXISTS (SELECT 1 FROM stripe_pricing WHERE id=1);
