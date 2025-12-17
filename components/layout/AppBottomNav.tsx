@@ -68,7 +68,7 @@ export default function AppBottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 w-full border-t border-white/5 bg-[#0c0a1a]/95 backdrop-blur-xl md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 w-full border-t border-white/5 bg-[#060515]/95 backdrop-blur-2xl md:hidden"
       role="tablist"
     >
       <div className="relative overflow-hidden px-3 pb-[calc(env(safe-area-inset-bottom)+14px)] pt-2">
