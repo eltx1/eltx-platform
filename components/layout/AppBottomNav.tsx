@@ -13,45 +13,32 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
       aria-current={active ? 'page' : undefined}
       aria-selected={active}
       role="tab"
-      className="group relative flex h-[3.5rem] items-center justify-center gap-2 rounded-xl border border-white/5 px-3 text-[11px] font-semibold tracking-tight transition-all duration-200 hover:border-white/15 hover:bg-white/5"
+      className="group relative flex flex-1 items-center justify-center rounded-3xl px-2 py-2 text-[11px] font-semibold tracking-tight transition duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-400/60"
       data-state={active ? 'active' : 'inactive'}
     >
-      <div
-        className={`grid h-10 w-10 place-items-center rounded-2xl transition-all duration-200 ${
-          active
-            ? 'bg-gradient-to-br from-violet-600/70 via-fuchsia-500/70 to-indigo-500/70 text-white shadow-[0_10px_30px_rgba(76,29,149,0.45)] ring-1 ring-violet-200/60'
-            : 'bg-white/5 text-slate-300/80 ring-1 ring-white/10 group-hover:text-slate-100'
-        }`}
-      >
-        <Icon
-          className={`h-5 w-5 transition-colors duration-150 ${
-            active ? 'text-white' : 'text-slate-200/70 group-hover:text-slate-100'
-          }`}
-          strokeWidth={2.25}
-        />
-      </div>
-      <div className="min-w-0 flex-1">
-        <span
-          className={`line-clamp-1 text-left text-xs leading-tight transition-colors duration-150 ${
-            active
-              ? 'text-white drop-shadow-[0_1px_8px_rgba(124,58,237,0.35)]'
-              : 'text-slate-200/90 group-hover:text-slate-100'
-          }`}
+      <span
+        className="absolute inset-0 rounded-3xl bg-white/5 opacity-0 blur transition duration-200 group-data-[state=active]:opacity-100"
+        aria-hidden
+      />
+      <span
+        className="absolute inset-y-1 left-1/2 h-[82%] w-[72%] -translate-x-1/2 rounded-3xl bg-gradient-to-b from-white/10 via-white/4 to-transparent opacity-0 transition duration-200 group-data-[state=active]:opacity-100"
+        aria-hidden
+      />
+      <span
+        className="absolute inset-x-5 bottom-1 h-0.5 rounded-full bg-gradient-to-r from-fuchsia-400 via-violet-400 to-indigo-400 opacity-0 transition duration-200 group-hover:opacity-60 group-data-[state=active]:opacity-100"
+        aria-hidden
+      />
+
+      <div className="relative flex flex-col items-center gap-1">
+        <div
+          className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-200/90 shadow-[0_10px_30px_rgba(0,0,0,0.35)] transition duration-200 group-hover:border-white/30 group-hover:text-white group-data-[state=active]:border-fuchsia-300/60 group-data-[state=active]:bg-gradient-to-br group-data-[state=active]:from-violet-600/80 group-data-[state=active]:via-fuchsia-500/80 group-data-[state=active]:to-indigo-500/75 group-data-[state=active]:text-white"
         >
+          <Icon className="h-5 w-5" strokeWidth={2.25} />
+        </div>
+        <span className="text-center leading-tight text-slate-200/90 transition duration-150 group-hover:text-white group-data-[state=active]:text-white">
           {label}
         </span>
       </div>
-      <span
-        className={`whitespace-nowrap text-xs leading-none transition-colors duration-150 ${
-          active ? 'text-white drop-shadow-[0_1px_8px_rgba(124,58,237,0.35)]' : 'text-slate-300/85 group-hover:text-slate-100'
-        }`}
-      >
-        {label}
-      </span>
-      <span
-        className="absolute inset-0 -z-10 rounded-2xl opacity-0 transition-opacity duration-200 group-data-[state=active]:opacity-100"
-        aria-hidden
-      />
     </Link>
   );
 }
@@ -73,12 +60,13 @@ export default function AppBottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 w-full border-t border-white/5 bg-[#0c0a1a]/95 backdrop-blur-xl md:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 w-full border-t border-white/5 bg-[#060515]/95 backdrop-blur-2xl md:hidden"
       role="tablist"
     >
-      <div className="relative overflow-hidden px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_22%_20%,rgba(139,92,246,0.12),transparent_32%),radial-gradient(circle_at_80%_78%,rgba(109,40,217,0.16),transparent_30%)]" />
-        <div className="relative grid h-[4.5rem] grid-cols-5 items-stretch gap-2">
+      <div className="relative px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_12%,rgba(139,92,246,0.14),transparent_32%),radial-gradient(circle_at_82%_84%,rgba(109,40,217,0.22),transparent_38%)]" />
+        <div className="pointer-events-none absolute inset-x-2 bottom-2 top-1 rounded-[26px] border border-white/10 bg-white/10 backdrop-blur-[18px]" />
+        <div className="relative grid grid-cols-5 gap-1">
           {navItems.map((item) => (
             <NavItem
               key={item.href}
