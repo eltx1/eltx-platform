@@ -30,6 +30,17 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
           strokeWidth={2.25}
         />
       </div>
+      <div className="min-w-0 flex-1">
+        <span
+          className={`line-clamp-1 text-left text-xs leading-tight transition-colors duration-150 ${
+            active
+              ? 'text-white drop-shadow-[0_1px_8px_rgba(124,58,237,0.35)]'
+              : 'text-slate-200/90 group-hover:text-slate-100'
+          }`}
+        >
+          {label}
+        </span>
+      </div>
       <span
         className={`whitespace-nowrap text-xs leading-none transition-colors duration-150 ${
           active ? 'text-white drop-shadow-[0_1px_8px_rgba(124,58,237,0.35)]' : 'text-slate-300/85 group-hover:text-slate-100'
