@@ -66,21 +66,22 @@ export default function AppBottomNav() {
   ];
 
   return (
-    <nav className="md:hidden fixed inset-x-0 bottom-0 z-40 w-full px-4 pb-[calc(env(safe-area-inset-bottom)+16px)] pt-3" role="tablist">
-      <div className="relative w-full">
-        <div className="relative overflow-hidden rounded-[26px] border border-violet-400/10 bg-[#0c0a1a]/90 shadow-[0_-12px_34px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_22%_20%,rgba(139,92,246,0.12),transparent_32%),radial-gradient(circle_at_80%_78%,rgba(109,40,217,0.16),transparent_30%)]" />
-          <div className="relative grid h-20 grid-cols-5 items-center px-5 py-3">
-            {navItems.map((item) => (
-              <NavItem
-                key={item.href}
-                href={item.href}
-                label={item.label}
-                icon={item.icon}
-                active={isActive(item.activeRoot ?? item.href)}
-              />
-            ))}
-          </div>
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 w-full border-t border-white/5 bg-[#0c0a1a]/95 backdrop-blur-xl md:hidden"
+      role="tablist"
+    >
+      <div className="relative overflow-hidden px-3 pb-[calc(env(safe-area-inset-bottom)+12px)] pt-2">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_22%_20%,rgba(139,92,246,0.12),transparent_32%),radial-gradient(circle_at_80%_78%,rgba(109,40,217,0.16),transparent_30%)]" />
+        <div className="relative grid h-[4.5rem] grid-cols-5 items-center gap-1">
+          {navItems.map((item) => (
+            <NavItem
+              key={item.href}
+              href={item.href}
+              label={item.label}
+              icon={item.icon}
+              active={isActive(item.activeRoot ?? item.href)}
+            />
+          ))}
         </div>
       </div>
     </nav>
