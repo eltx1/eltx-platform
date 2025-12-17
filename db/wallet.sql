@@ -162,6 +162,26 @@ INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALU
 INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('BNB', 0, 0.01, 25);
 INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALUES ('ETH', 0, 0.005, 25);
 
+-- dedicated Stripe pricing so card purchases are decoupled from swap pricing
+CREATE TABLE IF NOT EXISTS stripe_pricing (
+  id TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  price_eltx DECIMAL(36,18) NOT NULL,
+  min_usd DECIMAL(36,18) NOT NULL DEFAULT 10,
+  max_usd DECIMAL(36,18) DEFAULT NULL,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE stripe_pricing
+  ADD COLUMN IF NOT EXISTS price_eltx DECIMAL(36,18) NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS min_usd DECIMAL(36,18) NOT NULL DEFAULT 10 AFTER price_eltx,
+  ADD COLUMN IF NOT EXISTS max_usd DECIMAL(36,18) NULL DEFAULT NULL AFTER min_usd,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER max_usd;
+INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd, max_usd)
+SELECT 1,
+       COALESCE((SELECT price_eltx FROM asset_prices WHERE UPPER(asset)='USDC' LIMIT 1), 1),
+       COALESCE((SELECT min_amount FROM asset_prices WHERE UPPER(asset)='USDC' LIMIT 1), 10),
+       (SELECT max_amount FROM asset_prices WHERE UPPER(asset)='USDC' LIMIT 1);
+
 -- fiat purchases via card (Stripe)
 CREATE TABLE IF NOT EXISTS fiat_purchases (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

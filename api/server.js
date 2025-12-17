@@ -26,7 +26,7 @@ const {
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
 const STRIPE_BASE_FALLBACK = 'https://eltx.online';
-const STRIPE_PRICING_ASSET = 'USDC';
+const STRIPE_PRICING_ASSET = 'USD';
 
 const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
 const DEFAULT_SPOT_MAX_DEVIATION_BPS = 800n;
@@ -1772,13 +1772,6 @@ app.post('/stripe/webhook', async (req, res) => {
 app.get('/fiat/stripe/rate', walletLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
-    if (stripe) {
-      try {
-        await syncSwapAssetPrices(pool);
-      } catch (err) {
-        console.warn('[stripe] price sync skipped', err.message || err);
-      }
-    }
     const pricing = await getStripePricing(pool);
     const min = pricing.min.toFixed(2, Decimal.ROUND_UP);
     const max = pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null;
@@ -2390,13 +2383,9 @@ app.patch('/admin/stripe/pricing', async (req, res, next) => {
     await requireAdmin(req);
     const updates = AdminStripePricingUpdateSchema.parse(req.body || {});
 
-    const [[row]] = await pool.query('SELECT asset FROM asset_prices WHERE UPPER(asset)=? LIMIT 1', [
-      STRIPE_PRICING_ASSET,
-    ]);
+    const [[row]] = await pool.query('SELECT id FROM stripe_pricing WHERE id=1 LIMIT 1');
     if (!row) {
-      await pool.query('INSERT INTO asset_prices (asset, price_eltx, min_amount) VALUES (?, 1, 1)', [
-        STRIPE_PRICING_ASSET,
-      ]);
+      await pool.query('INSERT INTO stripe_pricing (id, price_eltx, min_usd) VALUES (1, 1, 10)');
     }
 
     const fields = [];
@@ -2414,25 +2403,25 @@ app.patch('/admin/stripe/pricing', async (req, res, next) => {
       const normalized = normalizePositiveDecimal(updates.min_usd, 18);
       if (normalized === null)
         return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid minimum purchase amount' });
-      fields.push('min_amount = ?');
+      fields.push('min_usd = ?');
       params.push(normalized);
     }
 
     if (Object.prototype.hasOwnProperty.call(updates, 'max_usd')) {
       if (updates.max_usd === null) {
-        fields.push('max_amount = NULL');
+        fields.push('max_usd = NULL');
       } else {
         const normalized = normalizePositiveDecimal(updates.max_usd, 18);
         if (normalized === null)
           return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid maximum purchase amount' });
-        fields.push('max_amount = ?');
+        fields.push('max_usd = ?');
         params.push(normalized);
       }
     }
 
     if (fields.length) {
-      params.push(STRIPE_PRICING_ASSET);
-      await pool.query(`UPDATE asset_prices SET ${fields.join(', ')}, updated_at = NOW() WHERE UPPER(asset)=?`, params);
+      params.push(1);
+      await pool.query(`UPDATE stripe_pricing SET ${fields.join(', ')}, updated_at = NOW() WHERE id=?`, params);
     }
 
     const pricing = await getStripePricing(pool);
@@ -5557,16 +5546,23 @@ function isTruthyFlag(value) {
   return str === '1' || str === 'true' || str === 'yes';
 }
 
+async function ensureStripePricingRow(conn) {
+  try {
+    const minVal = Number.isFinite(stripeMinPurchaseUsd) && stripeMinPurchaseUsd > 0 ? stripeMinPurchaseUsd : 10;
+    await conn.query('INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd) VALUES (1, 1, ?)', [minVal]);
+  } catch (err) {
+    console.warn('[stripe] failed to initialize stripe_pricing row', err.message || err);
+  }
+}
+
 async function getStripePricing(conn = pool) {
   let row = null;
   try {
-    const [rows] = await conn.query(
-      'SELECT asset, price_eltx, min_amount, max_amount, updated_at FROM asset_prices WHERE UPPER(asset)=? LIMIT 1',
-      [STRIPE_PRICING_ASSET]
-    );
+    await ensureStripePricingRow(conn);
+    const [rows] = await conn.query('SELECT price_eltx, min_usd, max_usd, updated_at FROM stripe_pricing WHERE id=1 LIMIT 1');
     if (rows.length) row = rows[0];
   } catch (err) {
-    console.warn('[stripe] failed to read asset_prices', err.message || err);
+    console.warn('[stripe] failed to read stripe_pricing', err.message || err);
   }
 
   let price = null;
@@ -5589,9 +5585,9 @@ async function getStripePricing(conn = pool) {
   let min = new Decimal(
     Number.isFinite(stripeMinPurchaseUsd) && stripeMinPurchaseUsd > 0 ? stripeMinPurchaseUsd : 10
   );
-  if (row?.min_amount !== undefined && row.min_amount !== null) {
+  if (row?.min_usd !== undefined && row.min_usd !== null) {
     try {
-      const dbMin = new Decimal(row.min_amount);
+      const dbMin = new Decimal(row.min_usd);
       if (dbMin.isFinite() && dbMin.gt(min)) min = dbMin;
     } catch {}
   }
@@ -5602,16 +5598,16 @@ async function getStripePricing(conn = pool) {
       max = new Decimal(stripeMaxPurchaseUsd);
     } catch {}
   }
-  if (row?.max_amount !== undefined && row.max_amount !== null) {
+  if (row?.max_usd !== undefined && row.max_usd !== null) {
     try {
-      const dbMax = new Decimal(row.max_amount);
+      const dbMax = new Decimal(row.max_usd);
       if (dbMax.isFinite() && dbMax.gt(0)) {
         max = max ? Decimal.min(max, dbMax) : dbMax;
       }
     } catch {}
   }
 
-  return { asset: row?.asset || STRIPE_PRICING_ASSET, price, min, max, updatedAt: row?.updated_at || null };
+  return { asset: STRIPE_PRICING_ASSET, price, min, max, updatedAt: row?.updated_at || null };
 }
 
 function formatFiatPurchaseRow(row) {
