@@ -201,7 +201,7 @@ const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split('
 const corsOptions = {
   origin: allowedOrigins,
   credentials: true,
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
 };
 app.use(cors(corsOptions));
@@ -6220,4 +6220,3 @@ const port = process.env.PORT || 4000;
 app.listen(port, () => {
   console.log(`API running on port ${port}`);
 });
-
