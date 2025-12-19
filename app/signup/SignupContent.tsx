@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '../lib/api';
 import { dict, useLang } from '../lib/i18n';
 import { useToast } from '../lib/toast';
@@ -16,6 +16,8 @@ export default function SignupContent() {
   const t = dict[lang];
   const toast = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const referralCode = (searchParams.get('ref') || '').trim();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,9 +29,12 @@ export default function SignupContent() {
     const cleanedUsername = rawUsername.replace(/[^a-zA-Z0-9._-]/g, '') || 'user';
     const username = cleanedUsername.length >= 3 ? cleanedUsername.slice(0, 32) : `${cleanedUsername}123`;
 
+    const payload: Record<string, string> = { email: sanitizedEmail, password, language: lang, username };
+    if (referralCode) payload.referral_code = referralCode;
+
     const res = await apiFetch<any>('/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ email: sanitizedEmail, password, language: lang, username }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) {
       const err = (res.data as any)?.error;

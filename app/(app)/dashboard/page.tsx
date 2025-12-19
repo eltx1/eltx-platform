@@ -14,6 +14,7 @@ import {
   ArrowLeftRight,
   CandlestickChart,
   ShoppingCart,
+  Gift,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { apiFetch } from '../../lib/api';
@@ -199,6 +200,12 @@ export default function DashboardPage() {
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/80">Earn</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <SectionCard title="Staking" href="/staking" icon={Coins} />
+            <SectionCard
+              title={t.dashboard.cards.invite.title}
+              subtitle={t.dashboard.cards.invite.subtitle}
+              href="/referrals"
+              icon={Gift}
+            />
           </div>
         </div>
 
@@ -219,4 +226,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
