@@ -50,6 +50,7 @@ type Section =
   | 'pricing'
   | 'fees'
   | 'ai'
+  | 'referrals'
   | 'notifications'
   | 'faq'
   | 'stripe';
@@ -132,6 +133,9 @@ type AiSettings = { daily_free_messages: number; message_price_eltx: string };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
+type ReferralSettings = { reward_eltx: string };
+type ReferralSettingsResponse = { settings: ReferralSettings };
+
 type EmailSettings = {
   enabled: boolean;
   from_address: string;
@@ -209,6 +213,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'staking', label: 'Staking', icon: Layers },
   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'ai', label: 'AI', icon: Sparkles },
+  { id: 'referrals', label: 'Referrals', icon: UserPlus },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
@@ -387,6 +392,98 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
           <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : `${stats.eltx_spent} ELTX`}</p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<ReferralSettings | null>(null);
+  const [form, setForm] = useState<ReferralSettings>({ reward_eltx: '0' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<ReferralSettingsResponse>('/admin/referrals/settings');
+    if (res.ok) {
+      setSettings(res.data.settings);
+      setForm(res.data.settings);
+    } else {
+      onNotify(res.error || 'Failed to load referral settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const res = await apiFetch<ReferralSettingsResponse>('/admin/referrals/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setSettings(res.data.settings);
+      setForm(res.data.settings);
+      onNotify('Referral settings updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update referral settings', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-white/60">Referral rewards</p>
+          <h2 className="text-xl font-semibold">Invite & earn payout</h2>
+        </div>
+        <button
+          onClick={load}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Sync
+        </button>
+      </div>
+
+      <form
+        onSubmit={handleSubmit}
+        className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner shadow-black/30"
+      >
+        <label className="space-y-2 text-sm text-white/70">
+          <span>Reward for first successful purchase (ELTX)</span>
+          <input
+            type="text"
+            value={form.reward_eltx}
+            onChange={(e) => setForm({ reward_eltx: e.target.value })}
+            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+          />
+        </label>
+        <div className="flex items-center justify-between text-xs text-white/60">
+          <div className="space-y-1">
+            <p>حدد المكافأة اللي المستخدم بياخدها عند أول شراء ناجح لصديقه.</p>
+            <p>تقدر تحط 0 لتعطيل المكافآت بدون ما توقف نظام الإحالة.</p>
+          </div>
+          <button
+            type="submit"
+            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+            disabled={saving || loading}
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            احفظ التغييرات
+          </button>
+        </div>
+        {settings && (
+          <p className="text-xs text-white/50">
+            Current reward: <span className="text-white/80">{settings.reward_eltx} ELTX</span>
+          </p>
+        )}
+      </form>
     </div>
   );
 }
@@ -3236,6 +3333,7 @@ export default function AdminApp() {
           {active === 'staking' && <StakingPanel onNotify={notify} />}
           {active === 'fees' && <FeesPanel onNotify={notify} />}
           {active === 'ai' && <AiPanel onNotify={notify} />}
+          {active === 'referrals' && <ReferralPanel onNotify={notify} />}
           {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}

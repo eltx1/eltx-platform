@@ -477,6 +477,7 @@ const SignupSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
   language: z.string().trim().optional(),
+  referral_code: z.string().trim().max(32).optional(),
 });
 
 const LoginSchema = z.object({
@@ -766,6 +767,8 @@ const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
 const DEFAULT_AI_DAILY_FREE = 10;
 const DEFAULT_AI_PRICE = '1';
+const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
+const DEFAULT_REFERRAL_REWARD = '0';
 
 function getSymbolDecimals(symbol) {
   const meta = tokenMetaBySymbol[symbol];
@@ -930,6 +933,32 @@ function parseEmailList(raw) {
     .map((item) => item.trim())
     .filter((item) => item && /@/.test(item))
     .slice(0, 20);
+}
+
+function generateReferralCode() {
+  return crypto.randomBytes(5).toString('hex').toUpperCase();
+}
+
+async function ensureReferralCode(conn, userId) {
+  const executor = conn.query ? conn : pool;
+  const [rows] = await executor.query('SELECT code FROM referral_codes WHERE user_id=?', [userId]);
+  if (rows.length) return rows[0].code;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const code = generateReferralCode();
+    try {
+      await executor.query('INSERT INTO referral_codes (user_id, code) VALUES (?, ?)', [userId, code]);
+      return code;
+    } catch (err) {
+      if (err?.code === 'ER_DUP_ENTRY') continue;
+      throw err;
+    }
+  }
+  throw new Error('Failed to allocate referral code');
+}
+
+async function readReferralSettings(conn = pool) {
+  const reward = await getPlatformSettingValue(REFERRAL_REWARD_SETTING, DEFAULT_REFERRAL_REWARD, conn);
+  return { reward_eltx: trimDecimal(reward) };
 }
 
 const EMAIL_SETTING_KEYS = {
@@ -2009,6 +2038,10 @@ const AiSettingsSchema = z.object({
   message_price_eltx: z.union([z.string(), z.number()]),
 });
 
+const ReferralSettingsSchema = z.object({
+  reward_eltx: z.union([z.string(), z.number()]),
+});
+
 const CANDLE_INTERVALS = {
   '5m': { seconds: 300 },
   '1h': { seconds: 3600 },
@@ -2280,7 +2313,7 @@ app.get('/fiat/stripe/session/:sessionId', walletLimiter, async (req, res, next)
 app.post('/auth/signup', async (req, res, next) => {
   let conn;
   try {
-    const { email, password, language } = SignupSchema.parse(req.body);
+    const { email, password, language, referral_code: referralCodeRaw } = SignupSchema.parse(req.body);
     conn = await pool.getConnection();
     await conn.beginTransaction();
     const username = await generateUsernameFromEmail(conn, email);
@@ -2290,6 +2323,17 @@ app.post('/auth/signup', async (req, res, next) => {
     );
     const hash = await argon2.hash(password, { type: argon2.argon2id });
     await conn.query('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)', [u.insertId, hash]);
+    await ensureReferralCode(conn, u.insertId);
+    const referralCode = referralCodeRaw ? referralCodeRaw.trim().toUpperCase() : null;
+    if (referralCode) {
+      const [[referrer]] = await conn.query('SELECT user_id FROM referral_codes WHERE code=? LIMIT 1', [referralCode]);
+      if (referrer?.user_id && referrer.user_id !== u.insertId) {
+        await conn.query('INSERT IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?, ?)', [
+          referrer.user_id,
+          u.insertId,
+        ]);
+      }
+    }
     const token = crypto.randomUUID();
     await conn.query(
       'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
@@ -2390,6 +2434,57 @@ app.get('/auth/me', async (req, res, next) => {
     );
     if (!rows.length) return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
     res.json(rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/referrals/summary', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const code = await ensureReferralCode(pool, userId);
+    const [rows] = await pool.query(
+      `SELECT r.referred_user_id,
+              u.username,
+              u.email,
+              u.created_at,
+              rr.reward_eltx,
+              rr.created_at AS rewarded_at,
+              EXISTS(
+                SELECT 1 FROM fiat_purchases fp WHERE fp.user_id = r.referred_user_id AND fp.status='succeeded'
+              ) AS has_purchase
+         FROM referrals r
+         JOIN users u ON u.id = r.referred_user_id
+         LEFT JOIN referral_rewards rr ON rr.referred_user_id = r.referred_user_id
+        WHERE r.referrer_user_id = ?
+        ORDER BY r.created_at DESC`,
+      [userId]
+    );
+
+    const referrals = rows.map((row) => ({
+      referred_user_id: row.referred_user_id,
+      username: row.username,
+      email: row.email,
+      created_at: row.created_at,
+      has_purchase: !!row.has_purchase,
+      reward_eltx: row.reward_eltx?.toString() || '0',
+      rewarded_at: row.rewarded_at || null,
+    }));
+
+    const totalInvited = referrals.length;
+    const totalPurchases = referrals.filter((r) => r.has_purchase).length;
+    const totalRewards = referrals.reduce((sum, row) => sum.plus(new Decimal(row.reward_eltx || '0')), new Decimal(0));
+
+    res.json({
+      ok: true,
+      code,
+      stats: {
+        invited: totalInvited,
+        purchases: totalPurchases,
+        rewards_eltx: trimDecimal(totalRewards.toFixed(18, Decimal.ROUND_DOWN)),
+      },
+      referrals,
+    });
   } catch (err) {
     next(err);
   }
@@ -2698,6 +2793,32 @@ app.patch('/admin/ai/settings', async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid AI settings', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.get('/admin/referrals/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const settings = await readReferralSettings();
+    res.json({ ok: true, settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/referrals/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = ReferralSettingsSchema.parse(req.body || {});
+    const reward = normalizePositiveDecimal(payload.reward_eltx, 18);
+    if (reward === null) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid referral reward' });
+    await setPlatformSettingValue(REFERRAL_REWARD_SETTING, reward);
+    const settings = await readReferralSettings();
+    res.json({ ok: true, settings });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid referral settings', details: err.flatten() });
     next(err);
   }
 });
@@ -6089,6 +6210,89 @@ async function creditFiatPurchase(conn, purchase, refs = {}) {
   );
 }
 
+async function processReferralRewardForPurchase(purchaseId, userId) {
+  let conn;
+  try {
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[referral]] = await conn.query(
+      'SELECT referrer_user_id FROM referrals WHERE referred_user_id=? FOR UPDATE',
+      [userId]
+    );
+    if (!referral) {
+      await conn.rollback();
+      return;
+    }
+
+    const [[existingReward]] = await conn.query(
+      'SELECT id FROM referral_rewards WHERE referred_user_id=? FOR UPDATE',
+      [userId]
+    );
+    if (existingReward) {
+      await conn.rollback();
+      return;
+    }
+
+    const [[purchaseCount]] = await conn.query(
+      "SELECT COUNT(*) AS total FROM fiat_purchases WHERE user_id=? AND status='succeeded'",
+      [userId]
+    );
+    if (Number(purchaseCount?.total || 0) !== 1) {
+      await conn.rollback();
+      return;
+    }
+
+    const settings = await readReferralSettings(conn);
+    const rewardDecimal = new Decimal(settings.reward_eltx || '0');
+    if (!rewardDecimal.isFinite() || rewardDecimal.lte(0)) {
+      await conn.rollback();
+      return;
+    }
+
+    const decimals = getSymbolDecimals(ELTX_SYMBOL);
+    const rewardWeiStr = decimalToWeiString(rewardDecimal, decimals);
+    if (!rewardWeiStr) {
+      await conn.rollback();
+      return;
+    }
+    const rewardWei = bigIntFromValue(rewardWeiStr);
+    if (rewardWei <= 0n) {
+      await conn.rollback();
+      return;
+    }
+
+    await conn.query(
+      `INSERT INTO user_balances (user_id, asset, balance_wei, created_at)
+         VALUES (?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+      [referral.referrer_user_id, ELTX_SYMBOL, rewardWei.toString()]
+    );
+
+    await conn.query(
+      `INSERT INTO referral_rewards (referrer_user_id, referred_user_id, purchase_id, reward_eltx, reward_wei)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        referral.referrer_user_id,
+        userId,
+        purchaseId,
+        rewardDecimal.toFixed(Math.min(decimals, 18), Decimal.ROUND_DOWN),
+        rewardWei.toString(),
+      ]
+    );
+
+    await conn.commit();
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    console.error('[referrals] failed to process referral reward', err);
+  } finally {
+    if (conn) conn.release();
+  }
+}
+
 async function handleStripeCheckoutCompleted(session) {
   const metadata = session.metadata || {};
   const purchaseId = metadata.purchaseId ? Number(metadata.purchaseId) : null;
@@ -6129,6 +6333,11 @@ async function handleStripeCheckoutCompleted(session) {
     purchase.credited = isTruthyFlag(purchase.credited);
     await creditFiatPurchase(conn, purchase, { paymentIntentId, sessionId: session.id });
     await conn.commit();
+    try {
+      await processReferralRewardForPurchase(purchaseId, purchase.user_id);
+    } catch (err) {
+      console.error('[referrals] reward processing failed', err);
+    }
   } catch (err) {
     if (conn) {
       try {
