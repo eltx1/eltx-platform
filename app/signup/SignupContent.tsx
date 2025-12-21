@@ -53,7 +53,7 @@ export default function SignupContent() {
       <div className="relative w-full max-w-5xl">
         <div className="absolute inset-0 blur-3xl bg-emerald-500/20 rounded-full" aria-hidden />
         <div className="relative grid gap-10 md:grid-cols-[1fr_1.1fr] items-center">
-          <section className="space-y-4">
+          <section className="space-y-4 order-2 md:order-1">
             <div className="inline-flex items-center gap-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-sm text-emerald-100">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
               {t.auth.signup.badge}
@@ -87,7 +87,7 @@ export default function SignupContent() {
 
           <form
             onSubmit={handleSubmit}
-            className="bg-white/5 border border-white/10 rounded-2xl p-8 shadow-2xl backdrop-blur w-full max-w-lg mx-auto space-y-4"
+            className="bg-white/5 border border-white/10 rounded-2xl p-8 shadow-2xl backdrop-blur w-full max-w-lg mx-auto space-y-4 order-1 md:order-2"
           >
             <div className="flex items-center justify-between gap-2">
               <div>
