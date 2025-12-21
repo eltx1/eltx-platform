@@ -1910,6 +1910,7 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     e.preventDefault();
     if (!editingPlan) return;
 
+    const minDepositValue = editForm.min_deposit.trim();
     const res = await apiFetch(`/admin/staking/plans/${editingPlan.id}`, {
       method: 'PATCH',
       body: JSON.stringify({
@@ -1918,7 +1919,7 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
         apr_bps: Number(editForm.apr_bps || 0),
         stake_asset: editForm.stake_asset || 'ELTX',
         stake_decimals: Number(editForm.stake_decimals || 18),
-        min_deposit: editForm.min_deposit === '' ? null : Number(editForm.min_deposit),
+        min_deposit: minDepositValue,
       }),
     });
 
