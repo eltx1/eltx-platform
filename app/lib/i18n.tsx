@@ -134,6 +134,7 @@ export const dict = {
         transactions: { title: 'Transactions', subtitle: 'Recent deposits' },
         pay: { title: 'Pay', subtitle: 'Send ELTX to another user' },
         buy: { title: 'Buy Crypto', subtitle: 'Purchase ELTX with your card' },
+        p2p: { title: 'P2P', subtitle: 'Buy & sell USDC/USDT' },
         invite: { title: 'Invite & earn', subtitle: 'Share your referral link' },
         trade: { title: 'Trade', subtitle: 'Swap to ELTX' },
         spotTrade: { title: 'Spot trade', subtitle: 'Order book trading' },
@@ -643,6 +644,66 @@ export const dict = {
         loadError: 'Unable to load verification status.',
       },
     },
+    p2p: {
+      title: 'P2P Marketplace',
+      tabs: {
+        express: 'Express',
+        p2p: 'P2P',
+        block: 'Block Trade',
+      },
+      currency: 'USD',
+      tradeSide: {
+        buy: 'Buy',
+        sell: 'Sell',
+      },
+      filters: {
+        asset: 'Asset',
+        amount: 'Amount',
+        payment: 'Payment',
+        searchPayment: 'Search payment methods',
+        receivedWith: 'Received with',
+        all: 'All',
+        reset: 'Reset',
+        confirm: 'Confirm',
+      },
+      stats: {
+        trades: 'Trade(s)',
+        completion: 'Completion',
+        limit: 'Limit',
+        available: 'Available',
+        orderTime: 'Order time',
+      },
+      actions: {
+        buy: 'Buy',
+        sell: 'Sell',
+      },
+      info: {
+        supportedAssets: 'Supported assets: USDC, USDT.',
+        sellerEligibility:
+          'Sellers can list after 7 days from their last successful Stripe purchase or last successful on-chain wallet deposit.',
+        disputeTiming:
+          'Dispute availability is controlled by admins per payment method (e.g. bank transfer disputes can open after 7 days).',
+        escrow:
+          'Funds are locked in escrow when a trade starts and released only after payment confirmation.',
+        chat: 'Every order includes a private chat that closes when the trade completes.',
+        adminPayments: 'Admins can add, edit, or remove payment methods from the admin panel.',
+      },
+      statuses: {
+        title: 'Trade lifecycle',
+        initiated: 'Initiated',
+        paymentPending: 'Payment pending',
+        paid: 'Paid',
+        released: 'Released',
+        completed: 'Completed',
+        disputed: 'Disputed',
+      },
+      protections: {
+        title: 'Protection & settlement',
+        escrow: 'Escrow-protected trades with automatic balance locking.',
+        settlement: 'Settlement releases when buyer payment is confirmed.',
+        risk: 'Risk controls enforce eligibility windows and dispute timing.',
+      },
+    },
     errors: {
       userExists: 'Email already exists.',
       invalid: 'Invalid email or password.',
@@ -776,6 +837,7 @@ export const dict = {
         transactions: { title: 'الإيداعات', subtitle: 'آخر الإيداعات' },
         pay: { title: 'تحويل', subtitle: 'ابعت ELTX لأي مستخدم' },
         buy: { title: 'شراء ELTX', subtitle: 'اشحن ببطاقتك البنكية فورًا' },
+        p2p: { title: 'P2P', subtitle: 'شراء وبيع USDC/USDT' },
         invite: { title: 'ادعي واربح', subtitle: 'شارك رابط الإحالة بتاعك' },
         trade: { title: 'التداول', subtitle: 'حوّل أصولك إلى ELTX' },
         spotTrade: { title: 'تداول فوري', subtitle: 'دفتر أوامر مركزي' },
@@ -1282,6 +1344,65 @@ export const dict = {
         submitted: 'تم إرسال طلب التحقق بنجاح.',
         error: 'تعذر إرسال طلب التحقق.',
         loadError: 'تعذر تحميل حالة التحقق.',
+      },
+    },
+    p2p: {
+      title: 'سوق التداول P2P',
+      tabs: {
+        express: 'Express',
+        p2p: 'P2P',
+        block: 'Block Trade',
+      },
+      currency: 'USD',
+      tradeSide: {
+        buy: 'شراء',
+        sell: 'بيع',
+      },
+      filters: {
+        asset: 'العملة',
+        amount: 'المبلغ',
+        payment: 'وسيلة الدفع',
+        searchPayment: 'ابحث عن وسيلة دفع',
+        receivedWith: 'الاستلام عبر',
+        all: 'الكل',
+        reset: 'إعادة ضبط',
+        confirm: 'تأكيد',
+      },
+      stats: {
+        trades: 'عدد الصفقات',
+        completion: 'نسبة الإكمال',
+        limit: 'الحدود',
+        available: 'المتاح',
+        orderTime: 'وقت الطلب',
+      },
+      actions: {
+        buy: 'شراء',
+        sell: 'بيع',
+      },
+      info: {
+        supportedAssets: 'العملات المدعومة: USDC و USDT.',
+        sellerEligibility:
+          'البائع يقدر ينشر بعد مرور 7 أيام من آخر شراء ناجح بالبطاقة أو آخر إيداع ناجح على المحفظة من البلوك تشين.',
+        disputeTiming:
+          'فتح النزاع بيتحدد من الأدمن لكل وسيلة دفع (مثلاً التحويل البنكي بعد 7 أيام).',
+        escrow: 'الرصيد بيتقفل في الضمان عند بدء الصفقة وبيتحرر بعد تأكيد الدفع.',
+        chat: 'كل أوردر فيه شات خاص بين الطرفين بيقفل لما الصفقة تكتمل.',
+        adminPayments: 'الأدمن يقدر يضيف أو يعدل أو يحذف وسائل الدفع من لوحة التحكم.',
+      },
+      statuses: {
+        title: 'مراحل الصفقة',
+        initiated: 'تم الإنشاء',
+        paymentPending: 'بانتظار الدفع',
+        paid: 'تم الدفع',
+        released: 'تم التحرير',
+        completed: 'مكتملة',
+        disputed: 'نزاع',
+      },
+      protections: {
+        title: 'الحماية والتسوية',
+        escrow: 'صفقات محمية بضمان مع قفل تلقائي للرصيد.',
+        settlement: 'التسوية بتحصل بعد تأكيد الدفع.',
+        risk: 'ضوابط المخاطر بتطبق شروط الأهلية ووقت النزاع.',
       },
     },
     errors: {
