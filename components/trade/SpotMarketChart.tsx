@@ -98,6 +98,11 @@ function formatUpdateTimestamp(timestamp?: number, locale?: string): string {
   });
 }
 
+function clampPrecision(value: number, min = 2, max = 12): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(Math.max(Math.trunc(value), min), max);
+}
+
 export default function SpotMarketChart({
   marketSymbol,
   baseAsset,
@@ -418,11 +423,13 @@ export default function SpotMarketChart({
   const locale = lang === 'ar' ? 'ar-EG' : 'en-US';
   const activeCandle = hoverCandle || chartData.candles[chartData.candles.length - 1];
 
+  const chartPrecision = useMemo(() => clampPrecision(pricePrecision), [pricePrecision]);
+  const chartMinMove = useMemo(() => Number(new Decimal(10).pow(-chartPrecision).toString()), [chartPrecision]);
+
   const formatPrice = (value: number | string | null | undefined, fallback = '—') => {
     const decimal = safeDecimal(value);
     if (!decimal.isFinite()) return fallback;
-    const precision = Math.min(Math.max(pricePrecision, 2), 12);
-    return decimal.toFixed(precision);
+    return decimal.toFixed(chartPrecision);
   };
 
   const formatCompact = (value: number | string | null | undefined, fallback = '—') => {
@@ -449,6 +456,13 @@ export default function SpotMarketChart({
 
   const showEmptyState = !enabled || (!chartData.candles.length && !loading && fallbackLinePoints.length === 0);
   const containerMinHeight = { minHeight: 'min(60vh, 520px)' } as const;
+
+  useEffect(() => {
+    if (!priceSeriesRef.current || !fallbackLineSeriesRef.current) return;
+    const priceFormat = { type: 'price' as const, precision: chartPrecision, minMove: chartMinMove };
+    priceSeriesRef.current.applyOptions({ priceFormat });
+    fallbackLineSeriesRef.current.applyOptions({ priceFormat });
+  }, [chartPrecision, chartMinMove, hasIntersected]);
 
   return (
     <div className="bg-white/5 rounded-xl p-4 space-y-4 shadow-lg">
