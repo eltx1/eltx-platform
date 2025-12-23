@@ -3332,6 +3332,10 @@ app.post('/p2p/trades/:id/dispute', walletLimiter, async (req, res, next) => {
       await conn.rollback();
       return next({ status: 400, code: 'BAD_STATE', message: 'Trade already completed' });
     }
+    if (tradeRow.status === 'released') {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Trade already released' });
+    }
     if (tradeRow.status === 'disputed') {
       await conn.rollback();
       return next({ status: 400, code: 'BAD_STATE', message: 'Trade already disputed' });
