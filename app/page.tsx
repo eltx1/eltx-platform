@@ -8,15 +8,14 @@ import EthereumToken from '../components/home/EthereumToken';
 import Partners from '../components/home/Partners';
 import UserTrust from '../components/home/UserTrust';
 import MarketSpotlight from '../components/home/MarketSpotlight';
-import AppDownloadBar from '../components/home/AppDownloadBar';
 import SeoIntro from '../components/home/SeoIntro';
 import { getHomeOverview } from './lib/home-data';
 import ScrollToTopOnLoad from '../components/ScrollToTopOnLoad';
 
 
-export default async function Page(){
+export default async function Page() {
   const overview = await getHomeOverview();
-  return(
+  return (
     <main className="flex flex-col">
       <ScrollToTopOnLoad />
       <Hero />
@@ -30,7 +29,6 @@ export default async function Page(){
       <Tokenomics />
       <Roadmap />
       <Partners />
-      <AppDownloadBar />
 
     </main>
   );
