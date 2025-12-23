@@ -15,6 +15,7 @@ import {
   CandlestickChart,
   ShoppingCart,
   Gift,
+  Handshake,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { apiFetch } from '../../lib/api';
@@ -193,6 +194,12 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <SectionCard title="ELTX Swap" subtitle="Convert to ELTX" href="/trade" icon={ArrowLeftRight} />
             <SectionCard title="Spot Trade" subtitle="Order book trading" href="/trade/spot" icon={CandlestickChart} />
+            <SectionCard
+              title={t.dashboard.cards.p2p.title}
+              subtitle={t.dashboard.cards.p2p.subtitle}
+              href="/p2p"
+              icon={Handshake}
+            />
           </div>
         </div>
 

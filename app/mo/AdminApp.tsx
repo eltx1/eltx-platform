@@ -14,6 +14,7 @@ import {
   Loader2,
   LineChart,
   LogOut,
+  MessageCircle,
   Pencil,
   Plus,
   RefreshCw,
@@ -53,7 +54,8 @@ type Section =
   | 'referrals'
   | 'notifications'
   | 'faq'
-  | 'stripe';
+  | 'stripe'
+  | 'p2p';
 
 interface SummaryResponse {
   summary: {
@@ -204,6 +206,49 @@ type SpotMarketRow = {
   updated_at?: string;
 };
 
+type P2PPaymentMethod = {
+  id: number;
+  name: string;
+  code?: string | null;
+  country?: string | null;
+  dispute_delay_hours: number;
+  is_active: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
+type P2PTradeRow = {
+  id: number;
+  asset: string;
+  amount: string;
+  fiat_amount: string;
+  status: string;
+  buyer_username: string;
+  seller_username: string;
+  payment_method_name: string;
+  created_at?: string | null;
+};
+
+type P2PDisputeRow = {
+  id: number;
+  trade_id: number;
+  status: string;
+  reason: string;
+  resolution?: string | null;
+  admin_username?: string | null;
+  created_at?: string | null;
+  resolved_at?: string | null;
+  trade: {
+    asset: string;
+    amount: string;
+    fiat_amount: string;
+    status: string;
+    buyer_username: string;
+    seller_username: string;
+    payment_method_name: string;
+  };
+};
+
 const sections: Array<{ id: Section; label: string; icon: ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
@@ -218,6 +263,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
+  { id: 'p2p', label: 'P2P Marketplace', icon: MessageCircle },
 ];
 
 function trimDecimalValue(value: string | number | null | undefined) {
@@ -867,6 +913,347 @@ function FaqPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function P2PPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [methods, setMethods] = useState<P2PPaymentMethod[]>([]);
+  const [methodEdits, setMethodEdits] = useState<Record<number, P2PPaymentMethod>>({});
+  const [trades, setTrades] = useState<P2PTradeRow[]>([]);
+  const [disputes, setDisputes] = useState<P2PDisputeRow[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [newMethod, setNewMethod] = useState({ name: '', code: '', country: '', dispute_delay_hours: 0, is_active: true });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const [methodsRes, tradesRes, disputesRes] = await Promise.all([
+      apiFetch<{ methods: P2PPaymentMethod[] }>('/admin/p2p/payment-methods'),
+      apiFetch<{ trades: P2PTradeRow[] }>('/admin/p2p/trades'),
+      apiFetch<{ disputes: P2PDisputeRow[] }>('/admin/p2p/disputes'),
+    ]);
+    if (methodsRes.ok) {
+      setMethods(methodsRes.data.methods || []);
+      setMethodEdits(
+        (methodsRes.data.methods || []).reduce((acc, method) => {
+          acc[method.id] = { ...method };
+          return acc;
+        }, {} as Record<number, P2PPaymentMethod>)
+      );
+    } else {
+      onNotify(methodsRes.error || 'Failed to load payment methods', 'error');
+    }
+    if (tradesRes.ok) {
+      setTrades(tradesRes.data.trades || []);
+    } else {
+      onNotify(tradesRes.error || 'Failed to load trades', 'error');
+    }
+    if (disputesRes.ok) {
+      setDisputes(disputesRes.data.disputes || []);
+    } else {
+      onNotify(disputesRes.error || 'Failed to load disputes', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const createMethod = async () => {
+    if (!newMethod.name.trim()) {
+      onNotify('Payment method name is required', 'error');
+      return;
+    }
+    setSaving(true);
+    const res = await apiFetch<{ method: P2PPaymentMethod }>('/admin/p2p/payment-methods', {
+      method: 'POST',
+      body: JSON.stringify(newMethod),
+    });
+    setSaving(false);
+    if (res.ok) {
+      onNotify('Payment method added');
+      setNewMethod({ name: '', code: '', country: '', dispute_delay_hours: 0, is_active: true });
+      load();
+    } else {
+      onNotify(res.error || 'Failed to add payment method', 'error');
+    }
+  };
+
+  const saveMethod = async (methodId: number) => {
+    const payload = methodEdits[methodId];
+    if (!payload) return;
+    setSaving(true);
+    const res = await apiFetch<{ method: P2PPaymentMethod }>(`/admin/p2p/payment-methods/${methodId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: payload.name,
+        code: payload.code || undefined,
+        country: payload.country || undefined,
+        dispute_delay_hours: payload.dispute_delay_hours,
+        is_active: payload.is_active,
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      onNotify('Payment method updated');
+      load();
+    } else {
+      onNotify(res.error || 'Failed to update payment method', 'error');
+    }
+  };
+
+  const resolveDispute = async (disputeId: number, resolution: 'buyer' | 'seller' | 'cancel') => {
+    if (!window.confirm(`Resolve dispute ${disputeId} in favor of ${resolution}?`)) return;
+    const res = await apiFetch(`/admin/p2p/disputes/${disputeId}/resolve`, {
+      method: 'PATCH',
+      body: JSON.stringify({ resolution }),
+    });
+    if (res.ok) {
+      onNotify('Dispute resolved');
+      load();
+    } else {
+      onNotify(res.error || 'Failed to resolve dispute', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-white/60">P2P operations</p>
+          <h2 className="text-xl font-semibold">Marketplace controls</h2>
+        </div>
+        <button
+          onClick={load}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Refresh
+        </button>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          <h3 className="text-lg font-semibold">Payment methods</h3>
+          <p className="text-xs text-white/60">Set dispute windows and enable/disable payment rails.</p>
+          <div className="mt-4 space-y-3">
+            <div className="grid gap-3 md:grid-cols-4">
+              <input
+                value={newMethod.name}
+                onChange={(e) => setNewMethod((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Name"
+                className="rounded-lg border border-white/10 bg-black/40 p-2 text-sm"
+              />
+              <input
+                value={newMethod.code}
+                onChange={(e) => setNewMethod((prev) => ({ ...prev, code: e.target.value }))}
+                placeholder="Code"
+                className="rounded-lg border border-white/10 bg-black/40 p-2 text-sm"
+              />
+              <input
+                value={newMethod.country}
+                onChange={(e) => setNewMethod((prev) => ({ ...prev, country: e.target.value }))}
+                placeholder="Country"
+                className="rounded-lg border border-white/10 bg-black/40 p-2 text-sm"
+              />
+              <input
+                type="number"
+                min={0}
+                value={newMethod.dispute_delay_hours}
+                onChange={(e) => setNewMethod((prev) => ({ ...prev, dispute_delay_hours: Number(e.target.value) || 0 }))}
+                placeholder="Dispute delay (hrs)"
+                className="rounded-lg border border-white/10 bg-black/40 p-2 text-sm"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <label className="text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={newMethod.is_active}
+                  onChange={(e) => setNewMethod((prev) => ({ ...prev, is_active: e.target.checked }))}
+                  className="mr-2"
+                />
+                Active on creation
+              </label>
+              <button
+                type="button"
+                onClick={createMethod}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                <Plus className="h-3 w-3" />
+                Add method
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 overflow-x-auto rounded-xl border border-white/10">
+            {loading ? (
+              <div className="p-4 text-sm text-white/60">Loading payment methods...</div>
+            ) : methods.length ? (
+              <table className="min-w-full divide-y divide-white/10 text-sm">
+                <thead>
+                  <tr className="bg-white/5 text-left text-xs text-white/60">
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Dispute delay (hrs)</th>
+                    <th className="px-3 py-2">Active</th>
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/5">
+                  {methods.map((method) => {
+                    const edit = methodEdits[method.id] || method;
+                    return (
+                      <tr key={method.id}>
+                        <td className="px-3 py-2">
+                          <input
+                            value={edit.name}
+                            onChange={(e) =>
+                              setMethodEdits((prev) => ({
+                                ...prev,
+                                [method.id]: { ...edit, name: e.target.value },
+                              }))
+                            }
+                            className="w-full rounded border border-white/10 bg-black/30 px-2 py-1 text-xs"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            value={edit.code || ''}
+                            onChange={(e) =>
+                              setMethodEdits((prev) => ({
+                                ...prev,
+                                [method.id]: { ...edit, code: e.target.value },
+                              }))
+                            }
+                            className="w-full rounded border border-white/10 bg-black/30 px-2 py-1 text-xs"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            value={edit.dispute_delay_hours}
+                            onChange={(e) =>
+                              setMethodEdits((prev) => ({
+                                ...prev,
+                                [method.id]: { ...edit, dispute_delay_hours: Number(e.target.value) || 0 },
+                              }))
+                            }
+                            className="w-24 rounded border border-white/10 bg-black/30 px-2 py-1 text-xs"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={edit.is_active}
+                            onChange={(e) =>
+                              setMethodEdits((prev) => ({
+                                ...prev,
+                                [method.id]: { ...edit, is_active: e.target.checked },
+                              }))
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            type="button"
+                            onClick={() => saveMethod(method.id)}
+                            className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 hover:text-white"
+                          >
+                            Save
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="p-4 text-sm text-white/60">No payment methods yet.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-semibold">Open disputes</h3>
+            <p className="text-xs text-white/60">Resolve disputes and release escrow from admin.</p>
+            <div className="mt-4 space-y-3">
+              {loading ? (
+                <div className="text-sm text-white/60">Loading disputes...</div>
+              ) : disputes.length ? (
+                disputes.map((dispute) => (
+                  <div key={dispute.id} className="rounded-xl border border-white/10 bg-black/30 p-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs text-white/50">#{dispute.trade_id}</div>
+                      <span className="text-xs text-white/60">{dispute.status}</span>
+                    </div>
+                    <div className="mt-2 text-sm font-semibold text-white">{dispute.reason}</div>
+                    <div className="text-xs text-white/50">
+                      {dispute.trade.buyer_username} ↔ {dispute.trade.seller_username} · {dispute.trade.payment_method_name}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                      <button
+                        type="button"
+                        onClick={() => resolveDispute(dispute.id, 'buyer')}
+                        className="rounded-full bg-emerald-500 px-3 py-1 text-black"
+                      >
+                        Release to buyer
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => resolveDispute(dispute.id, 'seller')}
+                        className="rounded-full bg-amber-400 px-3 py-1 text-black"
+                      >
+                        Refund seller
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => resolveDispute(dispute.id, 'cancel')}
+                        className="rounded-full border border-red-500/40 px-3 py-1 text-red-200"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-white/60">No disputes to review.</div>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+            <h3 className="text-lg font-semibold">Recent trades</h3>
+            <p className="text-xs text-white/60">Latest marketplace trades and statuses.</p>
+            <div className="mt-4 space-y-2 text-sm">
+              {loading ? (
+                <div className="text-sm text-white/60">Loading trades...</div>
+              ) : trades.length ? (
+                trades.slice(0, 10).map((trade) => (
+                  <div key={trade.id} className="rounded-xl border border-white/10 bg-black/30 p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="font-semibold text-white">
+                        #{trade.id} · {trade.asset} · {trade.amount}
+                      </div>
+                      <span className="text-xs text-white/60">{trade.status}</span>
+                    </div>
+                    <div className="text-xs text-white/50">
+                      {trade.buyer_username} ↔ {trade.seller_username} · {trade.payment_method_name}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-white/60">No trades yet.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3339,6 +3726,7 @@ export default function AdminApp() {
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
           {active === 'stripe' && <StripePanel onNotify={notify} />}
+          {active === 'p2p' && <P2PPanel onNotify={notify} />}
         </div>
       </main>
     </div>
