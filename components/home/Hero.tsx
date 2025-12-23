@@ -48,7 +48,7 @@ export default function Hero() {
               transition={{ duration: 0.5 }}
               className="text-4xl md:text-5xl font-extrabold leading-tight bg-gradient-to-r from-purple-200 via-fuchsia-200 to-cyan-200 bg-clip-text text-transparent"
             >
-              ELTX Platform
+              ELTX Platform — Crypto Trading & Web3 Exchange
             </motion.h1>
             <motion.p
               initial={{ opacity: 0, y: 20 }}
@@ -56,7 +56,15 @@ export default function Hero() {
               transition={{ duration: 0.5, delay: 0.1 }}
               className="opacity-90 text-base md:text-lg max-w-2xl"
             >
-              Secure, fast and cross-chain ready digital asset platform.
+              Secure, fast and cross-chain ready digital asset platform where you can buy, trade, and stake ELTX alongside leading cryptocurrencies with bilingual English and Arabic support.
+            </motion.p>
+            <motion.p
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.15 }}
+              className="opacity-90 text-base md:text-lg max-w-2xl"
+            >
+              منصة ELTX للتداول وتبديل العملات الرقمية بتأمين كامل وسرعة عالية، جاهزة للمستخدمين بالإنجليزي والعربي.
             </motion.p>
           </div>
           <motion.div
@@ -117,4 +125,3 @@ export default function Hero() {
     </section>
   );
 }
-
