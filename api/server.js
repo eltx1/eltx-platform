@@ -671,6 +671,63 @@ const AdminStripePricingUpdateSchema = z
     message: 'No update fields provided',
   });
 
+const P2P_SUPPORTED_ASSETS = ['USDC', 'USDT'];
+
+const P2POfferCreateSchema = z.object({
+  side: z.enum(['buy', 'sell']),
+  asset: z.enum(['USDC', 'USDT']),
+  currency: z.string().min(1).max(8).default('USD'),
+  price: z.string(),
+  min_limit: z.string(),
+  max_limit: z.string(),
+  total_amount: z.string(),
+  payment_method_ids: z.array(z.number().int().positive()).min(1),
+});
+
+const P2POffersQuerySchema = z.object({
+  side: z.enum(['buy', 'sell']).optional(),
+  asset: z.enum(['USDC', 'USDT']).optional(),
+  amount: z.string().optional(),
+  payment_method_id: z.coerce.number().int().positive().optional(),
+});
+
+const P2PTradeCreateSchema = z.object({
+  offer_id: z.number().int().positive(),
+  amount: z.string(),
+  payment_method_id: z.number().int().positive(),
+});
+
+const P2PMessageSchema = z.object({
+  message: z.string().min(1).max(2000),
+});
+
+const P2PDisputeSchema = z.object({
+  reason: z.string().min(3).max(255),
+  evidence: z.string().max(4000).optional(),
+});
+
+const P2PPaymentMethodSchema = z.object({
+  name: z.string().min(2).max(120),
+  code: z.string().max(64).optional(),
+  country: z.string().max(64).optional(),
+  dispute_delay_hours: z.number().int().min(0).max(24 * 30).default(0),
+  is_active: z.boolean().optional(),
+});
+
+const P2PPaymentMethodUpdateSchema = z
+  .object({
+    name: z.string().min(2).max(120).optional(),
+    code: z.string().max(64).optional(),
+    country: z.string().max(64).optional(),
+    dispute_delay_hours: z.number().int().min(0).max(24 * 30).optional(),
+    is_active: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, { message: 'No update fields provided' });
+
+const P2PDisputeResolveSchema = z.object({
+  resolution: z.enum(['buyer', 'seller', 'cancel']),
+});
+
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const SUPPORTED_CHAINS = [56, 1];
 const DEFAULT_CHAIN_BY_SYMBOL = { BNB: 56, ETH: 1, ELTX: CHAIN_ID };
@@ -845,6 +902,108 @@ function normalizePositiveDecimal(value, precision = 18) {
   } catch {
     return null;
   }
+}
+
+function parseDecimalValue(value) {
+  try {
+    const decimalValue = new Decimal(value);
+    if (!decimalValue.isFinite() || decimalValue.isNegative()) return null;
+    return decimalValue;
+  } catch {
+    return null;
+  }
+}
+
+async function getLatestFundingTimestamp(conn, userId) {
+  const [[fiatRow]] = await conn.query(
+    "SELECT MAX(COALESCE(completed_at, created_at)) AS last_fiat FROM fiat_purchases WHERE user_id=? AND status='succeeded'",
+    [userId]
+  );
+  const [[depositRow]] = await conn.query(
+    "SELECT MAX(created_at) AS last_deposit FROM wallet_deposits WHERE user_id=? AND status IN ('confirmed','swept')",
+    [userId]
+  );
+  const fiatDate = fiatRow?.last_fiat ? new Date(fiatRow.last_fiat) : null;
+  const depositDate = depositRow?.last_deposit ? new Date(depositRow.last_deposit) : null;
+  if (fiatDate && depositDate) return fiatDate > depositDate ? fiatDate : depositDate;
+  return fiatDate || depositDate || null;
+}
+
+function addHours(date, hours) {
+  try {
+    const next = new Date(date);
+    next.setHours(next.getHours() + hours);
+    return next;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureSellerEligibility(conn, userId) {
+  const lastFunding = await getLatestFundingTimestamp(conn, userId);
+  if (!lastFunding) {
+    return { eligible: false, availableAt: null };
+  }
+  const eligibleAt = addHours(lastFunding, 24 * 7);
+  if (!eligibleAt) return { eligible: false, availableAt: null };
+  return { eligible: Date.now() >= eligibleAt.getTime(), availableAt: eligibleAt };
+}
+
+function presentPaymentMethodRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    code: row.code,
+    country: row.country,
+    is_active: !!row.is_active,
+    dispute_delay_hours: Number(row.dispute_delay_hours || 0),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function presentOfferRow(row, paymentMethods = []) {
+  return {
+    id: row.id,
+    user: { id: row.user_id, username: row.username },
+    side: row.side,
+    asset: row.asset,
+    currency: row.currency || 'USD',
+    price: formatDecimalValue(row.price, 6),
+    min_limit: formatDecimalValue(row.min_limit, 2),
+    max_limit: formatDecimalValue(row.max_limit, 2),
+    total_amount: trimDecimal(row.total_amount),
+    available_amount: trimDecimal(row.available_amount),
+    status: row.status,
+    payment_methods: paymentMethods,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function presentTradeRow(row) {
+  return {
+    id: row.id,
+    offer_id: row.offer_id,
+    buyer_id: row.buyer_id,
+    seller_id: row.seller_id,
+    buyer_username: row.buyer_username,
+    seller_username: row.seller_username,
+    payment_method_id: row.payment_method_id,
+    payment_method_name: row.payment_method_name,
+    asset: row.asset,
+    currency: row.currency || 'USD',
+    price: formatDecimalValue(row.price, 6),
+    amount: trimDecimal(row.amount),
+    fiat_amount: formatDecimalValue(row.fiat_amount, 2),
+    status: row.status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    paid_at: row.paid_at,
+    released_at: row.released_at,
+    completed_at: row.completed_at,
+    disputed_at: row.disputed_at,
+  };
 }
 
 function presentAdminRow(row) {
@@ -2575,6 +2734,644 @@ app.post('/kyc/submit', async (req, res, next) => {
   }
 });
 
+app.get('/p2p/payment-methods', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const [rows] = await pool.query(
+      'SELECT id, name, code, country, is_active, dispute_delay_hours, created_at, updated_at FROM p2p_payment_methods WHERE is_active=1 ORDER BY name'
+    );
+    res.json({ ok: true, methods: rows.map(presentPaymentMethodRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/p2p/offers', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const filters = P2POffersQuerySchema.parse(req.query || {});
+    const params = [];
+    const conditions = ['o.status = ?'];
+    params.push('active');
+    let sql =
+      'SELECT DISTINCT o.*, u.username FROM p2p_offers o JOIN users u ON u.id=o.user_id';
+    if (filters.payment_method_id) {
+      sql += ' JOIN p2p_offer_payment_methods opm ON opm.offer_id = o.id';
+      conditions.push('opm.payment_method_id = ?');
+      params.push(filters.payment_method_id);
+    }
+    if (filters.side) {
+      conditions.push('o.side = ?');
+      params.push(filters.side);
+    }
+    if (filters.asset) {
+      conditions.push('o.asset = ?');
+      params.push(filters.asset);
+    }
+    if (filters.amount) {
+      const amountDecimal = parseDecimalValue(filters.amount);
+      if (!amountDecimal || amountDecimal.lte(0)) {
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount filter' });
+      }
+      conditions.push('o.min_limit <= ? AND o.max_limit >= ?');
+      const amountStr = amountDecimal.toFixed(2, Decimal.ROUND_DOWN);
+      params.push(amountStr, amountStr);
+    }
+    sql += ` WHERE ${conditions.join(' AND ')} ORDER BY o.updated_at DESC LIMIT 100`;
+
+    const [rows] = await pool.query(sql, params);
+    const offerIds = rows.map((row) => row.id);
+    let methodMap = {};
+    if (offerIds.length) {
+      const [methodRows] = await pool.query(
+        `SELECT opm.offer_id, pm.id, pm.name
+           FROM p2p_offer_payment_methods opm
+           JOIN p2p_payment_methods pm ON pm.id = opm.payment_method_id
+          WHERE opm.offer_id IN (?)
+          ORDER BY pm.name`,
+        [offerIds]
+      );
+      methodMap = methodRows.reduce((acc, row) => {
+        if (!acc[row.offer_id]) acc[row.offer_id] = [];
+        acc[row.offer_id].push({ id: row.id, name: row.name });
+        return acc;
+      }, {});
+    }
+    const offers = rows.map((row) => presentOfferRow(row, methodMap[row.id] || []));
+    res.json({ ok: true, offers });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid filters', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.post('/p2p/offers', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = P2POfferCreateSchema.parse(req.body || {});
+    const price = parseDecimalValue(payload.price);
+    const minLimit = parseDecimalValue(payload.min_limit);
+    const maxLimit = parseDecimalValue(payload.max_limit);
+    const totalAmount = parseDecimalValue(payload.total_amount);
+    if (!price || price.lte(0) || !minLimit || minLimit.lte(0) || !maxLimit || maxLimit.lte(0)) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid pricing or limits' });
+    }
+    if (minLimit.gt(maxLimit)) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Minimum limit exceeds maximum' });
+    }
+    if (!totalAmount || totalAmount.lte(0)) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid total amount' });
+    }
+    if (totalAmount.lt(maxLimit.div(price))) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Total amount is too low for maximum limit' });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [methodRows] = await conn.query(
+      'SELECT id FROM p2p_payment_methods WHERE id IN (?) AND is_active=1',
+      [payload.payment_method_ids]
+    );
+    if (methodRows.length !== payload.payment_method_ids.length) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid payment methods' });
+    }
+
+    if (payload.side === 'sell') {
+      const eligibility = await ensureSellerEligibility(conn, userId);
+      if (!eligibility.eligible) {
+        await conn.rollback();
+        return next({
+          status: 403,
+          code: 'SELLER_NOT_ELIGIBLE',
+          message: 'Seller eligibility window has not completed',
+          details: { available_at: eligibility.availableAt?.toISOString() || null },
+        });
+      }
+      const decimals = getSymbolDecimals(payload.asset);
+      const amountWei = decimalToWeiString(totalAmount, decimals);
+      if (!amountWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+      }
+      const [balanceRows] = await conn.query(
+        'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+        [userId, payload.asset]
+      );
+      const balanceWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+      if (balanceWei < BigInt(amountWei)) {
+        await conn.rollback();
+        return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance to create offer' });
+      }
+    }
+
+    const [insert] = await conn.query(
+      `INSERT INTO p2p_offers
+        (user_id, side, asset, currency, price, min_limit, max_limit, total_amount, available_amount)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        payload.side,
+        payload.asset,
+        payload.currency || 'USD',
+        price.toFixed(6, Decimal.ROUND_DOWN),
+        minLimit.toFixed(2, Decimal.ROUND_DOWN),
+        maxLimit.toFixed(2, Decimal.ROUND_DOWN),
+        totalAmount.toFixed(18, Decimal.ROUND_DOWN),
+        totalAmount.toFixed(18, Decimal.ROUND_DOWN),
+      ]
+    );
+    const offerId = insert.insertId;
+    const methodValues = payload.payment_method_ids.map((methodId) => [offerId, methodId]);
+    await conn.query('INSERT INTO p2p_offer_payment_methods (offer_id, payment_method_id) VALUES ?', [methodValues]);
+    await conn.commit();
+
+    const [[offerRow]] = await pool.query(
+      `SELECT o.*, u.username
+         FROM p2p_offers o
+         JOIN users u ON u.id=o.user_id
+        WHERE o.id=?`,
+      [offerId]
+    );
+    const [methodRowsFull] = await pool.query(
+      `SELECT pm.id, pm.name
+         FROM p2p_offer_payment_methods opm
+         JOIN p2p_payment_methods pm ON pm.id=opm.payment_method_id
+        WHERE opm.offer_id=?
+        ORDER BY pm.name`,
+      [offerId]
+    );
+    res.json({ ok: true, offer: presentOfferRow(offerRow, methodRowsFull) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/p2p/trades', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = P2PTradeCreateSchema.parse(req.body || {});
+    const fiatAmount = parseDecimalValue(payload.amount);
+    if (!fiatAmount || fiatAmount.lte(0)) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[offer]] = await conn.query(
+      `SELECT o.*, u.username
+         FROM p2p_offers o
+         JOIN users u ON u.id=o.user_id
+        WHERE o.id=? FOR UPDATE`,
+      [payload.offer_id]
+    );
+    if (!offer) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Offer not found' });
+    }
+    if (offer.status !== 'active') {
+      await conn.rollback();
+      return next({ status: 400, code: 'OFFER_INACTIVE', message: 'Offer is not active' });
+    }
+    if (!P2P_SUPPORTED_ASSETS.includes(offer.asset)) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Unsupported asset' });
+    }
+
+    const [[method]] = await conn.query(
+      'SELECT id, name, is_active, dispute_delay_hours FROM p2p_payment_methods WHERE id=? LIMIT 1',
+      [payload.payment_method_id]
+    );
+    if (!method || !method.is_active) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid payment method' });
+    }
+    const [methodLink] = await conn.query(
+      'SELECT 1 FROM p2p_offer_payment_methods WHERE offer_id=? AND payment_method_id=? LIMIT 1',
+      [payload.offer_id, payload.payment_method_id]
+    );
+    if (!methodLink.length) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Payment method not supported by offer' });
+    }
+
+    const price = new Decimal(offer.price);
+    const minLimit = new Decimal(offer.min_limit);
+    const maxLimit = new Decimal(offer.max_limit);
+    if (fiatAmount.lt(minLimit) || fiatAmount.gt(maxLimit)) {
+      await conn.rollback();
+      return next({ status: 400, code: 'AMOUNT_OUT_OF_RANGE', message: 'Amount out of offer limits' });
+    }
+    const assetAmount = fiatAmount.div(price);
+    const available = new Decimal(offer.available_amount || offer.total_amount);
+    if (assetAmount.gt(available)) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_AVAILABLE', message: 'Offer has insufficient availability' });
+    }
+
+    const isOfferSell = offer.side === 'sell';
+    const buyerId = isOfferSell ? userId : offer.user_id;
+    const sellerId = isOfferSell ? offer.user_id : userId;
+    if (buyerId === sellerId) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Cannot trade with yourself' });
+    }
+
+    if (!isOfferSell) {
+      const eligibility = await ensureSellerEligibility(conn, sellerId);
+      if (!eligibility.eligible) {
+        await conn.rollback();
+        return next({
+          status: 403,
+          code: 'SELLER_NOT_ELIGIBLE',
+          message: 'Seller eligibility window has not completed',
+          details: { available_at: eligibility.availableAt?.toISOString() || null },
+        });
+      }
+    }
+
+    const decimals = getSymbolDecimals(offer.asset);
+    const assetAmountFixed = assetAmount.toFixed(18, Decimal.ROUND_DOWN);
+    const amountWeiStr = decimalToWeiString(assetAmountFixed, decimals);
+    if (!amountWeiStr) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
+    }
+    const amountWei = BigInt(amountWeiStr);
+
+    const [balanceRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+      [sellerId, offer.asset]
+    );
+    const sellerBalance = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+    if (sellerBalance < amountWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Seller balance is insufficient' });
+    }
+
+    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+      amountWei.toString(),
+      sellerId,
+      offer.asset,
+    ]);
+
+    const [tradeInsert] = await conn.query(
+      `INSERT INTO p2p_trades
+        (offer_id, buyer_id, seller_id, payment_method_id, asset, currency, price, amount, fiat_amount, status, escrow_amount_wei)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'payment_pending', ?)`,
+      [
+        offer.id,
+        buyerId,
+        sellerId,
+        payload.payment_method_id,
+        offer.asset,
+        offer.currency || 'USD',
+        price.toFixed(6, Decimal.ROUND_DOWN),
+        assetAmountFixed,
+        fiatAmount.toFixed(2, Decimal.ROUND_DOWN),
+        amountWei.toString(),
+      ]
+    );
+    const tradeId = tradeInsert.insertId;
+
+    await conn.query(
+      'INSERT INTO p2p_escrows (trade_id, user_id, asset, amount_wei, status) VALUES (?, ?, ?, ?, ?)',
+      [tradeId, sellerId, offer.asset, amountWei.toString(), 'locked']
+    );
+
+    const newAvailable = available.minus(assetAmount);
+    const newStatus = newAvailable.lte(0) ? 'paused' : 'active';
+    await conn.query('UPDATE p2p_offers SET available_amount=?, status=? WHERE id=?', [
+      newAvailable.toFixed(18, Decimal.ROUND_DOWN),
+      newStatus,
+      offer.id,
+    ]);
+
+    await conn.commit();
+
+    const [[tradeRow]] = await pool.query(
+      `SELECT t.*, pm.name AS payment_method_name, bu.username AS buyer_username, su.username AS seller_username
+         FROM p2p_trades t
+         JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+         JOIN users bu ON bu.id=t.buyer_id
+         JOIN users su ON su.id=t.seller_id
+        WHERE t.id=?`,
+      [tradeId]
+    );
+    res.json({ ok: true, trade: presentTradeRow(tradeRow) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/p2p/trades', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT t.*, pm.name AS payment_method_name, bu.username AS buyer_username, su.username AS seller_username
+         FROM p2p_trades t
+         JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+         JOIN users bu ON bu.id=t.buyer_id
+         JOIN users su ON su.id=t.seller_id
+        WHERE t.buyer_id=? OR t.seller_id=?
+        ORDER BY t.created_at DESC
+        LIMIT 100`,
+      [userId, userId]
+    );
+    res.json({ ok: true, trades: rows.map(presentTradeRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/p2p/trades/:id', walletLimiter, async (req, res, next) => {
+  const tradeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(tradeId) || tradeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid trade id' });
+  try {
+    const userId = await requireUser(req);
+    const [[tradeRow]] = await pool.query(
+      `SELECT t.*, pm.name AS payment_method_name, pm.dispute_delay_hours, bu.username AS buyer_username, su.username AS seller_username
+         FROM p2p_trades t
+         JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+         JOIN users bu ON bu.id=t.buyer_id
+         JOIN users su ON su.id=t.seller_id
+        WHERE t.id=?`,
+      [tradeId]
+    );
+    if (!tradeRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
+    if (tradeRow.buyer_id !== userId && tradeRow.seller_id !== userId) {
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Not allowed' });
+    }
+    const [messageRows] = await pool.query(
+      `SELECT m.id, m.message, m.sender_id, u.username, m.created_at
+         FROM p2p_messages m
+         JOIN users u ON u.id=m.sender_id
+        WHERE m.trade_id=?
+        ORDER BY m.created_at ASC`,
+      [tradeId]
+    );
+    const canDisputeAt = addHours(new Date(tradeRow.created_at), Number(tradeRow.dispute_delay_hours || 0));
+    res.json({
+      ok: true,
+      trade: { ...presentTradeRow(tradeRow), dispute_delay_hours: Number(tradeRow.dispute_delay_hours || 0), can_dispute_at: canDisputeAt?.toISOString() || null },
+      messages: messageRows.map((row) => ({
+        id: row.id,
+        message: row.message,
+        sender_id: row.sender_id,
+        username: row.username,
+        created_at: row.created_at,
+      })),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/p2p/trades/:id/messages', walletLimiter, async (req, res, next) => {
+  const tradeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(tradeId) || tradeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid trade id' });
+  try {
+    const userId = await requireUser(req);
+    const payload = P2PMessageSchema.parse(req.body || {});
+    const [[tradeRow]] = await pool.query(
+      'SELECT buyer_id, seller_id, status FROM p2p_trades WHERE id=? LIMIT 1',
+      [tradeId]
+    );
+    if (!tradeRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
+    if (tradeRow.buyer_id !== userId && tradeRow.seller_id !== userId) {
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Not allowed' });
+    }
+    if (tradeRow.status === 'completed') {
+      return next({ status: 400, code: 'TRADE_CLOSED', message: 'Trade chat is closed' });
+    }
+    await pool.query('INSERT INTO p2p_messages (trade_id, sender_id, message) VALUES (?, ?, ?)', [
+      tradeId,
+      userId,
+      payload.message.trim(),
+    ]);
+    const [[messageRow]] = await pool.query(
+      `SELECT m.id, m.message, m.sender_id, u.username, m.created_at
+         FROM p2p_messages m
+         JOIN users u ON u.id=m.sender_id
+        WHERE m.trade_id=?
+        ORDER BY m.created_at DESC
+        LIMIT 1`,
+      [tradeId]
+    );
+    res.json({
+      ok: true,
+      message: {
+        id: messageRow.id,
+        message: messageRow.message,
+        sender_id: messageRow.sender_id,
+        username: messageRow.username,
+        created_at: messageRow.created_at,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.post('/p2p/trades/:id/mark-paid', walletLimiter, async (req, res, next) => {
+  const tradeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(tradeId) || tradeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid trade id' });
+  try {
+    const userId = await requireUser(req);
+    const [[tradeRow]] = await pool.query(
+      'SELECT buyer_id, status FROM p2p_trades WHERE id=? LIMIT 1',
+      [tradeId]
+    );
+    if (!tradeRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
+    if (tradeRow.buyer_id !== userId) return next({ status: 403, code: 'FORBIDDEN', message: 'Only buyer can mark paid' });
+    if (tradeRow.status !== 'payment_pending') {
+      return next({ status: 400, code: 'BAD_STATE', message: 'Trade is not awaiting payment' });
+    }
+    await pool.query('UPDATE p2p_trades SET status=?, paid_at=NOW(), updated_at=NOW() WHERE id=?', ['paid', tradeId]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/p2p/trades/:id/release', walletLimiter, async (req, res, next) => {
+  const tradeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(tradeId) || tradeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid trade id' });
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[tradeRow]] = await conn.query(
+      'SELECT id, seller_id, buyer_id, asset, status, escrow_amount_wei FROM p2p_trades WHERE id=? FOR UPDATE',
+      [tradeId]
+    );
+    if (!tradeRow) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
+    }
+    if (tradeRow.seller_id !== userId) {
+      await conn.rollback();
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Only seller can release' });
+    }
+    if (tradeRow.status !== 'paid') {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Trade is not marked as paid' });
+    }
+    const amountWei = bigIntFromValue(tradeRow.escrow_amount_wei || 0);
+    if (amountWei <= 0n) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Escrow is empty' });
+    }
+    await conn.query('UPDATE p2p_escrows SET status=? WHERE trade_id=?', ['released', tradeId]);
+    await conn.query(
+      'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+      [tradeRow.buyer_id, tradeRow.asset, amountWei.toString()]
+    );
+    await conn.query('UPDATE p2p_trades SET status=?, released_at=NOW(), updated_at=NOW() WHERE id=?', [
+      'released',
+      tradeId,
+    ]);
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/p2p/trades/:id/complete', walletLimiter, async (req, res, next) => {
+  const tradeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(tradeId) || tradeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid trade id' });
+  try {
+    const userId = await requireUser(req);
+    const [[tradeRow]] = await pool.query('SELECT buyer_id, status FROM p2p_trades WHERE id=? LIMIT 1', [tradeId]);
+    if (!tradeRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
+    if (tradeRow.buyer_id !== userId) {
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Only buyer can complete trade' });
+    }
+    if (tradeRow.status !== 'released') {
+      return next({ status: 400, code: 'BAD_STATE', message: 'Trade is not released yet' });
+    }
+    await pool.query('UPDATE p2p_trades SET status=?, completed_at=NOW(), updated_at=NOW() WHERE id=?', [
+      'completed',
+      tradeId,
+    ]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/p2p/trades/:id/dispute', walletLimiter, async (req, res, next) => {
+  const tradeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(tradeId) || tradeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid trade id' });
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = P2PDisputeSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[tradeRow]] = await conn.query(
+      `SELECT t.*, pm.dispute_delay_hours
+         FROM p2p_trades t
+         JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+        WHERE t.id=? FOR UPDATE`,
+      [tradeId]
+    );
+    if (!tradeRow) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
+    }
+    if (tradeRow.buyer_id !== userId && tradeRow.seller_id !== userId) {
+      await conn.rollback();
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Not allowed' });
+    }
+    if (tradeRow.status === 'completed') {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Trade already completed' });
+    }
+    if (tradeRow.status === 'disputed') {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Trade already disputed' });
+    }
+    const delayHours = Number(tradeRow.dispute_delay_hours || 0);
+    const allowAt = addHours(new Date(tradeRow.created_at), delayHours);
+    if (allowAt && Date.now() < allowAt.getTime()) {
+      await conn.rollback();
+      return next({
+        status: 403,
+        code: 'DISPUTE_TOO_EARLY',
+        message: 'Dispute window has not opened',
+        details: { available_at: allowAt.toISOString() },
+      });
+    }
+    await conn.query('UPDATE p2p_trades SET status=?, disputed_at=NOW(), updated_at=NOW() WHERE id=?', [
+      'disputed',
+      tradeId,
+    ]);
+    const [insert] = await conn.query(
+      'INSERT INTO p2p_disputes (trade_id, opened_by, reason, evidence, status) VALUES (?, ?, ?, ?, ?)',
+      [tradeId, userId, payload.reason, payload.evidence || null, 'open']
+    );
+    await conn.commit();
+    res.json({ ok: true, dispute_id: insert.insertId });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
 app.post('/admin/auth/login', loginLimiter, async (req, res, next) => {
   try {
     const { identifier, password } = AdminLoginSchema.parse(req.body || {});
@@ -2682,6 +3479,220 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get('/admin/p2p/payment-methods', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [rows] = await pool.query(
+      'SELECT id, name, code, country, is_active, dispute_delay_hours, created_at, updated_at FROM p2p_payment_methods ORDER BY name'
+    );
+    res.json({ ok: true, methods: rows.map(presentPaymentMethodRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/admin/p2p/payment-methods', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = P2PPaymentMethodSchema.parse(req.body || {});
+    const [insert] = await pool.query(
+      `INSERT INTO p2p_payment_methods (name, code, country, dispute_delay_hours, is_active)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        payload.name,
+        payload.code || null,
+        payload.country || null,
+        payload.dispute_delay_hours ?? 0,
+        payload.is_active === undefined ? 1 : payload.is_active ? 1 : 0,
+      ]
+    );
+    const [[row]] = await pool.query(
+      'SELECT id, name, code, country, is_active, dispute_delay_hours, created_at, updated_at FROM p2p_payment_methods WHERE id=?',
+      [insert.insertId]
+    );
+    res.json({ ok: true, method: presentPaymentMethodRow(row) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.patch('/admin/p2p/payment-methods/:id', async (req, res, next) => {
+  const methodId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(methodId) || methodId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid payment method id' });
+  try {
+    await requireAdmin(req);
+    const updates = P2PPaymentMethodUpdateSchema.parse(req.body || {});
+    const fields = [];
+    const params = [];
+    if (updates.name !== undefined) {
+      fields.push('name=?');
+      params.push(updates.name);
+    }
+    if (updates.code !== undefined) {
+      fields.push('code=?');
+      params.push(updates.code || null);
+    }
+    if (updates.country !== undefined) {
+      fields.push('country=?');
+      params.push(updates.country || null);
+    }
+    if (updates.dispute_delay_hours !== undefined) {
+      fields.push('dispute_delay_hours=?');
+      params.push(updates.dispute_delay_hours);
+    }
+    if (updates.is_active !== undefined) {
+      fields.push('is_active=?');
+      params.push(updates.is_active ? 1 : 0);
+    }
+    if (!fields.length) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'No updates provided' });
+    }
+    params.push(methodId);
+    await pool.query(`UPDATE p2p_payment_methods SET ${fields.join(', ')} WHERE id=?`, params);
+    const [[row]] = await pool.query(
+      'SELECT id, name, code, country, is_active, dispute_delay_hours, created_at, updated_at FROM p2p_payment_methods WHERE id=?',
+      [methodId]
+    );
+    res.json({ ok: true, method: presentPaymentMethodRow(row) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/p2p/trades', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [rows] = await pool.query(
+      `SELECT t.*, pm.name AS payment_method_name, bu.username AS buyer_username, su.username AS seller_username
+         FROM p2p_trades t
+         JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+         JOIN users bu ON bu.id=t.buyer_id
+         JOIN users su ON su.id=t.seller_id
+        ORDER BY t.created_at DESC
+        LIMIT 200`
+    );
+    res.json({ ok: true, trades: rows.map(presentTradeRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/p2p/disputes', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [rows] = await pool.query(
+      `SELECT d.*, t.asset, t.amount, t.fiat_amount, t.status AS trade_status,
+              bu.username AS buyer_username, su.username AS seller_username,
+              pm.name AS payment_method_name, au.username AS admin_username
+         FROM p2p_disputes d
+         JOIN p2p_trades t ON t.id=d.trade_id
+         JOIN users bu ON bu.id=t.buyer_id
+         JOIN users su ON su.id=t.seller_id
+         JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+         LEFT JOIN admin_users au ON au.id=d.admin_id
+        ORDER BY d.created_at DESC
+        LIMIT 200`
+    );
+    const disputes = rows.map((row) => ({
+      id: row.id,
+      trade_id: row.trade_id,
+      opened_by: row.opened_by,
+      status: row.status,
+      reason: row.reason,
+      evidence: row.evidence,
+      resolution: row.resolution,
+      admin_username: row.admin_username,
+      created_at: row.created_at,
+      resolved_at: row.resolved_at,
+      trade: {
+        asset: row.asset,
+        amount: trimDecimal(row.amount),
+        fiat_amount: formatDecimalValue(row.fiat_amount, 2),
+        status: row.trade_status,
+        buyer_username: row.buyer_username,
+        seller_username: row.seller_username,
+        payment_method_name: row.payment_method_name,
+      },
+    }));
+    res.json({ ok: true, disputes });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/p2p/disputes/:id/resolve', async (req, res, next) => {
+  const disputeId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(disputeId) || disputeId <= 0)
+    return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid dispute id' });
+  let conn;
+  try {
+    const admin = await requireAdmin(req);
+    const payload = P2PDisputeResolveSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[dispute]] = await conn.query(
+      `SELECT d.*, t.seller_id, t.buyer_id, t.asset, t.escrow_amount_wei, t.status AS trade_status
+         FROM p2p_disputes d
+         JOIN p2p_trades t ON t.id=d.trade_id
+        WHERE d.id=? FOR UPDATE`,
+      [disputeId]
+    );
+    if (!dispute) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Dispute not found' });
+    }
+    if (dispute.status !== 'open') {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Dispute already resolved' });
+    }
+    const amountWei = bigIntFromValue(dispute.escrow_amount_wei || 0);
+    if (amountWei > 0n) {
+      if (payload.resolution === 'buyer') {
+        await conn.query('UPDATE p2p_escrows SET status=? WHERE trade_id=?', ['released', dispute.trade_id]);
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [dispute.buyer_id, dispute.asset, amountWei.toString()]
+        );
+      } else {
+        await conn.query('UPDATE p2p_escrows SET status=? WHERE trade_id=?', ['refunded', dispute.trade_id]);
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [dispute.seller_id, dispute.asset, amountWei.toString()]
+        );
+      }
+    }
+    await conn.query(
+      'UPDATE p2p_trades SET status=?, completed_at=NOW(), updated_at=NOW(), released_at=IFNULL(released_at, NOW()) WHERE id=?',
+      ['completed', dispute.trade_id]
+    );
+    await conn.query(
+      'UPDATE p2p_disputes SET status=?, resolution=?, admin_id=?, resolved_at=NOW(), updated_at=NOW() WHERE id=?',
+      ['resolved', payload.resolution, admin.id, disputeId]
+    );
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 
