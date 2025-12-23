@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS p2p_disputes (
   reason VARCHAR(255) NOT NULL,
   evidence TEXT NULL,
   resolution ENUM('buyer','seller','cancel') NULL,
-  admin_id INT NULL,
+  admin_id INT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   resolved_at DATETIME NULL,
