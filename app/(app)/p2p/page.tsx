@@ -1,144 +1,41 @@
 'use client';
+export const dynamic = 'force-dynamic';
 
-import { useMemo, useState } from 'react';
-import { Filter, MessageCircle, ShieldCheck, Star, Timer } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Filter, Loader2, MessageCircle, ShieldCheck, Star, Timer } from 'lucide-react';
+import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
+import { useToast } from '../../lib/toast';
 
-const paymentMethods = [
-  'Bank Transfer',
-  'Cash Deposit',
-  'Wise',
-  'Zelle',
-  'Skrill',
-  'AirTM',
-  'Payoneer',
-  'Revolut',
-  'SEPA',
-  'ACH',
-  'Mobile Wallet',
-  'PayPal',
-];
+type OfferPaymentMethod = { id: number; name: string };
 
-const offers = [
-  {
-    id: 'realtrader',
-    user: 'RealTrader-Dio',
-    trades: 689,
-    completion: 98.9,
-    price: 1.05,
-    asset: 'USDC',
-    limitMin: 10,
-    limitMax: 47,
-    available: 44.8637,
-    paymentMethods: ['Bank Transfer', 'AirTM', 'Wise'],
-    orderTime: 15,
-    side: 'buy',
-    featured: true,
-  },
-  {
-    id: 'aboali',
-    user: '__AboAli_',
-    trades: 457,
-    completion: 95.5,
-    price: 1.07,
-    asset: 'USDC',
-    limitMin: 10,
-    limitMax: 631,
-    available: 590.1913,
-    paymentMethods: ['Cash Deposit', 'Mobile Wallet'],
-    orderTime: 15,
-    side: 'buy',
-  },
-  {
-    id: 'elite-secure',
-    user: 'EliteSecureReliable',
-    trades: 2054,
-    completion: 100,
-    price: 1.08,
-    asset: 'USDC',
-    limitMin: 20,
-    limitMax: 1000,
-    available: 1496.3339,
-    paymentMethods: ['AirTM', 'Bank Transfer'],
-    orderTime: 15,
-    side: 'buy',
-  },
-  {
-    id: 'wise-pay',
-    user: 'rachidfrg_wispayoner',
-    trades: 407,
-    completion: 97.4,
-    price: 1.09,
-    asset: 'USDC',
-    limitMin: 200,
-    limitMax: 1087,
-    available: 997.9109,
-    paymentMethods: ['Skrill', 'Bank Transfer', 'Wise'],
-    orderTime: 15,
-    side: 'buy',
-  },
-  {
-    id: 'zelle-fast',
-    user: 'ZelleFastDesk',
-    trades: 954,
-    completion: 99.1,
-    price: 1.03,
-    asset: 'USDT',
-    limitMin: 50,
-    limitMax: 800,
-    available: 250.12,
-    paymentMethods: ['Zelle', 'Bank Transfer'],
-    orderTime: 10,
-    side: 'buy',
-  },
-  {
-    id: 'pro-seller',
-    user: 'ProSeller-ALX',
-    trades: 1304,
-    completion: 98.4,
-    price: 1.04,
-    asset: 'USDT',
-    limitMin: 100,
-    limitMax: 900,
-    available: 874.55,
-    paymentMethods: ['Wise', 'SEPA'],
-    orderTime: 20,
-    side: 'sell',
-    featured: true,
-  },
-  {
-    id: 'bank-only',
-    user: 'BankOnlyOTC',
-    trades: 311,
-    completion: 96.1,
-    price: 1.06,
-    asset: 'USDC',
-    limitMin: 75,
-    limitMax: 500,
-    available: 312.88,
-    paymentMethods: ['Bank Transfer', 'ACH'],
-    orderTime: 30,
-    side: 'sell',
-  },
-  {
-    id: 'wallet-cash',
-    user: 'CashBridge',
-    trades: 189,
-    completion: 94.3,
-    price: 1.02,
-    asset: 'USDT',
-    limitMin: 25,
-    limitMax: 350,
-    available: 410.5,
-    paymentMethods: ['Cash Deposit', 'Mobile Wallet'],
-    orderTime: 25,
-    side: 'sell',
-  },
-];
+type Offer = {
+  id: number;
+  user: { id: number; username: string };
+  side: 'buy' | 'sell';
+  asset: string;
+  currency: string;
+  price: string;
+  min_limit: string;
+  max_limit: string;
+  total_amount: string;
+  available_amount: string;
+  status: string;
+  payment_methods: OfferPaymentMethod[];
+};
 
-const statuses = ['initiated', 'paymentPending', 'paid', 'released', 'completed', 'disputed'] as const;
+type PaymentMethod = {
+  id: number;
+  name: string;
+  dispute_delay_hours: number;
+};
+
+const statuses = ['initiated', 'payment_pending', 'paid', 'released', 'completed', 'disputed'] as const;
 
 export default function P2PPage() {
+  const router = useRouter();
+  const toast = useToast();
   const { lang } = useLang();
   const t = dict[lang];
 
@@ -146,33 +43,155 @@ export default function P2PPage() {
   const [asset, setAsset] = useState('USDC');
   const [amount, setAmount] = useState('');
   const [paymentSearch, setPaymentSearch] = useState('');
-  const [selectedPayments, setSelectedPayments] = useState<string[]>([]);
+  const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
   const [paymentFilterOpen, setPaymentFilterOpen] = useState(false);
+
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [offers, setOffers] = useState<Offer[]>([]);
+  const [loadingMethods, setLoadingMethods] = useState(true);
+  const [loadingOffers, setLoadingOffers] = useState(true);
+  const [offersError, setOffersError] = useState('');
+
+  const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
+  const [tradeAmount, setTradeAmount] = useState('');
+  const [tradePaymentMethodId, setTradePaymentMethodId] = useState<number | null>(null);
+  const [tradeLoading, setTradeLoading] = useState(false);
+
+  const oppositeSide = tradeSide === 'buy' ? 'sell' : 'buy';
+
+  const normalizedAmount = amount.trim();
+  const amountFilter = useMemo(() => {
+    const numeric = Number(normalizedAmount);
+    if (!normalizedAmount || !Number.isFinite(numeric) || numeric <= 0) return '';
+    return normalizedAmount;
+  }, [normalizedAmount]);
 
   const filteredPaymentMethods = useMemo(() => {
     const query = paymentSearch.trim().toLowerCase();
     if (!query) return paymentMethods;
-    return paymentMethods.filter((method) => method.toLowerCase().includes(query));
-  }, [paymentSearch]);
+    return paymentMethods.filter((method) => method.name.toLowerCase().includes(query));
+  }, [paymentMethods, paymentSearch]);
 
-  const filteredOffers = useMemo(() => {
-    const amountValue = Number(amount);
-    return offers.filter((offer) => {
-      if (offer.side !== tradeSide) return false;
-      if (offer.asset !== asset) return false;
-      if (selectedPayments.length > 0 && !offer.paymentMethods.some((method) => selectedPayments.includes(method))) {
-        return false;
-      }
-      if (amount.trim().length === 0) return true;
-      if (!Number.isFinite(amountValue) || amountValue <= 0) return false;
-      return amountValue >= offer.limitMin && amountValue <= offer.limitMax;
+  const selectedPaymentName = useMemo(
+    () => paymentMethods.find((pm) => pm.id === selectedPaymentId)?.name || null,
+    [paymentMethods, selectedPaymentId]
+  );
+
+  const formatFiat = (value: string, fraction = 2) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return value;
+    return num.toLocaleString(undefined, { minimumFractionDigits: fraction, maximumFractionDigits: fraction });
+  };
+
+  const formatAssetAmount = (value: string) => {
+    const num = Number(value);
+    if (!Number.isFinite(num)) return value;
+    return num.toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+  };
+
+  const loadPaymentMethods = useCallback(async () => {
+    setLoadingMethods(true);
+    const res = await apiFetch<{ methods: PaymentMethod[] }>('/p2p/payment-methods');
+    if (res.ok) {
+      setPaymentMethods(res.data.methods || []);
+    } else {
+      toast({ message: res.error || t.common.genericError, variant: 'error' });
+    }
+    setLoadingMethods(false);
+  }, [toast, t.common.genericError]);
+
+  const loadOffers = useCallback(async () => {
+    setLoadingOffers(true);
+    setOffersError('');
+    const params = new URLSearchParams();
+    params.set('side', oppositeSide);
+    params.set('asset', asset);
+    if (amountFilter) params.set('amount', amountFilter);
+    if (selectedPaymentId) params.set('payment_method_id', String(selectedPaymentId));
+    const res = await apiFetch<{ offers: Offer[] }>(`/p2p/offers${params.toString() ? `?${params.toString()}` : ''}`);
+    setLoadingOffers(false);
+    if (res.ok) {
+      setOffers(res.data.offers || []);
+    } else {
+      setOffers([]);
+      setOffersError(res.error || t.common.genericError);
+      toast({ message: res.error || t.common.genericError, variant: 'error' });
+    }
+  }, [asset, amountFilter, oppositeSide, selectedPaymentId, t.common.genericError, toast]);
+
+  useEffect(() => {
+    loadPaymentMethods();
+  }, [loadPaymentMethods]);
+
+  useEffect(() => {
+    const handle = setTimeout(() => {
+      loadOffers();
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [loadOffers]);
+
+  const resetFilters = () => {
+    setAmount('');
+    setSelectedPaymentId(null);
+    setPaymentSearch('');
+  };
+
+  const openTrade = (offer: Offer) => {
+    setSelectedOffer(offer);
+    const defaultPayment =
+      (selectedPaymentId && offer.payment_methods.find((pm) => pm.id === selectedPaymentId)?.id) ||
+      offer.payment_methods[0]?.id ||
+      null;
+    setTradePaymentMethodId(defaultPayment);
+    setTradeAmount(amountFilter || offer.min_limit || '');
+  };
+
+  const closeTrade = () => {
+    setSelectedOffer(null);
+    setTradeAmount('');
+    setTradePaymentMethodId(null);
+    setTradeLoading(false);
+  };
+
+  const startTrade = async () => {
+    if (!selectedOffer) return;
+    const normalized = tradeAmount.trim();
+    if (!normalized) {
+      toast({ message: t.p2p.errors.amount, variant: 'error' });
+      return;
+    }
+    const numeric = Number(normalized);
+    const min = Number(selectedOffer.min_limit);
+    const max = Number(selectedOffer.max_limit);
+    if (!Number.isFinite(numeric) || numeric <= 0 || (Number.isFinite(min) && numeric < min) || (Number.isFinite(max) && numeric > max)) {
+      toast({ message: t.p2p.errors.amount, variant: 'error' });
+      return;
+    }
+    if (!tradePaymentMethodId) {
+      toast({ message: t.p2p.errors.paymentMethod, variant: 'error' });
+      return;
+    }
+    setTradeLoading(true);
+    const res = await apiFetch<{ trade: { id: number } }>('/p2p/trades', {
+      method: 'POST',
+      body: JSON.stringify({
+        offer_id: selectedOffer.id,
+        amount: normalized,
+        payment_method_id: tradePaymentMethodId,
+      }),
     });
-  }, [tradeSide, asset, selectedPayments, amount]);
-
-  const togglePayment = (method: string) => {
-    setSelectedPayments((prev) =>
-      prev.includes(method) ? prev.filter((item) => item !== method) : [...prev, method],
-    );
+    setTradeLoading(false);
+    if (res.ok) {
+      toast({ message: t.p2p.toasts.tradeCreated, variant: 'success' });
+      closeTrade();
+      if (res.data?.trade?.id) {
+        router.push(`/p2p/trades/${res.data.trade.id}`);
+      } else {
+        loadOffers();
+      }
+    } else {
+      toast({ message: res.error || t.common.genericError, variant: 'error' });
+    }
   };
 
   return (
@@ -241,14 +260,23 @@ export default function P2PPage() {
               inputMode="decimal"
             />
           </div>
-          <button
-            type="button"
-            onClick={() => setPaymentFilterOpen((prev) => !prev)}
-            className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-white/80 hover:text-white"
-          >
-            {t.p2p.filters.payment}
-            <Filter className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPaymentFilterOpen((prev) => !prev)}
+              className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-white/80 hover:text-white"
+            >
+              {selectedPaymentName ? `${t.p2p.filters.payment}: ${selectedPaymentName}` : t.p2p.filters.payment}
+              <Filter className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={loadOffers}
+              className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 hover:text-white"
+            >
+              {loadingOffers ? <Loader2 className="h-4 w-4 animate-spin" /> : t.common.refresh}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -275,34 +303,45 @@ export default function P2PPage() {
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
             <button
               type="button"
-              onClick={() => setSelectedPayments([])}
+              onClick={() => setSelectedPaymentId(null)}
               className={`rounded-full border px-3 py-2 ${
-                selectedPayments.length === 0
+                selectedPaymentId === null
                   ? 'border-white/30 bg-white/10 text-white'
                   : 'border-white/10 text-white/70'
               }`}
             >
               {t.p2p.filters.all}
             </button>
-            {filteredPaymentMethods.map((method) => (
-              <button
-                key={method}
-                type="button"
-                onClick={() => togglePayment(method)}
-                className={`rounded-full border px-3 py-2 ${
-                  selectedPayments.includes(method)
-                    ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-200'
-                    : 'border-white/10 text-white/70'
-                }`}
-              >
-                {method}
-              </button>
-            ))}
+            {loadingMethods ? (
+              <div className="col-span-2 flex items-center gap-2 rounded-full border border-white/10 px-3 py-2 text-white/70">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {t.p2p.loading}
+              </div>
+            ) : filteredPaymentMethods.length ? (
+              filteredPaymentMethods.map((method) => (
+                <button
+                  key={method.id}
+                  type="button"
+                  onClick={() => setSelectedPaymentId((prev) => (prev === method.id ? null : method.id))}
+                  className={`rounded-full border px-3 py-2 ${
+                    selectedPaymentId === method.id
+                      ? 'border-emerald-400/60 bg-emerald-500/10 text-emerald-200'
+                      : 'border-white/10 text-white/70'
+                  }`}
+                >
+                  {method.name}
+                </button>
+              ))
+            ) : (
+              <div className="col-span-2 rounded-full border border-white/10 px-3 py-2 text-center text-white/70">
+                {t.p2p.offers.empty}
+              </div>
+            )}
           </div>
           <div className="mt-4 flex items-center justify-between gap-3">
             <button
               type="button"
-              onClick={() => setSelectedPayments([])}
+              onClick={resetFilters}
               className="flex-1 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:text-white"
             >
               {t.p2p.filters.reset}
@@ -319,60 +358,71 @@ export default function P2PPage() {
       )}
 
       <div className="space-y-4">
-        {filteredOffers.map((offer) => (
-          <div key={offer.id} className="rounded-3xl border border-white/10 bg-white/5 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500" />
-                <div>
-                  <div className="flex items-center gap-2 text-sm font-semibold">
-                    {offer.user}
-                    {offer.featured && <Star className="h-4 w-4 text-amber-400" />}
-                  </div>
-                  <div className="text-xs text-white/60">
-                    {t.p2p.stats.trades} {offer.trades} ({offer.completion.toFixed(2)}%) ·{' '}
-                    {t.p2p.stats.completion} {offer.completion.toFixed(2)}%
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                className={`rounded-full px-5 py-2 text-sm font-semibold ${
-                  tradeSide === 'buy' ? 'bg-emerald-500 text-black' : 'bg-fuchsia-500 text-white'
-                }`}
-              >
-                {tradeSide === 'buy' ? t.p2p.actions.buy : t.p2p.actions.sell}
-              </button>
-            </div>
-
-            <div className="mt-4 grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
-              <div>
-                <div className="text-xs uppercase text-white/40">Price</div>
-                <div className="text-2xl font-semibold">${offer.price.toFixed(2)}</div>
-                <div className="text-xs text-white/50">/{offer.asset}</div>
-              </div>
-              <div className="text-sm text-white/70">
-                <div>
-                  {t.p2p.stats.limit} {offer.limitMin} - {offer.limitMax} {t.p2p.currency}
-                </div>
-                <div>
-                  {t.p2p.stats.available} {offer.available.toFixed(4)} {offer.asset}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-white/50">
-                  <Timer className="h-4 w-4" />
-                  {t.p2p.stats.orderTime} {offer.orderTime} min
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
-                {offer.paymentMethods.map((method) => (
-                  <span key={method} className="rounded-full border border-white/10 px-2 py-1">
-                    {method}
-                  </span>
-                ))}
-              </div>
-            </div>
+        {loadingOffers ? (
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+            <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+            {t.p2p.loading}
           </div>
-        ))}
+        ) : offers.length ? (
+          offers.map((offer) => (
+            <div key={offer.id} className="rounded-3xl border border-white/10 bg-white/5 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500" />
+                  <div>
+                    <div className="flex items-center gap-2 text-sm font-semibold">
+                      {offer.user.username}
+                      <Star className="h-4 w-4 text-amber-400" />
+                    </div>
+                    <div className="text-xs text-white/60">
+                      {t.p2p.stats.available} {formatAssetAmount(offer.available_amount)} {offer.asset}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => openTrade(offer)}
+                  className={`rounded-full px-5 py-2 text-sm font-semibold ${
+                    tradeSide === 'buy' ? 'bg-emerald-500 text-black' : 'bg-fuchsia-500 text-white'
+                  }`}
+                >
+                  {tradeSide === 'buy' ? t.p2p.actions.buy : t.p2p.actions.sell}
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
+                <div>
+                  <div className="text-xs uppercase text-white/40">{t.p2p.stats.price}</div>
+                  <div className="text-2xl font-semibold">${formatFiat(offer.price)}</div>
+                  <div className="text-xs text-white/50">/{offer.asset}</div>
+                </div>
+                <div className="text-sm text-white/70">
+                  <div>
+                    {t.p2p.stats.limit} {offer.min_limit} - {offer.max_limit} {offer.currency}
+                  </div>
+                  <div>
+                    {t.p2p.stats.available} {formatAssetAmount(offer.available_amount)} {offer.asset}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-white/50">
+                    <Timer className="h-4 w-4" />
+                    {t.p2p.stats.orderTime} {t.p2p.tradeSide[offer.side as 'buy' | 'sell']}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-white/60">
+                  {offer.payment_methods.map((method) => (
+                    <span key={method.id} className="rounded-full border border-white/10 px-2 py-1">
+                      {method.name}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-3xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+            {offersError || t.p2p.offers.empty}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -413,6 +463,76 @@ export default function P2PPage() {
           ))}
         </div>
       </div>
+
+      {selectedOffer && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/60 p-4 sm:items-center">
+          <div className="w-full max-w-lg rounded-3xl border border-white/10 bg-[#0f1424] p-5 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs uppercase text-white/60">{t.p2p.form.title}</div>
+                <div className="text-lg font-semibold text-white">
+                  {tradeSide === 'buy' ? t.p2p.actions.buy : t.p2p.actions.sell} {selectedOffer.asset} · $
+                  {formatFiat(selectedOffer.price)}
+                </div>
+                <div className="text-xs text-white/50">{selectedOffer.user.username}</div>
+              </div>
+              <button onClick={closeTrade} className="text-sm text-white/60 hover:text-white">
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-sm text-white">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-white/60">{t.p2p.form.amount}</span>
+                <input
+                  value={tradeAmount}
+                  onChange={(event) => setTradeAmount(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-white placeholder:text-white/30"
+                  placeholder="0.00"
+                  inputMode="decimal"
+                />
+                <span className="text-xs text-white/50">
+                  {t.p2p.form.limits}: {selectedOffer.min_limit} - {selectedOffer.max_limit} {selectedOffer.currency}
+                </span>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-white/60">{t.p2p.form.payment}</span>
+                <select
+                  className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-white"
+                  value={tradePaymentMethodId ?? ''}
+                  onChange={(event) => setTradePaymentMethodId(Number(event.target.value) || null)}
+                >
+                  <option value="">{t.p2p.filters.all}</option>
+                  {selectedOffer.payment_methods.map((method) => (
+                    <option key={method.id} value={method.id}>
+                      {method.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={closeTrade}
+                className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:text-white"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={startTrade}
+                disabled={tradeLoading}
+                className="rounded-full bg-emerald-500 px-5 py-2 text-sm font-semibold text-black disabled:opacity-60"
+              >
+                {tradeLoading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : t.p2p.form.submit}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
