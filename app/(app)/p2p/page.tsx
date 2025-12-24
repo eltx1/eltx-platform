@@ -2,8 +2,9 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Filter, Loader2, MessageCircle, ShieldCheck, Star, Timer } from 'lucide-react';
+import { Filter, Loader2, MessageCircle, PlusCircle, ShieldCheck, Star, Timer } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
@@ -212,8 +213,22 @@ export default function P2PPage() {
               {t.p2p.tabs.block}
             </button>
           </div>
-          <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/80">
-            {t.p2p.currency}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/80">
+              {t.p2p.currency}
+            </div>
+            <Link
+              href="/p2p/offers/new"
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100 transition hover:border-emerald-400/70 hover:text-white"
+            >
+              <PlusCircle className="h-4 w-4" /> {t.p2p.actions.addOffer}
+            </Link>
+            <Link
+              href="/p2p/trades"
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/80 transition hover:text-white"
+            >
+              {t.p2p.actions.viewTrades}
+            </Link>
           </div>
         </div>
 
