@@ -145,6 +145,8 @@ type EmailSettings = {
   user_welcome_enabled: boolean;
   user_kyc_enabled: boolean;
   admin_kyc_enabled: boolean;
+  user_p2p_enabled: boolean;
+  admin_p2p_enabled: boolean;
 };
 
 type EmailSettingsResponse = {
@@ -542,6 +544,8 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
     user_welcome_enabled: true,
     user_kyc_enabled: true,
     admin_kyc_enabled: true,
+    user_p2p_enabled: true,
+    admin_p2p_enabled: true,
   });
   const [adminRecipients, setAdminRecipients] = useState('');
   const [smtp, setSmtp] = useState<EmailSettingsResponse['smtp']>({ ready: false, missing: [] });
@@ -664,6 +668,16 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.admin_p2p_enabled}
+                  onChange={(e) => setForm({ ...form, admin_p2p_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>Admin alerts for P2P trades</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
                   checked={form.user_welcome_enabled}
                   onChange={(e) => setForm({ ...form, user_welcome_enabled: e.target.checked })}
                   disabled={!form.enabled}
@@ -679,6 +693,16 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
                   disabled={!form.enabled}
                 />
                 <span>User emails for KYC status</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.user_p2p_enabled}
+                  onChange={(e) => setForm({ ...form, user_p2p_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>User emails for P2P trades</span>
               </label>
             </div>
 

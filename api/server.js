@@ -526,6 +526,8 @@ const EmailSettingsSchema = z.object({
   user_welcome_enabled: z.boolean().optional(),
   user_kyc_enabled: z.boolean().optional(),
   admin_kyc_enabled: z.boolean().optional(),
+  user_p2p_enabled: z.boolean().optional(),
+  admin_p2p_enabled: z.boolean().optional(),
 });
 
 const UserUpdateSchema = z
@@ -1006,6 +1008,94 @@ function presentTradeRow(row) {
   };
 }
 
+async function getP2PTradeEmailContext(tradeId) {
+  const [[row]] = await pool.query(
+    `SELECT t.*, pm.name AS payment_method_name,
+            bu.username AS buyer_username, bu.email AS buyer_email, bu.language AS buyer_language,
+            su.username AS seller_username, su.email AS seller_email, su.language AS seller_language
+       FROM p2p_trades t
+       JOIN p2p_payment_methods pm ON pm.id=t.payment_method_id
+       JOIN users bu ON bu.id=t.buyer_id
+       JOIN users su ON su.id=t.seller_id
+      WHERE t.id=?`,
+    [tradeId]
+  );
+  if (!row) return null;
+  const amount = trimDecimal(row.amount);
+  const fiat = formatDecimalValue(row.fiat_amount, 2);
+  return {
+    tradeId: row.id,
+    status: row.status,
+    currency: row.currency || 'USD',
+    asset: row.asset,
+    amount,
+    fiat,
+    payment: row.payment_method_name,
+    buyer: { email: row.buyer_email, username: row.buyer_username, language: row.buyer_language || 'en' },
+    seller: { email: row.seller_email, username: row.seller_username, language: row.seller_language || 'en' },
+  };
+}
+
+function enqueueP2PStatusEmails(context, status, note) {
+  if (!context) return;
+  const statusLabels = {
+    payment_pending: { en: 'awaiting payment', ar: 'منتظر الدفع' },
+    paid: { en: 'payment marked', ar: 'تم تأكيد الدفع' },
+    released: { en: 'released to buyer', ar: 'تم الإفراج للمشتري' },
+    completed: { en: 'completed', ar: 'مكتمل' },
+    disputed: { en: 'in dispute', ar: 'تحت النزاع' },
+  };
+  const label = statusLabels[status] || { en: status, ar: status };
+  const common = {
+    tradeId: context.tradeId,
+    amount: `${context.amount} ${context.asset}`,
+    fiat: `${context.fiat} ${context.currency || 'USD'}`,
+    payment: context.payment,
+    status: label.en,
+    note,
+  };
+  enqueueEmail({
+    kind: 'user-p2p-status',
+    to: context.buyer.email,
+    language: context.buyer.language || 'en',
+    data: {
+      ...common,
+      status: (label[(context.buyer.language || 'en') === 'ar' ? 'ar' : 'en']) || label.en,
+      role: 'buyer',
+      counterparty: context.seller.username,
+    },
+  });
+  enqueueEmail({
+    kind: 'user-p2p-status',
+    to: context.seller.email,
+    language: context.seller.language || 'en',
+    data: {
+      ...common,
+      status: (label[(context.seller.language || 'en') === 'ar' ? 'ar' : 'en']) || label.en,
+      role: 'seller',
+      counterparty: context.buyer.username,
+    },
+  });
+}
+
+function enqueueAdminP2PEmail(context, status, note) {
+  if (!context) return;
+  enqueueEmail({
+    kind: 'admin-p2p-trade',
+    data: {
+      tradeId: context.tradeId,
+      status,
+      asset: context.asset,
+      amount: `${context.amount} ${context.asset}`,
+      fiat: `${context.fiat} ${context.currency || 'USD'}`,
+      payment: context.payment,
+      buyer: context.buyer.username,
+      seller: context.seller.username,
+      note,
+    },
+  });
+}
+
 function presentAdminRow(row) {
   if (!row) return null;
   const { password_hash, ...rest } = row;
@@ -1127,6 +1217,8 @@ const EMAIL_SETTING_KEYS = {
   userWelcome: 'email_user_welcome_enabled',
   userKyc: 'email_user_kyc_enabled',
   adminKyc: 'email_admin_kyc_enabled',
+  userP2P: 'email_user_p2p_enabled',
+  adminP2P: 'email_admin_p2p_enabled',
 };
 
 const EMAIL_SETTINGS_CACHE_MS = 60 * 1000;
@@ -1177,6 +1269,8 @@ async function readEmailSettings(conn = pool, { forceReload = false } = {}) {
   );
   const userKycEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.userKyc, '1', conn), true);
   const adminKycEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminKyc, '1', conn), true);
+  const userP2pEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.userP2P, '1', conn), true);
+  const adminP2pEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminP2P, '1', conn), true);
 
   const settings = {
     enabled,
@@ -1185,6 +1279,8 @@ async function readEmailSettings(conn = pool, { forceReload = false } = {}) {
     userWelcomeEnabled,
     userKycEnabled,
     adminKycEnabled,
+    userP2pEnabled,
+    adminP2pEnabled,
   };
 
   if (conn === pool) {
@@ -1207,6 +1303,8 @@ function presentEmailSettings(settings) {
     user_welcome_enabled: !!settings.userWelcomeEnabled,
     user_kyc_enabled: !!settings.userKycEnabled,
     admin_kyc_enabled: !!settings.adminKycEnabled,
+    user_p2p_enabled: !!settings.userP2pEnabled,
+    admin_p2p_enabled: !!settings.adminP2pEnabled,
   };
 }
 
@@ -1305,6 +1403,49 @@ const EMAIL_TEMPLATE_BUILDERS = {
       return { subject: 'New KYC submission', body: lines };
     },
   },
+  'user-p2p-status': {
+    en: (data) => {
+      const status = data?.status || 'updated';
+      const role = data?.role || 'trader';
+      const lines = [
+        `Trade #${data?.tradeId ?? '—'} is now ${status}.`,
+        `You are the ${role}. Counterparty: ${data?.counterparty || 'N/A'}.`,
+        data?.amount ? `Amount: ${data.amount}` : null,
+        data?.fiat ? `Fiat: ${data.fiat}` : null,
+        data?.payment ? `Payment method: ${data.payment}` : null,
+        data?.note || null,
+      ].filter(Boolean);
+      return { subject: `P2P trade ${status}`, body: lines };
+    },
+    ar: (data) => {
+      const status = data?.status || 'محدّث';
+      const role = data?.role === 'buyer' ? 'المشتري' : data?.role === 'seller' ? 'البائع' : 'المستخدم';
+      const lines = [
+        `الطلب رقم ${data?.tradeId ?? '—'} حالته بقت ${status}.`,
+        `دورك: ${role}. الطرف التاني: ${data?.counterparty || 'غير معروف'}.`,
+        data?.amount ? `الكمية: ${data.amount}` : null,
+        data?.fiat ? `القيمة: ${data.fiat}` : null,
+        data?.payment ? `طريقة الدفع: ${data.payment}` : null,
+        data?.note || null,
+      ].filter(Boolean);
+      return { subject: `تحديث طلب P2P - ${status}`, body: lines };
+    },
+  },
+  'admin-p2p-trade': {
+    en: (data) => {
+      const lines = [
+        `Trade #${data?.tradeId ?? '—'} ${data?.status ? `is ${data.status}` : 'was updated'}.`,
+        data?.asset ? `Asset: ${data.asset}` : null,
+        data?.amount ? `Amount: ${data.amount}` : null,
+        data?.fiat ? `Fiat: ${data.fiat}` : null,
+        data?.payment ? `Payment method: ${data.payment}` : null,
+        data?.buyer ? `Buyer: ${data.buyer}` : null,
+        data?.seller ? `Seller: ${data.seller}` : null,
+        data?.note || null,
+      ].filter(Boolean);
+      return { subject: 'P2P trade update', body: lines };
+    },
+  },
 };
 
 function renderEmailTemplate(kind, language, data) {
@@ -1336,6 +1477,14 @@ const EMAIL_JOB_CONFIG = {
   },
   'admin-kyc-submitted': {
     shouldSend: (settings) => settings.adminKycEnabled && settings.adminRecipients.length > 0,
+    recipients: (_, settings) => settings.adminRecipients,
+  },
+  'user-p2p-status': {
+    shouldSend: (settings) => settings.userP2pEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'admin-p2p-trade': {
+    shouldSend: (settings) => settings.adminP2pEnabled && settings.adminRecipients.length > 0,
     recipients: (_, settings) => settings.adminRecipients,
   },
 };
@@ -3065,6 +3214,11 @@ app.post('/p2p/trades', walletLimiter, async (req, res, next) => {
 
     await conn.commit();
 
+    const context = await getP2PTradeEmailContext(tradeId);
+    if (context) {
+      enqueueP2PStatusEmails(context, 'payment_pending');
+      enqueueAdminP2PEmail(context, 'new trade');
+    }
     const [[tradeRow]] = await pool.query(
       `SELECT t.*, pm.name AS payment_method_name, bu.username AS buyer_username, su.username AS seller_username
          FROM p2p_trades t
@@ -3211,7 +3365,9 @@ app.post('/p2p/trades/:id/mark-paid', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [[tradeRow]] = await pool.query(
-      'SELECT buyer_id, status FROM p2p_trades WHERE id=? LIMIT 1',
+      `SELECT t.id, t.status, t.buyer_id
+         FROM p2p_trades t
+        WHERE t.id=? LIMIT 1`,
       [tradeId]
     );
     if (!tradeRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Trade not found' });
@@ -3220,6 +3376,11 @@ app.post('/p2p/trades/:id/mark-paid', walletLimiter, async (req, res, next) => {
       return next({ status: 400, code: 'BAD_STATE', message: 'Trade is not awaiting payment' });
     }
     await pool.query('UPDATE p2p_trades SET status=?, paid_at=NOW(), updated_at=NOW() WHERE id=?', ['paid', tradeId]);
+    const context = await getP2PTradeEmailContext(tradeId);
+    if (context) {
+      enqueueP2PStatusEmails(context, 'paid');
+      enqueueAdminP2PEmail(context, 'paid');
+    }
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -3266,6 +3427,11 @@ app.post('/p2p/trades/:id/release', walletLimiter, async (req, res, next) => {
       tradeId,
     ]);
     await conn.commit();
+    const context = await getP2PTradeEmailContext(tradeId);
+    if (context) {
+      enqueueP2PStatusEmails(context, 'released');
+      enqueueAdminP2PEmail(context, 'released');
+    }
     res.json({ ok: true });
   } catch (err) {
     if (conn) {
@@ -3297,6 +3463,11 @@ app.post('/p2p/trades/:id/complete', walletLimiter, async (req, res, next) => {
       'completed',
       tradeId,
     ]);
+    const context = await getP2PTradeEmailContext(tradeId);
+    if (context) {
+      enqueueP2PStatusEmails(context, 'completed');
+      enqueueAdminP2PEmail(context, 'completed');
+    }
     res.json({ ok: true });
   } catch (err) {
     next(err);
@@ -3360,6 +3531,12 @@ app.post('/p2p/trades/:id/dispute', walletLimiter, async (req, res, next) => {
       [tradeId, userId, payload.reason, payload.evidence || null, 'open']
     );
     await conn.commit();
+    const context = await getP2PTradeEmailContext(tradeId);
+    if (context) {
+      const note = payload.reason ? `Reason: ${payload.reason}` : undefined;
+      enqueueP2PStatusEmails(context, 'disputed', note);
+      enqueueAdminP2PEmail(context, 'disputed', note);
+    }
     res.json({ ok: true, dispute_id: insert.insertId });
   } catch (err) {
     if (conn) {
@@ -3684,6 +3861,12 @@ app.patch('/admin/p2p/disputes/:id/resolve', async (req, res, next) => {
       ['resolved', payload.resolution, admin.id, disputeId]
     );
     await conn.commit();
+    const context = await getP2PTradeEmailContext(dispute.trade_id);
+    if (context) {
+      const note = payload.resolution === 'buyer' ? 'Released to buyer' : 'Refunded to seller';
+      enqueueP2PStatusEmails(context, 'completed', note);
+      enqueueAdminP2PEmail(context, 'resolved', note);
+    }
     res.json({ ok: true });
   } catch (err) {
     if (conn) {
@@ -3878,6 +4061,10 @@ app.patch('/admin/email/settings', async (req, res, next) => {
       tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userKyc, payload.user_kyc_enabled ? '1' : '0'));
     if (payload.admin_kyc_enabled !== undefined)
       tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminKyc, payload.admin_kyc_enabled ? '1' : '0'));
+    if (payload.user_p2p_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userP2P, payload.user_p2p_enabled ? '1' : '0'));
+    if (payload.admin_p2p_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminP2P, payload.admin_p2p_enabled ? '1' : '0'));
     await Promise.all(tasks);
     invalidateEmailSettingsCache();
     const settings = presentEmailSettings(await readEmailSettings(pool, { forceReload: true }));

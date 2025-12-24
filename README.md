@@ -106,6 +106,8 @@ needed:
 - `email_user_welcome_enabled`
 - `email_user_kyc_enabled`
 - `email_admin_kyc_enabled`
+- `email_user_p2p_enabled`
+- `email_admin_p2p_enabled`
 
 If SMTP credentials are missing, emails are skipped gracefully while the rest of the platform
 continues to run.

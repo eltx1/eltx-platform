@@ -541,6 +541,8 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_recipien
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_welcome_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_kyc_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_kyc_enabled', '1');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_p2p_enabled', '1');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_p2p_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('referral_reward_eltx', '0');
 
 -- referral codes and rewards
