@@ -131,3 +131,8 @@ to regenerate because the registry blocks downloads in your environment, rerun
 ```json
 { "ok": true, "wallet": { "address": "0x..." } }
 ```
+
+### Live data & cache guardrails
+- تم تعيين مسارات `/wallet` و `/api/transactions` علشان تبعت هيدر `Cache-Control: no-store` و`Pragma: no-cache`، فالمحتوى دايماً Live. لو عندك بروكسي زي Cloudflare أو Apache، فعّل قاعدة Bypass لـ `/api/*` (شوف `docs/CLOUDFLARE.md`) أو استخدم إعدادات `.htaccess` اللي في الجذر علشان تمنع التخزين المؤقت.
+- صفحات المعاملات والمحفظة في الـ Dashboard متعلمة `dynamic` وبتعمل polling وإعادة طلب عند استعادة التركيز، فـ سيبها كده علشان تقرّي أحدث البيانات حتى مع تفعيل Service Worker.
+- Service Worker (`public/sw.js`) بيعدي أي طلبات `/api/*` بمود `no-store` وبيطلع Prompt Reload لما ينزل إصدار جديد. بعد أي نشر للواجهة، اعمل Purge لـ `/sw.js` وأي صفحات متأثرة من الـ CDN علشان المستخدمين يشوفوا التحديث فوراً (راجع `docs/CACHE-RUNBOOK.md`).
