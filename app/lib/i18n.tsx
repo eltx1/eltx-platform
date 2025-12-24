@@ -681,6 +681,20 @@ export const dict = {
         order: 'Order',
       },
       loading: 'Loading trade details…',
+      offers: {
+        empty: 'No offers match your filters yet.',
+      },
+      form: {
+        title: 'Start trade',
+        amount: 'Amount (fiat)',
+        payment: 'Payment method',
+        limits: 'Limits',
+        submit: 'Open trade',
+      },
+      errors: {
+        amount: 'Enter a valid amount within the offer limits.',
+        paymentMethod: 'Choose a payment method to continue.',
+      },
       trades: {
         empty: 'This trade is unavailable or was not found.',
         order: 'Order',
@@ -711,6 +725,7 @@ export const dict = {
         markedPaid: 'Payment marked as paid.',
         released: 'Funds released to buyer.',
         completed: 'Trade marked as completed.',
+        tradeCreated: 'Trade opened. Redirecting…',
       },
       info: {
         supportedAssets: 'Supported assets: USDC, USDT.',
@@ -726,6 +741,7 @@ export const dict = {
       statuses: {
         title: 'Trade lifecycle',
         initiated: 'Initiated',
+        payment_pending: 'Payment pending',
         paymentPending: 'Payment pending',
         paid: 'Paid',
         released: 'Released',
@@ -1418,6 +1434,20 @@ export const dict = {
         order: 'طلب',
       },
       loading: 'جاري تحميل بيانات الصفقة…',
+      offers: {
+        empty: 'مافيش عروض مطابقة لفلترك دلوقتي.',
+      },
+      form: {
+        title: 'ابدأ صفقة',
+        amount: 'المبلغ (عملة ورقية)',
+        payment: 'وسيلة الدفع',
+        limits: 'الحدود',
+        submit: 'فتح الصفقة',
+      },
+      errors: {
+        amount: 'اكتب مبلغ صحيح جوه حدود العرض.',
+        paymentMethod: 'اختار وسيلة دفع علشان تكمل.',
+      },
       trades: {
         empty: 'الصفقة غير متاحة أو غير موجودة.',
         order: 'طلب',
@@ -1448,6 +1478,7 @@ export const dict = {
         markedPaid: 'تم تأكيد الدفع.',
         released: 'تم تحرير الرصيد للمشتري.',
         completed: 'تم إنهاء الصفقة.',
+        tradeCreated: 'تم فتح الصفقة. بنحوّلك للشات…',
       },
       info: {
         supportedAssets: 'العملات المدعومة: USDC و USDT.',
@@ -1462,6 +1493,7 @@ export const dict = {
       statuses: {
         title: 'مراحل الصفقة',
         initiated: 'تم الإنشاء',
+        payment_pending: 'بانتظار الدفع',
         paymentPending: 'بانتظار الدفع',
         paid: 'تم الدفع',
         released: 'تم التحرير',
