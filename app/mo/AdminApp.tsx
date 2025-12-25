@@ -55,7 +55,8 @@ type Section =
   | 'notifications'
   | 'faq'
   | 'stripe'
-  | 'p2p';
+  | 'p2p'
+  | 'withdrawals';
 
 interface SummaryResponse {
   summary: {
@@ -251,12 +252,30 @@ type P2PDisputeRow = {
   };
 };
 
+type AdminWithdrawalRow = {
+  id: number;
+  user_id: number;
+  user_email?: string | null;
+  user_username?: string | null;
+  asset: string;
+  amount_formatted: string;
+  amount_wei: string;
+  chain: string;
+  address: string;
+  reason?: string | null;
+  status: 'pending' | 'completed' | 'rejected';
+  reject_reason?: string | null;
+  created_at?: string | null;
+  handled_at?: string | null;
+};
+
 const sections: Array<{ id: Section; label: string; icon: ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
   { id: 'users', label: 'Customers', icon: Wallet },
   { id: 'kyc', label: 'KYC & AML', icon: ShieldCheck },
   { id: 'transactions', label: 'Transactions', icon: LineChart },
+  { id: 'withdrawals', label: 'Withdrawals', icon: Download },
   { id: 'staking', label: 'Staking', icon: Layers },
   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'ai', label: 'AI', icon: Sparkles },
@@ -2130,6 +2149,152 @@ function KycPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
   );
 }
 
+function WithdrawalsPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const statuses: Array<{ id: 'pending' | 'completed' | 'rejected' | 'all'; label: string }> = [
+    { id: 'pending', label: 'Pending' },
+    { id: 'completed', label: 'Completed' },
+    { id: 'rejected', label: 'Rejected' },
+    { id: 'all', label: 'All' },
+  ];
+  const [status, setStatus] = useState<(typeof statuses)[number]['id']>('pending');
+  const [rows, setRows] = useState<AdminWithdrawalRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [processingId, setProcessingId] = useState<number | null>(null);
+
+  const load = useCallback(
+    async (current = status) => {
+      setLoading(true);
+      const res = await apiFetch<{ requests: AdminWithdrawalRow[] }>(`/admin/withdrawals?status=${current}`);
+      if (res.ok) {
+        setRows(res.data.requests);
+      } else {
+        onNotify(res.error || 'Failed to load withdrawal requests', 'error');
+      }
+      setLoading(false);
+    },
+    [onNotify, status]
+  );
+
+  useEffect(() => {
+    load(status);
+  }, [status, load]);
+
+  const handleAction = async (row: AdminWithdrawalRow, nextStatus: 'completed' | 'rejected') => {
+    setProcessingId(row.id);
+    const payload: { status: 'completed' | 'rejected'; reason?: string | null } = { status: nextStatus };
+    if (nextStatus === 'rejected') {
+      const reason = window.prompt('Reason for rejection (optional)', row.reject_reason || '') || '';
+      payload.reason = reason || null;
+    }
+    const res = await apiFetch<{ request: AdminWithdrawalRow }>(`/admin/withdrawals/${row.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    setProcessingId(null);
+    if (res.ok) {
+      setRows((prev) => prev.map((r) => (r.id === row.id ? res.data.request : r)));
+      onNotify('Withdrawal updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update request', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-2">
+        {statuses.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => setStatus(s.id)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium transition ${
+              status === s.id
+                ? 'border-blue-500 bg-blue-500/10 text-blue-200'
+                : 'border-white/10 bg-white/5 text-white/70 hover:border-white/30 hover:text-white'
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+        <button
+          onClick={() => load(status)}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Refresh
+        </button>
+      </div>
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        {loading ? (
+          <div className="flex h-40 items-center justify-center">
+            <RefreshCw className="h-6 w-6 animate-spin text-blue-300" />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="p-6 text-center text-sm text-white/60">No withdrawal requests found.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-white/10 text-xs">
+              <thead className="bg-white/5">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">ID</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">User</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Amount</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Chain</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Address</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Status</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Reason</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Created</th>
+                  <th className="px-3 py-2 text-left font-semibold text-white/60">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/10">
+                {rows.map((row) => (
+                  <tr key={row.id}>
+                    <td className="px-3 py-2 font-semibold text-white/80">{row.id}</td>
+                    <td className="px-3 py-2 text-white/80">
+                      <div className="font-semibold">{row.user_username || '—'}</div>
+                      <div className="text-white/60">{row.user_email || `User ${row.user_id}`}</div>
+                    </td>
+                    <td className="px-3 py-2 text-white/80">
+                      {row.amount_formatted} {row.asset}
+                    </td>
+                    <td className="px-3 py-2 text-white/80">{row.chain}</td>
+                    <td className="px-3 py-2 text-white/80">{row.address}</td>
+                    <td className="px-3 py-2 text-white/80">{row.status}</td>
+                    <td className="px-3 py-2 text-white/80">{row.reason || row.reject_reason || '—'}</td>
+                    <td className="px-3 py-2 text-white/80">{row.created_at ? new Date(row.created_at).toLocaleString() : '—'}</td>
+                    <td className="px-3 py-2 text-white/80">
+                      {row.status === 'pending' ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => handleAction(row, 'completed')}
+                            disabled={processingId === row.id}
+                            className="rounded-full border border-emerald-400/60 px-3 py-1 text-xs text-emerald-200 transition hover:border-emerald-300 hover:text-white disabled:opacity-50"
+                          >
+                            Mark completed
+                          </button>
+                          <button
+                            onClick={() => handleAction(row, 'rejected')}
+                            disabled={processingId === row.id}
+                            className="rounded-full border border-rose-400/60 px-3 py-1 text-xs text-rose-200 transition hover:border-rose-300 hover:text-white disabled:opacity-50"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-white/60">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TransactionsPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const types: Array<{ id: 'deposits' | 'transfers' | 'swaps' | 'spot' | 'fiat'; label: string }> = [
     { id: 'deposits', label: 'Deposits' },
@@ -3742,6 +3907,7 @@ export default function AdminApp() {
           {active === 'users' && <UsersPanel onNotify={notify} />}
           {active === 'kyc' && <KycPanel onNotify={notify} />}
           {active === 'transactions' && <TransactionsPanel onNotify={notify} />}
+          {active === 'withdrawals' && <WithdrawalsPanel onNotify={notify} />}
           {active === 'staking' && <StakingPanel onNotify={notify} />}
           {active === 'fees' && <FeesPanel onNotify={notify} />}
           {active === 'ai' && <AiPanel onNotify={notify} />}

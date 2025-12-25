@@ -32,6 +32,7 @@ const STRIPE_PRICING_ASSET = 'USD';
 const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
 const DEFAULT_SPOT_MAX_DEVIATION_BPS = 800n;
 const DEFAULT_SPOT_CANDLE_FETCH_LIMIT = 3000;
+const WITHDRAWAL_CHAINS = ['Ethereum', 'BNB', 'Solana', 'Base'];
 
 function normalizeSettingValue(value) {
   if (value === undefined || value === null) return null;
@@ -842,6 +843,33 @@ function addDays(dateStr, days) {
   }
 }
 
+function formatWithdrawalRow(row) {
+  const decimals = Number(row.asset_decimals || getSymbolDecimals(row.asset || ELTX_SYMBOL));
+  const amountWei = row.amount_wei?.toString() || '0';
+  const createdAt = row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at;
+  const updatedAt = row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at;
+  const handledAt = row.handled_at instanceof Date ? row.handled_at.toISOString() : row.handled_at;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    asset: row.asset || ELTX_SYMBOL,
+    asset_decimals: decimals,
+    amount_wei: amountWei,
+    amount_formatted: trimDecimal(formatUnitsStr(amountWei, decimals)),
+    chain: row.chain,
+    address: row.address,
+    reason: row.reason || null,
+    status: row.status,
+    reject_reason: row.reject_reason || null,
+    handled_by_admin_id: row.handled_by_admin_id ?? null,
+    handled_at: handledAt || null,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    user_email: row.user_email || null,
+    user_username: row.user_username || null,
+  };
+}
+
 const ELTX_SYMBOL = 'ELTX';
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
@@ -849,6 +877,7 @@ const DEFAULT_AI_DAILY_FREE = 10;
 const DEFAULT_AI_PRICE = '1';
 const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
 const DEFAULT_REFERRAL_REWARD = '0';
+const WITHDRAWAL_STATUS = ['pending', 'completed', 'rejected'];
 
 function getSymbolDecimals(symbol) {
   const meta = tokenMetaBySymbol[symbol];
@@ -2377,6 +2406,18 @@ const CANDLE_INTERVALS = {
   '1d': { seconds: 86400 },
 };
 
+const WithdrawalCreateSchema = z.object({
+  amount: z.string().min(1),
+  chain: z.enum(WITHDRAWAL_CHAINS),
+  address: z.string().min(8).max(191),
+  reason: z.string().trim().max(255).optional().nullable(),
+});
+
+const AdminWithdrawalUpdateSchema = z.object({
+  status: z.enum(['completed', 'rejected']),
+  reason: z.string().trim().max(255).optional().nullable(),
+});
+
 async function requireUser(req) {
   const token = req.cookies[COOKIE_NAME];
   if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
@@ -3681,6 +3722,99 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get('/admin/withdrawals', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const statusRaw = (req.query.status || 'pending').toString();
+    const status = WITHDRAWAL_STATUS.includes(statusRaw) ? statusRaw : 'all';
+    const where = status === 'all' ? '' : 'WHERE w.status = ?';
+    const params = status === 'all' ? [] : [status];
+    const [rows] = await pool.query(
+      `SELECT w.*, u.email AS user_email, u.username AS user_username
+         FROM wallet_withdrawals w
+         JOIN users u ON u.id = w.user_id
+        ${where}
+        ORDER BY w.created_at DESC
+        LIMIT 200`,
+      params
+    );
+    res.json({ ok: true, requests: rows.map(formatWithdrawalRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/withdrawals/:id', async (req, res, next) => {
+  let conn;
+  try {
+    const admin = await requireAdmin(req);
+    const { status, reason } = AdminWithdrawalUpdateSchema.parse(req.body || {});
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid id' });
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[row]] = await conn.query('SELECT * FROM wallet_withdrawals WHERE id=? FOR UPDATE', [id]);
+    if (!row) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Request not found' });
+    }
+    if (row.status !== 'pending') {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_STATE', message: 'Request already processed' });
+    }
+
+    const amountWeiStr = row.amount_wei?.toString() || '0';
+    const normalized = amountWeiStr.includes('.') ? amountWeiStr.split('.')[0] : amountWeiStr;
+    const amountWei = BigInt(normalized);
+    const asset = row.asset || ELTX_SYMBOL;
+
+    if (status === 'rejected') {
+      await conn.query(
+        `INSERT INTO user_balances (user_id, asset, balance_wei)
+         VALUES (?,?,?)
+         ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+        [row.user_id, asset, amountWei.toString()]
+      );
+    }
+
+    await conn.query(
+      `UPDATE wallet_withdrawals
+          SET status=?,
+              reject_reason=?,
+              handled_by_admin_id=?,
+              handled_at=NOW(),
+              updated_at=NOW()
+        WHERE id=?`,
+      [status, status === 'rejected' ? reason || null : null, admin.id, id]
+    );
+    await conn.commit();
+
+    const [[updated]] = await conn.query(
+      `SELECT w.*, u.email AS user_email, u.username AS user_username
+         FROM wallet_withdrawals w
+         JOIN users u ON u.id = w.user_id
+        WHERE w.id=?
+        LIMIT 1`,
+      [id]
+    );
+    res.json({ ok: true, request: formatWithdrawalRow(updated) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 
@@ -5825,6 +5959,124 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
     res.json({ ok: true, assets, transfer_fee_bps: transferFeeBps });
   } catch (err) {
     next(err);
+  }
+});
+
+app.get('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT id, user_id, asset, asset_decimals, amount_wei, chain, address, reason, status, reject_reason, handled_by_admin_id, handled_at, created_at, updated_at
+         FROM wallet_withdrawals
+        WHERE user_id=?
+        ORDER BY created_at DESC
+        LIMIT 50`,
+      [userId]
+    );
+    res.json({ ok: true, requests: rows.map(formatWithdrawalRow) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = WithdrawalCreateSchema.parse(req.body || {});
+    const reason = payload.reason ? payload.reason.trim() : null;
+    const decimals = getSymbolDecimals(ELTX_SYMBOL);
+    let amountWei;
+    try {
+      amountWei = ethers.parseUnits(payload.amount, decimals);
+    } catch {
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    }
+    if (amountWei <= 0n)
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[lastPurchase]] = await conn.query(
+      "SELECT created_at FROM fiat_purchases WHERE user_id=? AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
+      [userId]
+    );
+    if (!lastPurchase) {
+      await conn.rollback();
+      return next({
+        status: 400,
+        code: 'WITHDRAWAL_NOT_ELIGIBLE',
+        message: 'A successful Stripe purchase is required before withdrawing.',
+      });
+    }
+    const lastPurchaseAt = new Date(lastPurchase.created_at);
+    const availableAt = new Date(lastPurchaseAt.getTime() + 24 * 60 * 60 * 1000);
+    if (Date.now() < availableAt.getTime()) {
+      await conn.rollback();
+      return next({
+        status: 400,
+        code: 'WITHDRAWAL_TOO_EARLY',
+        message: 'Withdrawals are available 24 hours after your last purchase.',
+        details: { available_at: availableAt.toISOString() },
+      });
+    }
+
+    const [[pending]] = await conn.query(
+      'SELECT id FROM wallet_withdrawals WHERE user_id=? AND status=? LIMIT 1',
+      [userId, 'pending']
+    );
+    if (pending) {
+      await conn.rollback();
+      return next({
+        status: 400,
+        code: 'WITHDRAWAL_EXISTS',
+        message: 'You already have a pending withdrawal request.',
+      });
+    }
+
+    const [balanceRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE',
+      [userId, ELTX_SYMBOL]
+    );
+    if (!balanceRows.length) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+    }
+    const rawBal = balanceRows[0].balance_wei?.toString() || '0';
+    const normalized = rawBal.includes('.') ? rawBal.split('.')[0] : rawBal;
+    const balanceWei = BigInt(normalized);
+    if (balanceWei < amountWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+    }
+
+    await conn.query(
+      'UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND asset=?',
+      [amountWei.toString(), userId, ELTX_SYMBOL]
+    );
+    const [insert] = await conn.query(
+      `INSERT INTO wallet_withdrawals (user_id, asset, asset_decimals, amount_wei, chain, address, reason, status, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?, 'pending', NOW(), NOW())`,
+      [userId, ELTX_SYMBOL, decimals, amountWei.toString(), payload.chain, payload.address, reason]
+    );
+    await conn.commit();
+    const [[row]] = await conn.query('SELECT * FROM wallet_withdrawals WHERE id=? LIMIT 1', [
+      insert.insertId,
+    ]);
+    res.json({ ok: true, request: formatWithdrawalRow(row) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 

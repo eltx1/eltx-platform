@@ -140,6 +140,46 @@ ALTER TABLE user_balances
   DROP COLUMN IF EXISTS usd_balance,
   MODIFY COLUMN user_id INT NOT NULL;
 
+-- manual withdrawal requests
+CREATE TABLE IF NOT EXISTS wallet_withdrawals (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  asset VARCHAR(32) NOT NULL DEFAULT 'ELTX',
+  asset_decimals INT UNSIGNED NOT NULL DEFAULT 18,
+  amount_wei DECIMAL(65,0) NOT NULL,
+  chain VARCHAR(32) NOT NULL,
+  address VARCHAR(191) NOT NULL,
+  reason VARCHAR(255) NULL,
+  status ENUM('pending','completed','rejected') NOT NULL DEFAULT 'pending',
+  reject_reason VARCHAR(255) NULL,
+  handled_by_admin_id INT NULL,
+  handled_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_user_status (user_id, status),
+  INDEX idx_status_created (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE wallet_withdrawals
+  ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER user_id,
+  ADD COLUMN IF NOT EXISTS asset_decimals INT UNSIGNED NOT NULL DEFAULT 18 AFTER asset,
+  ADD COLUMN IF NOT EXISTS amount_wei DECIMAL(65,0) NOT NULL AFTER asset_decimals,
+  ADD COLUMN IF NOT EXISTS chain VARCHAR(32) NOT NULL AFTER amount_wei,
+  ADD COLUMN IF NOT EXISTS address VARCHAR(191) NOT NULL AFTER chain,
+  ADD COLUMN IF NOT EXISTS reason VARCHAR(255) NULL AFTER address,
+  ADD COLUMN IF NOT EXISTS status ENUM('pending','completed','rejected') NOT NULL DEFAULT 'pending' AFTER reason,
+  ADD COLUMN IF NOT EXISTS reject_reason VARCHAR(255) NULL AFTER status,
+  ADD COLUMN IF NOT EXISTS handled_by_admin_id INT NULL AFTER reject_reason,
+  ADD COLUMN IF NOT EXISTS handled_at DATETIME NULL AFTER handled_by_admin_id,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER handled_at,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at,
+  ADD INDEX IF NOT EXISTS idx_user_status (user_id, status),
+  ADD INDEX IF NOT EXISTS idx_status_created (status, created_at),
+  MODIFY COLUMN user_id INT NOT NULL,
+  MODIFY COLUMN amount_wei DECIMAL(65,0) NOT NULL,
+  MODIFY COLUMN address VARCHAR(191) NOT NULL,
+  MODIFY COLUMN chain VARCHAR(32) NOT NULL;
+
 -- centrally managed asset prices for ELTX swaps
 CREATE TABLE IF NOT EXISTS asset_prices (
   asset VARCHAR(32) NOT NULL,
