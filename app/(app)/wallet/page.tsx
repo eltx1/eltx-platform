@@ -38,9 +38,12 @@ type Asset = {
   change_24h_percent?: string | null;
   change_24h_wei?: string;
   last_movement_at?: string | null;
+  logo_url?: string | null;
 };
 
 type WalletInfo = { chain_id: number; address: string };
+type Pagination = { page: number; page_size: number; total: number; total_pages?: number; has_more?: boolean };
+type TransactionsResponse = { transactions: Transaction[]; pagination?: Pagination };
 
 export default function WalletPage() {
   const { user } = useAuth();
@@ -50,10 +53,20 @@ export default function WalletPage() {
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionsPage, setTransactionsPage] = useState(1);
+  const transactionsPageSize = 10;
+  const [transactionsPagination, setTransactionsPagination] = useState<Pagination>({
+    page: 1,
+    page_size: transactionsPageSize,
+    total: 0,
+    total_pages: 1,
+    has_more: false,
+  });
   const [error, setError] = useState('');
   const [unauth, setUnauth] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [networkFilter, setNetworkFilter] = useState<'all' | 'none' | number>('all');
+  const [hiddenLogos, setHiddenLogos] = useState<Record<string, boolean>>({});
 
   const valueFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }), []);
   const percentFormatter = useMemo(() => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }), []);
@@ -119,19 +132,48 @@ export default function WalletPage() {
     });
   }, [filteredAssets, getChainLabel]);
 
+  const loadTransactions = useCallback(
+    async (pageOverride?: number) => {
+      const pageToLoad = pageOverride ?? transactionsPage;
+      const res = await apiFetch<TransactionsResponse>(
+        `/wallet/transactions?page=${pageToLoad}&limit=${transactionsPageSize}`
+      );
+      if (!res.ok) {
+        if (res.status === 401) setUnauth(true);
+        return;
+      }
+      setTransactions(res.data.transactions || []);
+      const pagination = res.data.pagination;
+      const total = pagination?.total ?? res.data.transactions?.length ?? 0;
+      const pageSize = pagination?.page_size ?? transactionsPageSize;
+      const currentPage = pagination?.page ?? pageToLoad;
+      const totalPages = pagination?.total_pages ?? Math.max(1, Math.ceil(total / (pageSize || 1)));
+      setTransactionsPagination({
+        page: currentPage,
+        page_size: pageSize,
+        total,
+        total_pages: totalPages,
+        has_more: pagination?.has_more ?? currentPage < totalPages,
+      });
+      setTransactionsPage(currentPage);
+    },
+    [transactionsPage, transactionsPageSize]
+  );
+
   const load = useCallback(async () => {
     const addrRes = await apiFetch<{ wallet: WalletInfo; wallets?: WalletInfo[] }>('/wallet/address');
-    if (!addrRes.ok) {
-      if (addrRes.status === 401) { setUnauth(true); return; }
-      setError(addrRes.error || t.common.genericError); return;
-    }
-    const ws = addrRes.data.wallets || (addrRes.data.wallet ? [addrRes.data.wallet] : []);
-    setWallets(ws);
-    const assetsRes = await apiFetch<{ assets: Asset[] }>('/wallet/assets');
-    if (assetsRes.ok) setAssets(assetsRes.data.assets);
-    const txRes = await apiFetch<{ transactions: Transaction[] }>('/wallet/transactions');
-    if (txRes.ok) setTransactions(txRes.data.transactions);
-  }, [t]);
+      if (!addrRes.ok) {
+        if (addrRes.status === 401) { setUnauth(true); return; }
+        setError(addrRes.error || t.common.genericError); return;
+      }
+      const ws = addrRes.data.wallets || (addrRes.data.wallet ? [addrRes.data.wallet] : []);
+      setWallets(ws);
+      const assetsRes = await apiFetch<{ assets: Asset[] }>('/wallet/assets');
+      if (assetsRes.ok) setAssets(assetsRes.data.assets);
+      await loadTransactions();
+    },
+    [loadTransactions, t]
+  );
 
   useEffect(() => {
     load();
@@ -147,6 +189,13 @@ export default function WalletPage() {
   const handleRefresh = async () => {
     await apiFetch('/wallet/refresh', { method: 'POST' });
     load();
+  };
+
+  const changeTransactionsPage = (nextPage: number) => {
+    const totalPages = transactionsPagination.total_pages || 1;
+    const target = Math.min(Math.max(nextPage, 1), totalPages);
+    if (target === transactionsPage) return;
+    loadTransactions(target);
   };
 
   if (unauth) return <div className="p-4">Please sign in</div>;
@@ -285,8 +334,32 @@ export default function WalletPage() {
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="text-sm font-semibold">{asset.display_symbol || asset.symbol}</div>
-                          <div className="text-xs uppercase tracking-wide text-white/60 text-right">{networkLabel}</div>
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-full bg-white/10 ring-1 ring-white/10 flex items-center justify-center overflow-hidden">
+                              {asset.logo_url && !hiddenLogos[asset.symbol] ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
+                                <img
+                                  src={asset.logo_url}
+                                  alt={`${asset.display_symbol || asset.symbol} logo`}
+                                  className="h-full w-full object-cover"
+                                  loading="lazy"
+                                  onError={() =>
+                                    setHiddenLogos((prev) => ({ ...prev, [asset.symbol]: true }))
+                                  }
+                                />
+                              ) : (
+                                <span className="text-sm font-semibold">
+                                  {(asset.display_symbol || asset.symbol || '').slice(0, 4)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              <div className="text-sm font-semibold">{asset.display_symbol || asset.symbol}</div>
+                              <div className="text-[11px] uppercase tracking-wide text-white/60">
+                                {networkLabel}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                         <div className="text-xl font-bold">{balanceFormatted}</div>
                         <div className={`text-xs ${changeClass}`}>
@@ -348,6 +421,28 @@ export default function WalletPage() {
             </div>
           ))}
           {transactions.length === 0 && <div className="text-sm">-</div>}
+        </div>
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-xs text-white/60">
+            {t.common.pagination.page} {transactionsPagination.page} {t.common.pagination.of}{' '}
+            {transactionsPagination.total_pages || 1} • {transactionsPagination.total} {t.common.pagination.total}
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => changeTransactionsPage(transactionsPagination.page - 1)}
+              disabled={transactionsPagination.page <= 1}
+              className="rounded-full border border-white/20 px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 hover:border-white/40 transition"
+            >
+              {t.common.pagination.previous}
+            </button>
+            <button
+              onClick={() => changeTransactionsPage(transactionsPagination.page + 1)}
+              disabled={transactionsPagination.page >= (transactionsPagination.total_pages || 1)}
+              className="rounded-full border border-white/20 px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-40 hover:border-white/40 transition"
+            >
+              {t.common.pagination.next}
+            </button>
+          </div>
         </div>
       </div>
     </div>

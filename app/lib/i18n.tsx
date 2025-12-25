@@ -604,6 +604,13 @@ export const dict = {
       estimated: 'Estimated',
       fee: 'Fee',
       spread: 'Spread',
+      pagination: {
+        page: 'Page',
+        of: 'of',
+        previous: 'Previous',
+        next: 'Next',
+        total: 'total',
+      },
     },
     settings: {
       spotSlippage: {
@@ -1389,6 +1396,13 @@ export const dict = {
       estimated: 'تقديري',
       fee: 'رسوم',
       spread: 'السبريد',
+      pagination: {
+        page: 'صفحة',
+        of: 'من',
+        previous: 'السابق',
+        next: 'التالي',
+        total: 'إجمالي',
+      },
     },
     settings: {
       spotSlippage: {

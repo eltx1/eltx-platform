@@ -473,6 +473,27 @@ const adminSessionCookie = {
   maxAge: ADMIN_SESSION_TTL_SECONDS * 1000,
 };
 
+async function fetchAssetLogos(symbols) {
+  if (!symbols.length) return new Map();
+  try {
+    const logoKeys = symbols.map((sym) => `asset_logo_${sym.toLowerCase()}_url`);
+    if (!logoKeys.length) return new Map();
+    const [rows] = await pool.query('SELECT name, value FROM platform_settings WHERE name IN (?)', [logoKeys]);
+    const map = new Map();
+    for (const row of rows) {
+      if (!row?.name || !row?.value) continue;
+      const match = row.name.match(/^asset_logo_(.+)_url$/);
+      if (!match || !match[1]) continue;
+      const symbol = match[1].toUpperCase();
+      if (symbols.includes(symbol)) map.set(symbol, row.value);
+    }
+    return map;
+  } catch (err) {
+    console.warn('asset-logo-lookup-failed', err?.code || err?.message || err);
+    return new Map();
+  }
+}
+
 const SignupSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
@@ -5526,49 +5547,119 @@ app.get('/wallet/balance', walletLimiter, async (req, res, next) => {
 app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
-    const [depRows] = await pool.query(
-      'SELECT chain_id, tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at FROM wallet_deposits WHERE user_id=? ORDER BY created_at DESC LIMIT 50',
-      [userId]
+    const limitParam = Number.parseInt(req.query.limit, 10);
+    const pageParam = Number.parseInt(req.query.page, 10);
+    const statusParam = (req.query.status || 'all').toString();
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 50;
+    const page = Number.isFinite(pageParam) && pageParam > 0 ? pageParam : 1;
+    const offset = (page - 1) * limit;
+    const statusFilter = statusParam === 'pending' ? 'pending' : statusParam === 'confirmed' ? 'confirmed' : 'all';
+
+    const depositStatuses =
+      statusFilter === 'pending'
+        ? ['seen']
+        : statusFilter === 'confirmed'
+          ? ['confirmed', 'swept']
+          : ['seen', 'confirmed', 'swept', 'orphaned'];
+    const includeTransfers = statusFilter !== 'pending';
+
+    const depositWhere = depositStatuses.length ? ` AND status IN (${depositStatuses.map(() => '?').join(',')})` : '';
+    const depositParams = [userId, ...depositStatuses];
+    const [[{ deposit_count: depositCount = 0 } = {}]] = await pool.query(
+      `SELECT COUNT(*) AS deposit_count FROM wallet_deposits WHERE user_id=?${depositWhere}`,
+      depositParams
     );
-    const ZERO = '0x0000000000000000000000000000000000000000';
-    for (const row of depRows) {
-      row.type = 'deposit';
-      row.token_address = (row.token_address || ZERO).toLowerCase();
-      const rawWei = row.amount_wei?.toString() ?? '0';
-      row.amount_wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
-      row.amount_int = row.amount_wei;
-      if (row.token_address === ZERO) {
-        row.display_symbol = row.token_symbol || 'BNB';
-        row.decimals = 18;
-        row.amount = ethers.formatEther(BigInt(row.amount_wei));
-      } else {
-        const meta = tokenMeta[row.token_address];
-        row.display_symbol = row.token_symbol || (meta ? meta.symbol : 'UNKNOWN');
-        row.decimals = meta ? meta.decimals : 18;
-        row.amount = row.amount_wei;
-      }
-      row.amount_formatted = formatUnitsStr(row.amount_wei, row.decimals);
+
+    let transferCount = 0;
+    if (includeTransfers) {
+      const [[{ tx_count = 0 } = {}]] = await pool.query(
+        'SELECT COUNT(*) AS tx_count FROM wallet_transfers WHERE from_user_id=? OR to_user_id=?',
+        [userId, userId]
+      );
+      transferCount = Number(tx_count || 0);
     }
 
-    const [trRows] = await pool.query(
-      'SELECT from_user_id, to_user_id, asset, amount_wei, fee_wei, created_at FROM wallet_transfers WHERE from_user_id=? OR to_user_id=? ORDER BY created_at DESC LIMIT 50',
-      [userId, userId]
+    const total = Number(depositCount || 0) + transferCount;
+
+    const unionParts = [
+      {
+        sql: `SELECT 'deposit' AS tx_type, chain_id, tx_hash, token_address, token_symbol, amount_wei, confirmations, status, created_at, NULL AS from_user_id, NULL AS to_user_id, 0 AS fee_wei
+              FROM wallet_deposits
+              WHERE user_id=?${depositWhere}`,
+        params: depositParams,
+      },
+    ];
+    if (includeTransfers) {
+      unionParts.push({
+        sql: `SELECT 'transfer' AS tx_type, NULL AS chain_id, NULL AS tx_hash, NULL AS token_address, asset AS token_symbol, amount_wei, 0 AS confirmations, 'transfer' AS status, created_at, from_user_id, to_user_id, fee_wei
+              FROM wallet_transfers
+              WHERE from_user_id=? OR to_user_id=?`,
+        params: [userId, userId],
+      });
+    }
+
+    const unionSql = unionParts.map((p) => p.sql).join('\nUNION ALL\n');
+    const unionParams = unionParts.flatMap((p) => p.params);
+    const [rows] = await pool.query(
+      `SELECT * FROM (
+        ${unionSql}
+      ) AS tx
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?`,
+      [...unionParams, limit, offset]
     );
-    const transfers = [];
-    for (const row of trRows) {
+
+    const ZERO = '0x0000000000000000000000000000000000000000';
+    const transactions = rows.map((row) => {
+      if (row.tx_type === 'deposit') {
+        const tokenAddress = (row.token_address || ZERO).toLowerCase();
+        const rawWei = row.amount_wei?.toString() ?? '0';
+        const amountWei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
+        const base = {
+          tx_hash: row.tx_hash,
+          token_address: tokenAddress,
+          token_symbol: row.token_symbol,
+          amount_wei: amountWei,
+          amount_int: amountWei,
+          confirmations: row.confirmations,
+          status: row.status,
+          created_at: row.created_at,
+          type: 'deposit',
+          chain_id: row.chain_id,
+        };
+        if (tokenAddress === ZERO) {
+          const decimals = 18;
+          return {
+            ...base,
+            display_symbol: row.token_symbol || 'BNB',
+            decimals,
+            amount_formatted: formatUnitsStr(amountWei, decimals),
+          };
+        }
+        const meta = tokenMeta[tokenAddress];
+        const decimals = meta ? meta.decimals : 18;
+        return {
+          ...base,
+          display_symbol: row.token_symbol || (meta ? meta.symbol : 'UNKNOWN'),
+          decimals,
+          amount_formatted: formatUnitsStr(amountWei, decimals),
+        };
+      }
+
       const incoming = row.to_user_id === userId;
-      const meta = row.asset === 'BNB' || row.asset === 'ETH' ? { decimals: 18 } : tokenMetaBySymbol[row.asset];
+      const sym = row.token_symbol || '';
+      const meta = sym === 'BNB' || sym === 'ETH' ? { decimals: 18 } : tokenMetaBySymbol[sym];
       const decimals = meta ? meta.decimals : 18;
-      const amtWei = BigInt(row.amount_wei);
-      const feeWei = BigInt(row.fee_wei);
+      const amtWei = BigInt(row.amount_wei || 0);
+      const feeWei = BigInt(row.fee_wei || 0);
       const net = incoming ? amtWei - feeWei : amtWei;
-      transfers.push({
+      return {
         tx_hash: null,
         token_address: ZERO,
-        token_symbol: row.asset,
+        token_symbol: sym,
         amount_wei: net.toString(),
         amount_int: net.toString(),
-        display_symbol: row.asset,
+        display_symbol: sym,
         decimals,
         amount_formatted: formatUnitsStr(net.toString(), decimals),
         confirmations: 0,
@@ -5577,12 +5668,22 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
         type: 'transfer',
         direction: incoming ? 'in' : 'out',
         counterparty: incoming ? row.from_user_id : row.to_user_id,
-      });
-    }
+        chain_id: null,
+      };
+    });
 
-    const allTx = [...depRows, ...transfers];
-    allTx.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    res.json({ ok: true, transactions: allTx.slice(0, 50) });
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    res.json({
+      ok: true,
+      transactions,
+      pagination: {
+        page,
+        page_size: limit,
+        total,
+        total_pages: totalPages,
+        has_more: offset + transactions.length < total,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -5620,12 +5721,14 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
         change_24h: '0',
         change_24h_percent: null,
         change_24h_wei: '0',
+        logo_url: null,
       });
       symbolSet.add(sym);
     }
 
     if (assets.length) {
       const symbols = Array.from(symbolSet);
+      const logoMap = await fetchAssetLogos(symbols);
       const placeholders = symbols.map(() => '?').join(',');
 
       let movementRows = [];
@@ -5696,6 +5799,7 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       }
 
       for (const asset of assets) {
+        asset.logo_url = logoMap.get(asset.symbol) || null;
         const sym = asset.symbol;
         asset.last_movement_at = movementMap.get(sym) || null;
         const changeWei = changeMap.get(sym) || 0n;
