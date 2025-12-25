@@ -2,7 +2,8 @@
 export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, Search } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowUpRight, Copy, HandCoins, Search, ShoppingBag } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
@@ -442,6 +443,57 @@ export default function WalletPage() {
             >
               {t.common.pagination.next}
             </button>
+          </div>
+        </div>
+      </div>
+      <div className="pt-2">
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/20">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-white/60">{t.wallet.withdrawal.title}</p>
+              <p className="text-sm text-white/80">{t.wallet.withdrawalPage.subtitle}</p>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Link
+              href="/buy"
+              className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-emerald-400/10 to-emerald-600/20 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/10 transition hover:border-emerald-200/50"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <ShoppingBag className="h-4 w-4" />
+                  <span>{t.wallet.actions.buy}</span>
+                </div>
+                <p className="text-xs text-white/80">{t.buy.subtitle}</p>
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-white/70 group-hover:text-white" />
+            </Link>
+            <Link
+              href="/p2p"
+              className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-gradient-to-br from-amber-500/15 via-amber-400/10 to-amber-600/20 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-amber-500/10 transition hover:border-amber-200/50"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <HandCoins className="h-4 w-4" />
+                  <span>{t.wallet.actions.p2p}</span>
+                </div>
+                <p className="text-xs text-white/80">{t.p2p.info.supportedAssets}</p>
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-white/70 group-hover:text-white" />
+            </Link>
+            <Link
+              href="/wallet/withdrawal"
+              className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-gradient-to-br from-cyan-500/15 via-blue-500/10 to-indigo-500/20 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-cyan-500/10 transition hover:border-cyan-200/50"
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <ArrowUpRight className="h-4 w-4" />
+                  <span>{t.wallet.actions.withdrawal}</span>
+                </div>
+                <p className="text-xs text-white/80">{t.wallet.withdrawalPage.subtitle}</p>
+              </div>
+              <ArrowUpRight className="h-4 w-4 text-white/70 group-hover:text-white" />
+            </Link>
           </div>
         </div>
       </div>
