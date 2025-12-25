@@ -448,12 +448,6 @@ export default function WalletPage() {
       </div>
       <div className="pt-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/20">
-          <div className="mb-3 flex items-center justify-between">
-            <div>
-              <p className="text-xs uppercase tracking-wide text-white/60">{t.wallet.withdrawal.title}</p>
-              <p className="text-sm text-white/80">{t.wallet.withdrawalPage.subtitle}</p>
-            </div>
-          </div>
           <div className="grid gap-3 sm:grid-cols-3">
             <Link
               href="/buy"
