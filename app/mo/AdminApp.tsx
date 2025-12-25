@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState, type ComponentType } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { formatUnits, parseUnits } from 'ethers';
 import {
   CreditCard,
@@ -8,6 +8,7 @@ import {
   DollarSign,
   Download,
   HelpCircle,
+  LifeBuoy,
   KeyRound,
   Layers,
   Bell,
@@ -19,6 +20,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  Send,
   ShieldCheck,
   Sparkles,
   Trash2,
@@ -53,6 +55,7 @@ type Section =
   | 'ai'
   | 'referrals'
   | 'notifications'
+  | 'support'
   | 'faq'
   | 'stripe'
   | 'p2p'
@@ -269,6 +272,32 @@ type AdminWithdrawalRow = {
   handled_at?: string | null;
 };
 
+type SupportTicketStatus = 'open' | 'answered' | 'closed';
+
+type AdminSupportTicket = {
+  id: number;
+  user_id?: number;
+  user_email?: string | null;
+  user_username?: string | null;
+  title: string;
+  status: SupportTicketStatus;
+  created_at?: string | null;
+  updated_at?: string | null;
+  last_message_at?: string | null;
+  last_message_preview?: string | null;
+  message_count?: number;
+};
+
+type AdminSupportMessage = {
+  id: number;
+  ticket_id: number;
+  sender_type: 'user' | 'admin';
+  message: string;
+  created_at?: string | null;
+  admin_username?: string | null;
+  user_username?: string | null;
+};
+
 const sections: Array<{ id: Section; label: string; icon: ComponentType<{ className?: string }> }> = [
   { id: 'overview', label: 'Overview', icon: ShieldCheck },
   { id: 'admins', label: 'Admin Users', icon: Users },
@@ -281,6 +310,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'ai', label: 'AI', icon: Sparkles },
   { id: 'referrals', label: 'Referrals', icon: UserPlus },
   { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
   { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
@@ -1295,6 +1325,314 @@ function P2PPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
               )}
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SupportPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [tickets, setTickets] = useState<AdminSupportTicket[]>([]);
+  const [messages, setMessages] = useState<AdminSupportMessage[]>([]);
+  const [selected, setSelected] = useState<AdminSupportTicket | null>(null);
+  const selectedRef = useRef<AdminSupportTicket | null>(null);
+  const [filter, setFilter] = useState<SupportTicketStatus | 'all'>('open');
+  const [loadingTickets, setLoadingTickets] = useState(true);
+  const [loadingThread, setLoadingThread] = useState(false);
+  const [reply, setReply] = useState('');
+  const [replying, setReplying] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  const statusOptions: Array<{ value: SupportTicketStatus | 'all'; label: string }> = [
+    { value: 'all', label: 'All' },
+    { value: 'open', label: 'Open' },
+    { value: 'answered', label: 'Answered' },
+    { value: 'closed', label: 'Closed' },
+  ];
+
+  const formatDate = (value?: string | null) => {
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  };
+
+  const loadTicket = useCallback(
+    async (ticketId: number) => {
+      setLoadingThread(true);
+      const res = await apiFetch<{ ticket: AdminSupportTicket; messages: AdminSupportMessage[] }>(
+        `/admin/support/tickets/${ticketId}`
+      );
+      setLoadingThread(false);
+      if (res.ok) {
+        setSelected(res.data.ticket);
+        setMessages(res.data.messages || []);
+        setReply('');
+      } else {
+        onNotify(res.error || 'Failed to load ticket', 'error');
+      }
+    },
+    [onNotify]
+  );
+
+  const loadTickets = useCallback(async () => {
+    setLoadingTickets(true);
+    const res = await apiFetch<{ tickets: AdminSupportTicket[] }>(`/admin/support/tickets?status=${filter}`);
+    setLoadingTickets(false);
+    if (res.ok) {
+      const list = res.data.tickets || [];
+      setTickets(list);
+      const currentSelected = selectedRef.current;
+      const stillSelected = currentSelected ? list.find((t) => t.id === currentSelected.id) : null;
+      if (stillSelected) {
+        setSelected(stillSelected);
+      } else if (list.length) {
+        loadTicket(list[0].id);
+      } else {
+        setSelected(null);
+        setMessages([]);
+      }
+    } else {
+      onNotify(res.error || 'Failed to load tickets', 'error');
+    }
+  }, [filter, loadTicket, onNotify]);
+
+  useEffect(() => {
+    loadTickets();
+  }, [loadTickets]);
+
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+
+  const handleReply = async () => {
+    if (!selected || !reply.trim()) return;
+    setReplying(true);
+    const res = await apiFetch<{ ticket: AdminSupportTicket; message: AdminSupportMessage }>(
+      `/admin/support/tickets/${selected.id}/messages`,
+      { method: 'POST', body: JSON.stringify({ message: reply }) }
+    );
+    setReplying(false);
+    if (res.ok) {
+      if (res.data.ticket) {
+        setSelected(res.data.ticket);
+        setTickets((prev) => prev.map((t) => (t.id === res.data.ticket.id ? { ...t, ...res.data.ticket } : t)));
+      }
+      if (res.data.message) setMessages((prev) => [...prev, res.data.message]);
+      setReply('');
+    } else {
+      onNotify(res.error || 'Failed to send reply', 'error');
+    }
+  };
+
+  const handleStatusChange = async (status: SupportTicketStatus) => {
+    if (!selected || selected.status === status) return;
+    setUpdatingStatus(true);
+    const res = await apiFetch<{ ticket: AdminSupportTicket }>(`/admin/support/tickets/${selected.id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status }),
+    });
+    setUpdatingStatus(false);
+    if (res.ok) {
+      if (res.data.ticket) {
+        setSelected(res.data.ticket);
+        setTickets((prev) => prev.map((t) => (t.id === res.data.ticket.id ? { ...t, ...res.data.ticket } : t)));
+      }
+      onNotify(`Ticket marked as ${status}`);
+    } else {
+      onNotify(res.error || 'Failed to update status', 'error');
+    }
+  };
+
+  const badgeTone: Record<SupportTicketStatus, string> = {
+    open: 'bg-emerald-500/10 text-emerald-100 border-emerald-400/30',
+    answered: 'bg-blue-500/10 text-blue-100 border-blue-400/30',
+    closed: 'bg-rose-500/10 text-rose-100 border-rose-400/30',
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-white/60">Customer care</p>
+          <h2 className="text-xl font-semibold">Support tickets</h2>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as SupportTicketStatus | 'all')}
+            className="rounded-full border border-white/10 bg-black/40 px-3 py-1 text-sm text-white/80 focus:border-blue-400 focus:outline-none"
+          >
+            {statusOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={loadTickets}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+          >
+            <RefreshCw className="h-3 w-3" />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
+        <div className="space-y-3 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between text-sm font-semibold">
+            <span>Tickets</span>
+            {loadingTickets && <Loader2 className="h-4 w-4 animate-spin text-blue-300" />}
+          </div>
+          <div className="space-y-3">
+            {!loadingTickets && !tickets.length && (
+              <div className="rounded-xl border border-dashed border-white/10 bg-black/40 px-3 py-6 text-center text-sm text-white/60">
+                No tickets yet.
+              </div>
+            )}
+            {tickets.map((ticket) => {
+              const active = selected?.id === ticket.id;
+              return (
+                <button
+                  key={ticket.id}
+                  onClick={() => loadTicket(ticket.id)}
+                  className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                    active
+                      ? 'border-blue-400/60 bg-blue-500/10 shadow-lg shadow-blue-900/30'
+                      : 'border-white/10 bg-black/30 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="space-y-1">
+                      <div className="font-semibold leading-tight text-white">{ticket.title}</div>
+                      <div className="text-xs text-white/60">
+                        {ticket.user_username ? `@${ticket.user_username}` : 'User'} · {ticket.user_email || 'N/A'}
+                      </div>
+                    </div>
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${badgeTone[ticket.status]}`}>
+                      {ticket.status}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] uppercase tracking-wide text-white/50">
+                    Updated: {formatDate(ticket.last_message_at || ticket.updated_at)}
+                  </div>
+                  {ticket.last_message_preview && (
+                    <div className="mt-2 line-clamp-2 text-sm text-white/70">{ticket.last_message_preview}</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+          {selected ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-white/60">Ticket #{selected.id}</p>
+                  <h3 className="text-lg font-semibold">{selected.title}</h3>
+                  <p className="text-xs text-white/60">
+                    {selected.user_username ? `@${selected.user_username}` : 'User'} · {selected.user_email || 'N/A'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${badgeTone[selected.status]}`}>
+                    {selected.status}
+                  </span>
+                  <button
+                    onClick={() => handleStatusChange('open')}
+                    disabled={updatingStatus || selected.status === 'open'}
+                    className="rounded-full border border-emerald-400/40 px-3 py-1 text-xs text-emerald-100 transition hover:border-emerald-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Mark open
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange('answered')}
+                    disabled={updatingStatus || selected.status === 'answered'}
+                    className="rounded-full border border-blue-400/40 px-3 py-1 text-xs text-blue-100 transition hover:border-blue-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Mark answered
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange('closed')}
+                    disabled={updatingStatus || selected.status === 'closed'}
+                    className="rounded-full border border-rose-400/40 px-3 py-1 text-xs text-rose-100 transition hover:border-rose-300 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-xs text-white/60">
+                Last update: {formatDate(selected.last_message_at || selected.updated_at)} · Messages:{' '}
+                {selected.message_count ?? 0}
+              </div>
+
+              <div className="max-h-[420px] space-y-3 overflow-y-auto rounded-xl border border-white/10 bg-black/30 p-4">
+                {loadingThread && (
+                  <div className="flex items-center gap-2 text-sm text-white/60">
+                    <Loader2 className="h-4 w-4 animate-spin text-blue-300" />
+                    Loading conversation…
+                  </div>
+                )}
+                {!loadingThread && !messages.length && (
+                  <div className="rounded-xl border border-dashed border-white/10 bg-white/5 px-3 py-6 text-center text-sm text-white/60">
+                    No messages yet.
+                  </div>
+                )}
+                {messages.map((msg) => {
+                  const isAdmin = msg.sender_type === 'admin';
+                  return (
+                    <div key={msg.id} className={`flex ${isAdmin ? 'justify-end' : 'justify-start'}`}>
+                      <div
+                        className={`max-w-2xl rounded-2xl border px-3 py-2 text-sm shadow ${
+                          isAdmin
+                            ? 'border-blue-400/30 bg-blue-500/10 text-white shadow-blue-900/30'
+                            : 'border-white/10 bg-white/5 text-white'
+                        }`}
+                      >
+                        <div className="mb-1 flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-white/60">
+                          <span>{isAdmin ? msg.admin_username || 'Admin' : msg.user_username || 'User'}</span>
+                          <span>{formatDate(msg.created_at)}</span>
+                        </div>
+                        <div className="whitespace-pre-wrap leading-relaxed text-white/90">{msg.message}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs uppercase tracking-wide text-white/60">Reply</label>
+                <textarea
+                  value={reply}
+                  onChange={(e) => setReply(e.target.value)}
+                  className="h-28 w-full resize-none rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none"
+                  placeholder="Type your reply to the user…"
+                  disabled={selected.status === 'closed'}
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-white/60">Status: {selected.status}</span>
+                  <button
+                    onClick={handleReply}
+                    disabled={selected.status === 'closed' || replying || !reply.trim()}
+                    className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow shadow-blue-900/40 transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-white/10"
+                  >
+                    {replying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                    Send reply
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-72 items-center justify-center rounded-xl border border-dashed border-white/10 bg-black/30 text-sm text-white/60">
+              Select a ticket to review messages.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -3913,6 +4251,7 @@ export default function AdminApp() {
           {active === 'ai' && <AiPanel onNotify={notify} />}
           {active === 'referrals' && <ReferralPanel onNotify={notify} />}
           {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
+          {active === 'support' && <SupportPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
           {active === 'stripe' && <StripePanel onNotify={notify} />}

@@ -449,6 +449,7 @@ startRunner(pool);
 
 const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
 const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
+const supportLimiter = rateLimit({ windowMs: 60 * 1000, max: 20 });
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
@@ -878,6 +879,7 @@ const DEFAULT_AI_PRICE = '1';
 const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
 const DEFAULT_REFERRAL_REWARD = '0';
 const WITHDRAWAL_STATUS = ['pending', 'completed', 'rejected'];
+const SUPPORT_STATUSES = ['open', 'answered', 'closed'];
 
 function getSymbolDecimals(symbol) {
   const meta = tokenMetaBySymbol[symbol];
@@ -1253,6 +1255,44 @@ async function ensureReferralCode(conn, userId) {
     }
   }
   throw new Error('Failed to allocate referral code');
+}
+
+function parseTicketId(raw) {
+  const numeric = Number.parseInt((raw || '').toString(), 10);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric;
+}
+
+function presentSupportTicket(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    title: row.title,
+    status: row.status,
+    last_message_at: row.last_message_at || row.updated_at || row.created_at,
+    last_sender: row.last_sender || null,
+    closed_at: row.closed_at || null,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    message_count: Number(row.message_count || row.messages_count || 0),
+    last_message_preview: row.last_message_preview || null,
+  };
+}
+
+function presentSupportMessage(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    ticket_id: row.ticket_id,
+    sender_type: row.sender_type,
+    user_id: row.user_id ?? null,
+    admin_id: row.admin_id ?? null,
+    admin_username: row.admin_username || null,
+    user_username: row.user_username || null,
+    message: row.message,
+    created_at: row.created_at,
+  };
 }
 
 async function readReferralSettings(conn = pool) {
@@ -2400,6 +2440,19 @@ const ReferralSettingsSchema = z.object({
   reward_eltx: z.union([z.string(), z.number()]),
 });
 
+const SupportTicketCreateSchema = z.object({
+  title: z.string().trim().min(4).max(150),
+  message: z.string().trim().min(10).max(4000),
+});
+
+const SupportReplySchema = z.object({
+  message: z.string().trim().min(2).max(4000),
+});
+
+const SupportStatusUpdateSchema = z.object({
+  status: z.enum(['open', 'answered', 'closed']),
+});
+
 const CANDLE_INTERVALS = {
   '5m': { seconds: 300 },
   '1h': { seconds: 3600 },
@@ -2942,6 +2995,159 @@ app.post('/kyc/submit', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: err.errors[0]?.message || 'Invalid input', details: { missing } });
     }
     next(err);
+  }
+});
+
+app.get('/support/tickets', supportLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT t.*,
+              (SELECT m.message FROM support_messages m WHERE m.ticket_id=t.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_preview,
+              (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id=t.id) AS message_count
+         FROM support_tickets t
+        WHERE t.user_id = ?
+        ORDER BY COALESCE(t.last_message_at, t.updated_at, t.created_at) DESC, t.id DESC`,
+      [userId]
+    );
+    res.json({ ok: true, tickets: rows.map(presentSupportTicket) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/support/tickets/:ticketId', supportLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const ticketId = parseTicketId(req.params.ticketId);
+    if (!ticketId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ticket id' });
+    const [[ticketRow]] = await pool.query(
+      `SELECT t.*,
+              (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id=t.id) AS message_count,
+              (SELECT sm.message FROM support_messages sm WHERE sm.ticket_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_preview
+         FROM support_tickets t
+        WHERE t.id=? AND t.user_id=?
+        LIMIT 1`,
+      [ticketId, userId]
+    );
+    if (!ticketRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Ticket not found' });
+    const [messages] = await pool.query(
+      `SELECT sm.*, u.username AS user_username, au.username AS admin_username
+         FROM support_messages sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN admin_users au ON au.id = sm.admin_id
+        WHERE sm.ticket_id = ?
+        ORDER BY sm.created_at ASC, sm.id ASC`,
+      [ticketId]
+    );
+    res.json({ ok: true, ticket: presentSupportTicket(ticketRow), messages: messages.map(presentSupportMessage) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/support/tickets', supportLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = SupportTicketCreateSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [ticketResult] = await conn.query(
+      "INSERT INTO support_tickets (user_id, title, status, last_message_at, last_sender) VALUES (?, ?, 'open', NOW(), 'user')",
+      [userId, payload.title]
+    );
+    const ticketId = ticketResult.insertId;
+    const [messageResult] = await conn.query(
+      'INSERT INTO support_messages (ticket_id, sender_type, user_id, admin_id, message) VALUES (?, "user", ?, NULL, ?)',
+      [ticketId, userId, payload.message]
+    );
+    await conn.commit();
+    const [[ticketRow]] = await pool.query(
+      `SELECT t.*,
+              (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id=t.id) AS message_count,
+              (SELECT sm.message FROM support_messages sm WHERE sm.ticket_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_preview
+         FROM support_tickets t
+        WHERE t.id=?`,
+      [ticketId]
+    );
+    const [[messageRow]] = await pool.query(
+      `SELECT sm.*, u.username AS user_username, au.username AS admin_username
+         FROM support_messages sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN admin_users au ON au.id = sm.admin_id
+        WHERE sm.id = ?`,
+      [messageResult.insertId]
+    );
+    res.json({
+      ok: true,
+      ticket: presentSupportTicket(ticketRow),
+      messages: messageRow ? [presentSupportMessage(messageRow)] : [],
+    });
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ticket payload', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/support/tickets/:ticketId/messages', supportLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const ticketId = parseTicketId(req.params.ticketId);
+    if (!ticketId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ticket id' });
+    const [[ticketRow]] = await pool.query('SELECT * FROM support_tickets WHERE id=? AND user_id=? LIMIT 1', [
+      ticketId,
+      userId,
+    ]);
+    if (!ticketRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Ticket not found' });
+    if (ticketRow.status === 'closed') return next({ status: 400, code: 'TICKET_CLOSED', message: 'Ticket is closed' });
+    const payload = SupportReplySchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [messageResult] = await conn.query(
+      'INSERT INTO support_messages (ticket_id, sender_type, user_id, admin_id, message) VALUES (?, "user", ?, NULL, ?)',
+      [ticketId, userId, payload.message]
+    );
+    await conn.query(
+      "UPDATE support_tickets SET status='open', last_message_at=NOW(), last_sender='user', closed_at=NULL, updated_at=NOW() WHERE id=?",
+      [ticketId]
+    );
+    await conn.commit();
+    const [[messageRow]] = await pool.query(
+      `SELECT sm.*, u.username AS user_username, au.username AS admin_username
+         FROM support_messages sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN admin_users au ON au.id = sm.admin_id
+        WHERE sm.id = ?`,
+      [messageResult.insertId]
+    );
+    const [[updatedTicket]] = await pool.query(
+      `SELECT t.*,
+              (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id=t.id) AS message_count,
+              (SELECT sm.message FROM support_messages sm WHERE sm.ticket_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_preview
+         FROM support_tickets t
+        WHERE t.id=?`,
+      [ticketId]
+    );
+    res.json({
+      ok: true,
+      ticket: presentSupportTicket(updatedTicket),
+      message: messageRow ? presentSupportMessage(messageRow) : null,
+    });
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid reply payload', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 
@@ -3815,6 +4021,189 @@ app.patch('/admin/withdrawals/:id', async (req, res, next) => {
     next(err);
   } finally {
     if (conn) conn.release();
+  }
+});
+
+app.get('/admin/support/tickets', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const statusRaw = (req.query.status || 'open').toString();
+    const status = SUPPORT_STATUSES.includes(statusRaw) || statusRaw === 'all' ? statusRaw : 'open';
+    const where = status === 'all' ? '' : 'WHERE t.status = ?';
+    const params = status === 'all' ? [] : [status];
+    const [rows] = await pool.query(
+      `SELECT t.*,
+              u.email AS user_email,
+              u.username AS user_username,
+              (SELECT m.message FROM support_messages m WHERE m.ticket_id=t.id ORDER BY m.created_at DESC, m.id DESC LIMIT 1) AS last_message_preview,
+              (SELECT COUNT(*) FROM support_messages m WHERE m.ticket_id=t.id) AS message_count
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+        ${where}
+        ORDER BY COALESCE(t.last_message_at, t.updated_at, t.created_at) DESC, t.id DESC
+        LIMIT 200`,
+      params
+    );
+    const tickets = rows.map((row) => ({
+      ...presentSupportTicket(row),
+      user_email: row.user_email,
+      user_username: row.user_username,
+    }));
+    res.json({ ok: true, tickets });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/admin/support/tickets/:ticketId', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const ticketId = parseTicketId(req.params.ticketId);
+    if (!ticketId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ticket id' });
+    const [[ticketRow]] = await pool.query(
+      `SELECT t.*, u.email AS user_email, u.username AS user_username,
+              (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id=t.id) AS message_count,
+              (SELECT sm.message FROM support_messages sm WHERE sm.ticket_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_preview
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+        WHERE t.id=?
+        LIMIT 1`,
+      [ticketId]
+    );
+    if (!ticketRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Ticket not found' });
+    const [messages] = await pool.query(
+      `SELECT sm.*, u.username AS user_username, au.username AS admin_username
+         FROM support_messages sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN admin_users au ON au.id = sm.admin_id
+        WHERE sm.ticket_id = ?
+        ORDER BY sm.created_at ASC, sm.id ASC`,
+      [ticketId]
+    );
+    res.json({
+      ok: true,
+      ticket: {
+        ...presentSupportTicket(ticketRow),
+        user_email: ticketRow.user_email,
+        user_username: ticketRow.user_username,
+      },
+      messages: messages.map(presentSupportMessage),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/admin/support/tickets/:ticketId/messages', async (req, res, next) => {
+  let conn;
+  try {
+    const admin = await requireAdmin(req);
+    const ticketId = parseTicketId(req.params.ticketId);
+    if (!ticketId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ticket id' });
+    const [[ticketRow]] = await pool.query(
+      `SELECT t.*, u.email AS user_email, u.username AS user_username
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+        WHERE t.id=?
+        LIMIT 1`,
+      [ticketId]
+    );
+    if (!ticketRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Ticket not found' });
+    if (ticketRow.status === 'closed') return next({ status: 400, code: 'TICKET_CLOSED', message: 'Ticket is closed' });
+    const payload = SupportReplySchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [messageResult] = await conn.query(
+      'INSERT INTO support_messages (ticket_id, sender_type, user_id, admin_id, message) VALUES (?, "admin", NULL, ?, ?)',
+      [ticketId, admin.id, payload.message]
+    );
+    await conn.query(
+      "UPDATE support_tickets SET status='answered', last_message_at=NOW(), last_sender='admin', updated_at=NOW() WHERE id=?",
+      [ticketId]
+    );
+    await conn.commit();
+    const [[messageRow]] = await pool.query(
+      `SELECT sm.*, u.username AS user_username, au.username AS admin_username
+         FROM support_messages sm
+         LEFT JOIN users u ON u.id = sm.user_id
+         LEFT JOIN admin_users au ON au.id = sm.admin_id
+        WHERE sm.id = ?`,
+      [messageResult.insertId]
+    );
+    const [[updatedTicket]] = await pool.query(
+      `SELECT t.*, u.email AS user_email, u.username AS user_username,
+              (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id=t.id) AS message_count,
+              (SELECT sm.message FROM support_messages sm WHERE sm.ticket_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_preview
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+        WHERE t.id=?`,
+      [ticketId]
+    );
+    res.json({
+      ok: true,
+      ticket: {
+        ...presentSupportTicket(updatedTicket),
+        user_email: updatedTicket.user_email,
+        user_username: updatedTicket.user_username,
+      },
+      message: messageRow ? presentSupportMessage(messageRow) : null,
+    });
+  } catch (err) {
+    if (conn) await conn.rollback().catch(() => {});
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid reply payload', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.patch('/admin/support/tickets/:ticketId/status', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const ticketId = parseTicketId(req.params.ticketId);
+    if (!ticketId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ticket id' });
+    const payload = SupportStatusUpdateSchema.parse(req.body || {});
+    const [[ticketRow]] = await pool.query(
+      `SELECT t.*, u.email AS user_email, u.username AS user_username
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+        WHERE t.id=?
+        LIMIT 1`,
+      [ticketId]
+    );
+    if (!ticketRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Ticket not found' });
+    await pool.query(
+      `UPDATE support_tickets
+          SET status=?,
+              closed_at = CASE WHEN ? = 'closed' THEN NOW() ELSE NULL END,
+              updated_at = NOW()
+        WHERE id=?`,
+      [payload.status, payload.status, ticketId]
+    );
+    const [[updatedTicket]] = await pool.query(
+      `SELECT t.*, u.email AS user_email, u.username AS user_username,
+              (SELECT COUNT(*) FROM support_messages sm WHERE sm.ticket_id=t.id) AS message_count,
+              (SELECT sm.message FROM support_messages sm WHERE sm.ticket_id=t.id ORDER BY sm.created_at DESC, sm.id DESC LIMIT 1) AS last_message_preview
+         FROM support_tickets t
+         JOIN users u ON u.id = t.user_id
+        WHERE t.id=?`,
+      [ticketId]
+    );
+    res.json({
+      ok: true,
+      ticket: {
+        ...presentSupportTicket(updatedTicket),
+        user_email: updatedTicket.user_email,
+        user_username: updatedTicket.user_username,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid status payload', details: err.flatten() });
+    }
+    next(err);
   }
 });
 

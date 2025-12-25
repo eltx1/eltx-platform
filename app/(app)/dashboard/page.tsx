@@ -16,6 +16,7 @@ import {
   ShoppingCart,
   Gift,
   Handshake,
+  LifeBuoy,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { apiFetch } from '../../lib/api';
@@ -221,6 +222,12 @@ export default function DashboardPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
             <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
+            <SectionCard
+              title={t.dashboard.cards.support.title}
+              subtitle={t.dashboard.cards.support.subtitle}
+              href="/support"
+              icon={LifeBuoy}
+            />
             <SectionCard
               title={t.dashboard.cards.kyc.title}
               subtitle={t.dashboard.cards.kyc.subtitle}
