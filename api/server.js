@@ -465,7 +465,7 @@ const sessionCookie = {
   maxAge: USER_SESSION_TTL_SECONDS * 1000,
 };
 
-const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 2));
+const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 24));
 const adminSessionCookie = {
   httpOnly: true,
   sameSite: IS_PROD ? 'strict' : 'lax',
