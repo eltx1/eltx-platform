@@ -163,6 +163,10 @@ type EmailSettingsResponse = {
   smtp: { ready: boolean; missing: string[]; host?: string | null; from?: string | null; user?: string | null };
 };
 
+type EmailAnnouncementResponse = {
+  queued: number;
+};
+
 type AdminKycRequest = {
   id: number;
   user_id: number;
@@ -609,6 +613,14 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
   const [smtp, setSmtp] = useState<EmailSettingsResponse['smtp']>({ ready: false, missing: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [announcement, setAnnouncement] = useState({
+    subject: '',
+    message: '',
+    subject_ar: '',
+    message_ar: '',
+  });
+  const [queuedCount, setQueuedCount] = useState<number | null>(null);
+  const [sendingAnnouncement, setSendingAnnouncement] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -647,6 +659,31 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
       onNotify('Email settings updated', 'success');
     } else {
       onNotify(res.error || 'Failed to update email settings', 'error');
+    }
+  };
+
+  const submitAnnouncement = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!announcement.subject.trim() || !announcement.message.trim()) {
+      onNotify('Subject and message are required', 'error');
+      return;
+    }
+    setSendingAnnouncement(true);
+    const res = await apiFetch<EmailAnnouncementResponse>('/admin/email/announcement', {
+      method: 'POST',
+      body: JSON.stringify({
+        subject: announcement.subject,
+        message: announcement.message,
+        subject_ar: announcement.subject_ar || undefined,
+        message_ar: announcement.message_ar || undefined,
+      }),
+    });
+    setSendingAnnouncement(false);
+    if (res.ok) {
+      setQueuedCount(res.data.queued);
+      onNotify(`Announcement queued to ${res.data.queued} users`, 'success');
+    } else {
+      onNotify(res.error || 'Failed to queue announcement', 'error');
     }
   };
 
@@ -841,6 +878,80 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
               >
                 {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                 Save changes
+              </button>
+            </div>
+          </form>
+
+          <form
+            onSubmit={submitAnnouncement}
+            className="space-y-4 rounded-2xl border border-amber-200/20 bg-amber-50/5 p-5 shadow-inner shadow-amber-900/10"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-wide text-amber-100/70">Broadcast</p>
+                <h3 className="text-lg font-semibold text-white">Public announcement</h3>
+                <p className="text-sm text-white/60">إبعت بريد عام لكل المستخدمين في طابور بطيء لتجنب السبام.</p>
+              </div>
+              {queuedCount !== null && (
+                <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs text-white/80">
+                  Last queued: {queuedCount} emails
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-2 text-sm text-white/70">
+                <span>Subject (English)</span>
+                <input
+                  value={announcement.subject}
+                  onChange={(e) => setAnnouncement({ ...announcement, subject: e.target.value })}
+                  placeholder="Maintenance notice"
+                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-white/70">
+                <span>Subject (Arabic)</span>
+                <input
+                  value={announcement.subject_ar}
+                  onChange={(e) => setAnnouncement({ ...announcement, subject_ar: e.target.value })}
+                  placeholder="تنويه صيانة"
+                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-white/70">
+                <span>Body (English)</span>
+                <textarea
+                  rows={5}
+                  value={announcement.message}
+                  onChange={(e) => setAnnouncement({ ...announcement, message: e.target.value })}
+                  placeholder={'Hi ELTX family,\nWe are rolling out new pricing updates today.'}
+                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+                />
+              </label>
+              <label className="space-y-2 text-sm text-white/70">
+                <span>النص بالعربي</span>
+                <textarea
+                  rows={5}
+                  value={announcement.message_ar}
+                  onChange={(e) => setAnnouncement({ ...announcement, message_ar: e.target.value })}
+                  placeholder={'أهلا يا أبطال ELTX،\nعندنا تحديثات أسعار جديدة هتتنزل النهاردة.'}
+                  className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+                />
+              </label>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/60">
+              <div className="space-y-1">
+                <p>الإرسال بيتم عبر طابور بطيء (delay) علشان نحمي الـ SMTP ونقلل احتمالية السبام.</p>
+                <p>بيتم اختيار اللغة حسب إعداد المستخدم، ولو مفيش عربي بنبعت النسخة الانجليزية.</p>
+              </div>
+              <button
+                type="submit"
+                disabled={sendingAnnouncement}
+                className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-400 disabled:opacity-60"
+              >
+                {sendingAnnouncement ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Send announcement
               </button>
             </div>
           </form>
