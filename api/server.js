@@ -5013,7 +5013,19 @@ app.get('/admin/users/:id', async (req, res, next) => {
       };
     });
 
-    res.json({ ok: true, user, balances, staking, fiat, deposits, transfers });
+    const [kycRows] = await pool.query(
+      `SELECT kr.*, u.email, u.username, u.language, au.username AS reviewer_username
+         FROM kyc_requests kr
+         JOIN users u ON u.id = kr.user_id
+         LEFT JOIN admin_users au ON au.id = kr.reviewed_by
+        WHERE kr.user_id = ? AND kr.status = ?
+        ORDER BY kr.reviewed_at DESC, kr.updated_at DESC, kr.created_at DESC
+        LIMIT 1`,
+      [userId, 'approved']
+    );
+    const approvedKyc = kycRows.length ? presentKycRow(kycRows[0]) : null;
+
+    res.json({ ok: true, user, balances, staking, fiat, deposits, transfers, kyc: approvedKyc });
   } catch (err) {
     next(err);
   }
