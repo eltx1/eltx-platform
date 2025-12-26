@@ -586,6 +586,13 @@ const EmailSettingsSchema = z.object({
   admin_support_enabled: z.boolean().optional(),
 });
 
+const EmailAnnouncementSchema = z.object({
+  subject: z.string().trim().min(3).max(150),
+  message: z.string().trim().min(3).max(5000),
+  subject_ar: z.string().trim().max(150).optional(),
+  message_ar: z.string().trim().max(5000).optional(),
+});
+
 const UserUpdateSchema = z
   .object({
     email: z.string().email().optional(),
@@ -1518,7 +1525,10 @@ let cachedEmailLoadedAt = 0;
 let cachedTransporter = null;
 let cachedTransportSignature = '';
 const emailQueue = [];
+const emailLowPriorityQueue = [];
 let emailQueueActive = false;
+let emailLowPriorityActive = false;
+const LOW_PRIORITY_EMAIL_DELAY_MS = 750;
 
 function getSmtpStatus() {
   const host = normalizeSettingValue(process.env.SMTP_HOST);
@@ -1976,7 +1986,26 @@ const EMAIL_JOB_CONFIG = {
     shouldSend: (settings) => settings.adminSupportEnabled && settings.adminRecipients.length > 0,
     recipients: (_, settings) => settings.adminRecipients,
   },
+  announcement: {
+    shouldSend: (settings) => settings.enabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
 };
+
+function buildCustomEmailTemplate(subject, message, language = 'en') {
+  const normalizedSubject = normalizeSettingValue(subject);
+  const bodyLines = (message || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!normalizedSubject || !bodyLines.length) return null;
+  const lang = language === 'ar' ? 'ar' : 'en';
+  return {
+    subject: normalizedSubject,
+    text: bodyLines.join('\n'),
+    html: wrapEmailHtml(normalizedSubject, bodyLines, lang),
+  };
+}
 
 async function handleEmailJob(job) {
   const settings = await readEmailSettings();
@@ -1992,7 +2021,10 @@ async function handleEmailJob(job) {
     return;
   }
 
-  const template = renderEmailTemplate(job.kind, job.language || 'en', job.data || {});
+  const template =
+    job.kind === 'announcement'
+      ? job.data?.template || null
+      : renderEmailTemplate(job.kind, job.language || 'en', job.data || {});
   if (!template) return;
 
   const transporter = buildTransporter(smtpStatus);
@@ -2039,6 +2071,76 @@ function enqueueEmail(job) {
       processEmailQueue();
     });
   }
+}
+
+async function processLowPriorityQueue() {
+  if (emailLowPriorityActive) return;
+  emailLowPriorityActive = true;
+  while (emailLowPriorityQueue.length) {
+    const next = emailLowPriorityQueue.shift();
+    try {
+      await handleEmailJob(next);
+    } catch (err) {
+      console.error('[email] unexpected error', err?.message || err);
+    }
+    if (LOW_PRIORITY_EMAIL_DELAY_MS > 0) {
+      await new Promise((resolve) => setTimeout(resolve, LOW_PRIORITY_EMAIL_DELAY_MS));
+    }
+  }
+  emailLowPriorityActive = false;
+}
+
+function enqueueLowPriorityEmail(job) {
+  emailLowPriorityQueue.push(job);
+  if (!emailLowPriorityActive) {
+    setImmediate(() => {
+      processLowPriorityQueue();
+    });
+  }
+}
+
+async function queueAnnouncementEmails(payload, requestId, initiatedBy) {
+  const templates = {
+    en: buildCustomEmailTemplate(payload.subject, payload.message, 'en'),
+    ar: buildCustomEmailTemplate(
+      payload.subject_ar || payload.subject,
+      payload.message_ar || payload.message,
+      'ar'
+    ),
+  };
+
+  if (!templates.en) {
+    throw { status: 400, code: 'BAD_INPUT', message: 'Subject and message are required' };
+  }
+
+  const batchSize = 500;
+  let lastId = 0;
+  let queued = 0;
+  // walk users in ascending ID order to avoid heavy OFFSET scans
+  while (true) {
+    const [rows] = await pool.query(
+      'SELECT id, email, language FROM users WHERE email IS NOT NULL AND email != "" AND id > ? ORDER BY id ASC LIMIT ?',
+      [lastId, batchSize]
+    );
+    if (!rows.length) break;
+    for (const row of rows) {
+      lastId = row.id;
+      if (!row.email) continue;
+      const language = row.language === 'ar' ? 'ar' : 'en';
+      const template = language === 'ar' && templates.ar ? templates.ar : templates.en;
+      if (!template) continue;
+      enqueueLowPriorityEmail({
+        kind: 'announcement',
+        to: row.email,
+        language,
+        data: { template, initiatedBy: initiatedBy || undefined },
+        requestId,
+      });
+      queued += 1;
+    }
+    if (rows.length < batchSize) break;
+  }
+  return queued;
 }
 
 async function readAiSettings(conn = pool) {
@@ -5065,6 +5167,23 @@ app.patch('/admin/email/settings', async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid email settings', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.post('/admin/email/announcement', async (req, res, next) => {
+  try {
+    const admin = await requireAdmin(req);
+    const payload = EmailAnnouncementSchema.parse(req.body || {});
+    const settings = await readEmailSettings();
+    if (!settings.enabled) return next({ status: 400, code: 'EMAIL_DISABLED', message: 'Email notifications are disabled' });
+    const smtp = getSmtpStatus();
+    if (!smtp.ready) return next({ status: 400, code: 'SMTP_NOT_READY', message: 'SMTP is not configured' });
+    const queued = await queueAnnouncementEmails(payload, req.requestId, admin?.username || admin?.email);
+    res.json({ ok: true, queued });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid announcement payload', details: err.flatten() });
     next(err);
   }
 });
