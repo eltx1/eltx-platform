@@ -551,6 +551,10 @@ const EmailSettingsSchema = z.object({
   admin_kyc_enabled: z.boolean().optional(),
   user_p2p_enabled: z.boolean().optional(),
   admin_p2p_enabled: z.boolean().optional(),
+  user_withdrawal_enabled: z.boolean().optional(),
+  admin_withdrawal_enabled: z.boolean().optional(),
+  user_support_enabled: z.boolean().optional(),
+  admin_support_enabled: z.boolean().optional(),
 });
 
 const UserUpdateSchema = z
@@ -1159,6 +1163,152 @@ function enqueueAdminP2PEmail(context, status, note) {
   });
 }
 
+function shrinkAddress(address) {
+  if (!address) return 'N/A';
+  if (address.length <= 12) return address;
+  return `${address.slice(0, 6)}…${address.slice(-6)}`;
+}
+
+function getWithdrawalStatusLabel(status, lang = 'en') {
+  const labels = {
+    pending: { en: 'pending review', ar: 'قيد المراجعة' },
+    approved: { en: 'approved', ar: 'تمت الموافقة' },
+    completed: { en: 'completed', ar: 'تم التنفيذ' },
+    rejected: { en: 'rejected', ar: 'مرفوض' },
+  };
+  const fallback = { en: status || 'updated', ar: status || 'محدّث' };
+  const label = labels[status] || fallback;
+  return (lang === 'ar' ? label.ar : label.en) || fallback.en;
+}
+
+function enqueueWithdrawalEmails(event, withdrawal, userContact) {
+  if (!withdrawal) return;
+  const lang = userContact?.language || 'en';
+  const statusLabel = getWithdrawalStatusLabel(withdrawal.status, lang);
+  const amountLabel = `${withdrawal.amount_formatted || withdrawal.amount_wei} ${withdrawal.asset || ELTX_SYMBOL}`;
+  const destination = shrinkAddress(withdrawal.address);
+  const chain = withdrawal.chain || '—';
+  const reason = withdrawal.reason || null;
+  const rejection = withdrawal.reject_reason || null;
+
+  if (userContact?.email) {
+    const baseData = {
+      amount: amountLabel,
+      chain,
+      destination,
+      reason,
+      status: statusLabel,
+      rejection: rejection || null,
+    };
+    const kind = event === 'created' ? 'user-withdrawal-created' : 'user-withdrawal-updated';
+    enqueueEmail({
+      kind,
+      to: userContact.email,
+      language: lang,
+      data: { ...baseData, username: userContact.username },
+    });
+  }
+
+  enqueueEmail({
+    kind: event === 'created' ? 'admin-withdrawal-created' : 'admin-withdrawal-updated',
+    data: {
+      amount: amountLabel,
+      chain,
+      destination,
+      reason,
+      status: getWithdrawalStatusLabel(withdrawal.status, 'en'),
+      rejection: rejection || null,
+      userEmail: userContact?.email,
+      userUsername: userContact?.username,
+      requestId: withdrawal.id,
+    },
+  });
+}
+
+function enqueueSupportEmails(kind, payload) {
+  if (!payload) return;
+  if (kind === 'user-created' && payload.user?.email) {
+    enqueueEmail({
+      kind: 'user-support-created',
+      to: payload.user.email,
+      language: payload.user.language || 'en',
+      data: {
+        ticketId: payload.ticketId,
+        title: payload.title,
+        message: payload.message,
+        username: payload.user.username,
+      },
+    });
+  }
+
+  if (kind === 'admin-created') {
+    enqueueEmail({
+      kind: 'admin-support-created',
+      data: {
+        ticketId: payload.ticketId,
+        title: payload.title,
+        message: payload.message,
+        userEmail: payload.user?.email,
+        userUsername: payload.user?.username,
+      },
+    });
+  }
+
+  if (kind === 'user-replied') {
+    const sender = payload.user?.username || payload.user?.email || 'user';
+    if (payload.user?.email) {
+      enqueueEmail({
+        kind: 'user-support-reply',
+        to: payload.user.email,
+        language: payload.user.language || 'en',
+        data: {
+          ticketId: payload.ticketId,
+          title: payload.title,
+          message: payload.message,
+          username: payload.user.username,
+        },
+      });
+    }
+    enqueueEmail({
+      kind: 'admin-support-reply',
+      data: {
+        ticketId: payload.ticketId,
+        title: payload.title,
+        message: payload.message,
+        userEmail: payload.user?.email,
+        userUsername: payload.user?.username,
+        sender,
+      },
+    });
+  }
+
+  if (kind === 'admin-replied' && payload.user?.email) {
+    const sender = payload.adminUsername || 'admin';
+    enqueueEmail({
+      kind: 'user-support-reply',
+      to: payload.user.email,
+      language: payload.user.language || 'en',
+      data: {
+        ticketId: payload.ticketId,
+        title: payload.title,
+        message: payload.message,
+        username: payload.user.username,
+      },
+    });
+    enqueueEmail({
+      kind: 'admin-support-reply',
+      data: {
+        ticketId: payload.ticketId,
+        title: payload.title,
+        message: payload.message,
+        userEmail: payload.user?.email,
+        userUsername: payload.user?.username,
+        sender,
+      },
+    });
+  }
+}
+
 function presentAdminRow(row) {
   if (!row) return null;
   const { password_hash, ...rest } = row;
@@ -1306,6 +1456,13 @@ function presentSupportMessage(row) {
   };
 }
 
+async function getUserContact(userId, conn = pool) {
+  const executor = conn.query ? conn : pool;
+  const [[row]] = await executor.query('SELECT email, username, language FROM users WHERE id=? LIMIT 1', [userId]);
+  if (!row) return null;
+  return { email: row.email, username: row.username, language: row.language || 'en' };
+}
+
 async function readReferralSettings(conn = pool) {
   const reward = await getPlatformSettingValue(REFERRAL_REWARD_SETTING, DEFAULT_REFERRAL_REWARD, conn);
   return { reward_eltx: trimDecimal(reward) };
@@ -1320,6 +1477,10 @@ const EMAIL_SETTING_KEYS = {
   adminKyc: 'email_admin_kyc_enabled',
   userP2P: 'email_user_p2p_enabled',
   adminP2P: 'email_admin_p2p_enabled',
+  userWithdrawal: 'email_user_withdrawal_enabled',
+  adminWithdrawal: 'email_admin_withdrawal_enabled',
+  userSupport: 'email_user_support_enabled',
+  adminSupport: 'email_admin_support_enabled',
 };
 
 const EMAIL_SETTINGS_CACHE_MS = 60 * 1000;
@@ -1372,6 +1533,22 @@ async function readEmailSettings(conn = pool, { forceReload = false } = {}) {
   const adminKycEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminKyc, '1', conn), true);
   const userP2pEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.userP2P, '1', conn), true);
   const adminP2pEnabled = parseBooleanSetting(await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminP2P, '1', conn), true);
+  const userWithdrawalEnabled = parseBooleanSetting(
+    await getPlatformSettingValue(EMAIL_SETTING_KEYS.userWithdrawal, '1', conn),
+    true
+  );
+  const adminWithdrawalEnabled = parseBooleanSetting(
+    await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminWithdrawal, '1', conn),
+    true
+  );
+  const userSupportEnabled = parseBooleanSetting(
+    await getPlatformSettingValue(EMAIL_SETTING_KEYS.userSupport, '1', conn),
+    true
+  );
+  const adminSupportEnabled = parseBooleanSetting(
+    await getPlatformSettingValue(EMAIL_SETTING_KEYS.adminSupport, '1', conn),
+    true
+  );
 
   const settings = {
     enabled,
@@ -1382,6 +1559,10 @@ async function readEmailSettings(conn = pool, { forceReload = false } = {}) {
     adminKycEnabled,
     userP2pEnabled,
     adminP2pEnabled,
+    userWithdrawalEnabled,
+    adminWithdrawalEnabled,
+    userSupportEnabled,
+    adminSupportEnabled,
   };
 
   if (conn === pool) {
@@ -1406,8 +1587,14 @@ function presentEmailSettings(settings) {
     admin_kyc_enabled: !!settings.adminKycEnabled,
     user_p2p_enabled: !!settings.userP2pEnabled,
     admin_p2p_enabled: !!settings.adminP2pEnabled,
+    user_withdrawal_enabled: !!settings.userWithdrawalEnabled,
+    admin_withdrawal_enabled: !!settings.adminWithdrawalEnabled,
+    user_support_enabled: !!settings.userSupportEnabled,
+    admin_support_enabled: !!settings.adminSupportEnabled,
   };
 }
+
+const PLATFORM_URL = 'https://eltx.online';
 
 function wrapEmailHtml(title, bodyLines, lang = 'en') {
   const direction = lang === 'ar' ? 'rtl' : 'ltr';
@@ -1422,7 +1609,8 @@ function wrapEmailHtml(title, bodyLines, lang = 'en') {
     `<div style="background:#0f172a;border:1px solid #1e293b;border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,0.35);">` +
     `<h2 style="margin:0 0 12px 0;color:#93c5fd;font-size:18px;text-align:${align};">${escapeHtml(title)}</h2>` +
     body +
-    `</div><p style="color:#94a3b8;font-size:12px;margin:12px 0 0;text-align:${align};">ELTX Platform</p></div>`;
+    `<p style="margin:12px 0 0 0;text-align:${align};"><a href="${PLATFORM_URL}" style="color:#60a5fa;text-decoration:none;font-weight:600;" target="_blank" rel="noreferrer">ELTX</a></p>` +
+    `</div><p style="color:#94a3b8;font-size:12px;margin:12px 0 0;text-align:${align};">ELTX Platform · <a href="${PLATFORM_URL}" style="color:#60a5fa;text-decoration:none;" target="_blank" rel="noreferrer">${PLATFORM_URL}</a></p></div>`;
 }
 
 const EMAIL_TEMPLATE_BUILDERS = {
@@ -1547,6 +1735,142 @@ const EMAIL_TEMPLATE_BUILDERS = {
       return { subject: 'P2P trade update', body: lines };
     },
   },
+  'user-withdrawal-created': {
+    en: (data) => {
+      const lines = [
+        'We received your withdrawal request and it is being reviewed by the team.',
+        data?.amount ? `Amount: ${data.amount}` : null,
+        data?.chain ? `Chain: ${data.chain}` : null,
+        data?.destination ? `Destination: ${data.destination}` : null,
+        data?.reason ? `Reason: ${data.reason}` : null,
+        'You will get an email when the status changes.',
+      ].filter(Boolean);
+      return { subject: 'Withdrawal request received', body: lines };
+    },
+    ar: (data) => {
+      const lines = [
+        'استلمنا طلب السحب وجاري مراجعته من الفريق.',
+        data?.amount ? `القيمة: ${data.amount}` : null,
+        data?.chain ? `الشبكة: ${data.chain}` : null,
+        data?.destination ? `العنوان: ${data.destination}` : null,
+        data?.reason ? `السبب: ${data.reason}` : null,
+        'هنبعتلك ايميل أول ما الحالة تتغير.',
+      ].filter(Boolean);
+      return { subject: 'تم استلام طلب السحب', body: lines };
+    },
+  },
+  'user-withdrawal-updated': {
+    en: (data) => {
+      const lines = [
+        `Your withdrawal status is now ${data?.status || 'updated'}.`,
+        data?.amount ? `Amount: ${data.amount}` : null,
+        data?.chain ? `Chain: ${data.chain}` : null,
+        data?.destination ? `Destination: ${data.destination}` : null,
+        data?.rejection ? `Reason: ${data.rejection}` : null,
+      ].filter(Boolean);
+      return { subject: 'Withdrawal status changed', body: lines };
+    },
+    ar: (data) => {
+      const lines = [
+        `حالة السحب بقت ${data?.status || 'محدّثة'}.`,
+        data?.amount ? `القيمة: ${data.amount}` : null,
+        data?.chain ? `الشبكة: ${data.chain}` : null,
+        data?.destination ? `العنوان: ${data.destination}` : null,
+        data?.rejection ? `السبب: ${data.rejection}` : null,
+      ].filter(Boolean);
+      return { subject: 'تم تحديث حالة السحب', body: lines };
+    },
+  },
+  'admin-withdrawal-created': {
+    en: (data) => {
+      const lines = [
+        `New withdrawal request #${data?.requestId ?? '—'}.`,
+        data?.userUsername || data?.userEmail ? `User: ${data.userUsername || data.userEmail} (${data.userEmail || 'N/A'})` : null,
+        data?.amount ? `Amount: ${data.amount}` : null,
+        data?.chain ? `Chain: ${data.chain}` : null,
+        data?.destination ? `Destination: ${data.destination}` : null,
+        data?.reason ? `Reason: ${data.reason}` : null,
+        data?.status ? `Status: ${data.status}` : null,
+      ].filter(Boolean);
+      return { subject: 'Admin alert: withdrawal request', body: lines };
+    },
+  },
+  'admin-withdrawal-updated': {
+    en: (data) => {
+      const lines = [
+        `Withdrawal #${data?.requestId ?? '—'} status changed.`,
+        data?.userUsername || data?.userEmail ? `User: ${data.userUsername || data.userEmail} (${data.userEmail || 'N/A'})` : null,
+        data?.amount ? `Amount: ${data.amount}` : null,
+        data?.chain ? `Chain: ${data.chain}` : null,
+        data?.destination ? `Destination: ${data.destination}` : null,
+        data?.reason ? `Reason: ${data.reason}` : null,
+        data?.rejection ? `Rejection: ${data.rejection}` : null,
+        data?.status ? `Status: ${data.status}` : null,
+      ].filter(Boolean);
+      return { subject: 'Withdrawal updated', body: lines };
+    },
+  },
+  'user-support-created': {
+    en: (data) => {
+      const lines = [
+        `We got your support ticket #${data?.ticketId ?? '—'}.`,
+        data?.title ? `Title: ${data.title}` : null,
+        data?.message ? `Message: ${data.message}` : null,
+        'We will get back to you soon via email and your dashboard.',
+      ].filter(Boolean);
+      return { subject: 'Support ticket received', body: lines };
+    },
+    ar: (data) => {
+      const lines = [
+        `استلمنا تذكرتك رقم ${data?.ticketId ?? '—'}.`,
+        data?.title ? `العنوان: ${data.title}` : null,
+        data?.message ? `الرسالة: ${data.message}` : null,
+        'هنرد عليك بأسرع وقت على الايميل والداشبورد.',
+      ].filter(Boolean);
+      return { subject: 'تم استلام تذكرتك', body: lines };
+    },
+  },
+  'user-support-reply': {
+    en: (data) => {
+      const lines = [
+        `New reply on ticket #${data?.ticketId ?? '—'}.`,
+        data?.title ? `Title: ${data.title}` : null,
+        data?.message ? `Message: ${data.message}` : null,
+      ].filter(Boolean);
+      return { subject: 'Support ticket update', body: lines };
+    },
+    ar: (data) => {
+      const lines = [
+        `رد جديد على التذكرة رقم ${data?.ticketId ?? '—'}.`,
+        data?.title ? `العنوان: ${data.title}` : null,
+        data?.message ? `الرسالة: ${data.message}` : null,
+      ].filter(Boolean);
+      return { subject: 'تحديث على التذكرة', body: lines };
+    },
+  },
+  'admin-support-created': {
+    en: (data) => {
+      const lines = [
+        `New support ticket #${data?.ticketId ?? '—'}.`,
+        data?.userUsername || data?.userEmail ? `User: ${data.userUsername || data.userEmail} (${data.userEmail || 'N/A'})` : null,
+        data?.title ? `Title: ${data.title}` : null,
+        data?.message ? `Message: ${data.message}` : null,
+      ].filter(Boolean);
+      return { subject: 'Admin alert: support ticket', body: lines };
+    },
+  },
+  'admin-support-reply': {
+    en: (data) => {
+      const sender = data?.sender || 'user';
+      const lines = [
+        `Reply on ticket #${data?.ticketId ?? '—'} from ${sender}.`,
+        data?.userUsername || data?.userEmail ? `User: ${data.userUsername || data.userEmail} (${data.userEmail || 'N/A'})` : null,
+        data?.title ? `Title: ${data.title}` : null,
+        data?.message ? `Message: ${data.message}` : null,
+      ].filter(Boolean);
+      return { subject: 'Support reply alert', body: lines };
+    },
+  },
 };
 
 function renderEmailTemplate(kind, language, data) {
@@ -1556,7 +1880,10 @@ function renderEmailTemplate(kind, language, data) {
   const builder = template[lang] || template.en;
   if (!builder) return null;
   const { subject, body } = builder(data || {});
-  return { subject, text: (body || []).join('\n'), html: wrapEmailHtml(subject, body || [], lang) };
+  const lines = [...(body || [])];
+  const platformLine = lang === 'ar' ? `زور المنصة: ${PLATFORM_URL}` : `Visit ELTX online: ${PLATFORM_URL}`;
+  lines.push(platformLine);
+  return { subject, text: lines.join('\n'), html: wrapEmailHtml(subject, lines, lang) };
 }
 
 const EMAIL_JOB_CONFIG = {
@@ -1586,6 +1913,38 @@ const EMAIL_JOB_CONFIG = {
   },
   'admin-p2p-trade': {
     shouldSend: (settings) => settings.adminP2pEnabled && settings.adminRecipients.length > 0,
+    recipients: (_, settings) => settings.adminRecipients,
+  },
+  'user-withdrawal-created': {
+    shouldSend: (settings) => settings.userWithdrawalEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'user-withdrawal-updated': {
+    shouldSend: (settings) => settings.userWithdrawalEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'admin-withdrawal-created': {
+    shouldSend: (settings) => settings.adminWithdrawalEnabled && settings.adminRecipients.length > 0,
+    recipients: (_, settings) => settings.adminRecipients,
+  },
+  'admin-withdrawal-updated': {
+    shouldSend: (settings) => settings.adminWithdrawalEnabled && settings.adminRecipients.length > 0,
+    recipients: (_, settings) => settings.adminRecipients,
+  },
+  'user-support-created': {
+    shouldSend: (settings) => settings.userSupportEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'user-support-reply': {
+    shouldSend: (settings) => settings.userSupportEnabled,
+    recipients: (job) => (job.to ? [job.to] : []),
+  },
+  'admin-support-created': {
+    shouldSend: (settings) => settings.adminSupportEnabled && settings.adminRecipients.length > 0,
+    recipients: (_, settings) => settings.adminRecipients,
+  },
+  'admin-support-reply': {
+    shouldSend: (settings) => settings.adminSupportEnabled && settings.adminRecipients.length > 0,
     recipients: (_, settings) => settings.adminRecipients,
   },
 };
@@ -3090,6 +3449,15 @@ app.post('/support/tickets', supportLimiter, async (req, res, next) => {
         WHERE sm.id = ?`,
       [messageResult.insertId]
     );
+    const userContact = await getUserContact(userId, conn);
+    const ticketPayload = {
+      ticketId,
+      title: payload.title,
+      message: payload.message,
+      user: userContact,
+    };
+    enqueueSupportEmails('user-created', ticketPayload);
+    enqueueSupportEmails('admin-created', ticketPayload);
     res.json({
       ok: true,
       ticket: presentSupportTicket(ticketRow),
@@ -3146,6 +3514,13 @@ app.post('/support/tickets/:ticketId/messages', supportLimiter, async (req, res,
         WHERE t.id=?`,
       [ticketId]
     );
+    const userContact = await getUserContact(userId, conn);
+    enqueueSupportEmails('user-replied', {
+      ticketId,
+      title: updatedTicket.title,
+      message: payload.message,
+      user: userContact,
+    });
     res.json({
       ok: true,
       ticket: presentSupportTicket(updatedTicket),
@@ -4019,7 +4394,14 @@ app.patch('/admin/withdrawals/:id', async (req, res, next) => {
         LIMIT 1`,
       [id]
     );
-    res.json({ ok: true, request: formatWithdrawalRow(updated) });
+    const userContact = await getUserContact(updated.user_id, conn);
+    const formatted = formatWithdrawalRow({
+      ...updated,
+      user_email: userContact?.email || updated.user_email,
+      user_username: userContact?.username || updated.user_username,
+    });
+    enqueueWithdrawalEmails('updated', formatted, userContact);
+    res.json({ ok: true, request: formatted });
   } catch (err) {
     if (conn) {
       try {
@@ -4150,6 +4532,14 @@ app.post('/admin/support/tickets/:ticketId/messages', async (req, res, next) => 
         WHERE t.id=?`,
       [ticketId]
     );
+    const userContact = await getUserContact(ticketRow.user_id, conn);
+    enqueueSupportEmails('admin-replied', {
+      ticketId,
+      title: updatedTicket.title,
+      message: payload.message,
+      user: userContact,
+      adminUsername: admin.username,
+    });
     res.json({
       ok: true,
       ticket: {
@@ -4620,6 +5010,14 @@ app.patch('/admin/email/settings', async (req, res, next) => {
       tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userP2P, payload.user_p2p_enabled ? '1' : '0'));
     if (payload.admin_p2p_enabled !== undefined)
       tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminP2P, payload.admin_p2p_enabled ? '1' : '0'));
+    if (payload.user_withdrawal_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userWithdrawal, payload.user_withdrawal_enabled ? '1' : '0'));
+    if (payload.admin_withdrawal_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminWithdrawal, payload.admin_withdrawal_enabled ? '1' : '0'));
+    if (payload.user_support_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.userSupport, payload.user_support_enabled ? '1' : '0'));
+    if (payload.admin_support_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(EMAIL_SETTING_KEYS.adminSupport, payload.admin_support_enabled ? '1' : '0'));
     await Promise.all(tasks);
     invalidateEmailSettingsCache();
     const settings = presentEmailSettings(await readEmailSettings(pool, { forceReload: true }));
@@ -6468,10 +6866,11 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
       [userId, ELTX_SYMBOL, decimals, amountWei.toString(), payload.chain, payload.address, reason]
     );
     await conn.commit();
-    const [[row]] = await conn.query('SELECT * FROM wallet_withdrawals WHERE id=? LIMIT 1', [
-      insert.insertId,
-    ]);
-    res.json({ ok: true, request: formatWithdrawalRow(row) });
+    const [[row]] = await conn.query('SELECT * FROM wallet_withdrawals WHERE id=? LIMIT 1', [insert.insertId]);
+    const userContact = await getUserContact(userId, conn);
+    const formatted = formatWithdrawalRow({ ...row, user_email: userContact?.email, user_username: userContact?.username });
+    enqueueWithdrawalEmails('created', formatted, userContact);
+    res.json({ ok: true, request: formatted });
   } catch (err) {
     if (conn) {
       try {
