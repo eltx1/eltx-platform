@@ -535,6 +535,47 @@ export const dict = {
       },
     },
     home: {
+      seoIntro: {
+        kicker: 'Crypto Trading Platform',
+        title: 'Trade, swap, and stake ELTX with institutional-grade security.',
+        description:
+          'ELTX is a bilingual crypto exchange built for fast on-chain execution, secure wallets, and simple onboarding. Buy ELTX with cards, move assets across chains, and manage P2P deals with deep liquidity—all in one streamlined experience.',
+        secondary:
+          'The homepage is structured with concise headlines, descriptive copy, and metadata that reads naturally for humans while staying search-friendly.',
+        highlights: {
+          title: 'Search-friendly experience',
+          items: [
+            'Human-first headlines and meta tags tuned for crypto discovery.',
+            'Clear calls to action without keyword stuffing or repetition.',
+            'Fast loading sections that keep engagement strong on mobile.',
+          ],
+        },
+        trust: {
+          title: 'User-first trust signals',
+          items: [
+            'Multilingual support for English and Arabic across key flows.',
+            'Audited smart contracts, monitored sessions, and active support.',
+            'Transparent fees and P2P protections to keep trades smooth.',
+          ],
+        },
+        why: {
+          title: 'Why choose ELTX?',
+          copy: 'Built to remove friction for first-time users and active traders: quick KYC, instant deposits, real-time charts, and responsive support so you can focus on executing your crypto strategy.',
+        },
+        keywords: {
+          title: 'Key phrases we target',
+          list: 'Crypto trading platform, ELTX exchange, buy ELTX token, Web3 wallet, DeFi gateway, staking, P2P crypto marketplace, cross-chain swaps, Arabic and English support.',
+        },
+        value: {
+          title: 'Transparent value',
+          items: [
+            'Cross-chain support for BSC and Ethereum',
+            'Instant swaps with optimized slippage controls',
+            'In-app AI assistant for market answers',
+            'Guided Arabic/English flows from signup to trading',
+          ],
+        },
+      },
       trust: {
         eyebrow: 'Community',
         headline: 'Users trust ELTX',
@@ -1418,6 +1459,46 @@ export const dict = {
       },
     },
     home: {
+      seoIntro: {
+        kicker: 'منصة تداول كريبتو',
+        title: 'تداول وبدّل واستاك ELTX بحماية مؤسسية.',
+        description:
+          'ELTX منصة تبادل ثنائية اللغة بتنفيذ سريع على السلسلة، ومحافظ آمنة، وتسجيل دخول بسيط. اشترِ ELTX بالبطاقة، حرّك الأصول بين الشبكات، وادير صفقات P2P بسيولة عميقة في تجربة واحدة متكاملة.',
+        secondary: 'الصفحة الرئيسية متقسمة بعناوين واضحة ونصوص طبيعية وبيانات وصفية محسّنة للبحث بدون حشو كلمات مفتاحية.',
+        highlights: {
+          title: 'تجربة جاهزة للبحث',
+          items: [
+            'عناوين ووصف موجه للبشر ومحسّن لاكتشاف منصات الكريبتو.',
+            'دعوات إجراء واضحة بدون تكرار أو حشو للكلمات المفتاحية.',
+            'أقسام خفيفة التحميل تحافظ على التفاعل خصوصًا على الموبايل.',
+          ],
+        },
+        trust: {
+          title: 'مؤشرات ثقة تركز على المستخدم',
+          items: [
+            'دعم كامل للإنجليزي والعربي في الخطوات الأساسية.',
+            'عقود ذكية متراجعة، جلسات مراقَبة، ودعم سريع.',
+            'رسوم واضحة وحماية P2P علشان التداول يبقى سلس.',
+          ],
+        },
+        why: {
+          title: 'ليه تختار ELTX؟',
+          copy: 'مصممة تشيل الاحتكاك عن المستخدمين الجدد والمحترفين: تحقق سريع، إيداع فوري، شارتس لحظية، ودعم بيرد بسرعة علشان تركز على استراتيجيتك.',
+        },
+        keywords: {
+          title: 'العبارات الأساسية اللي بنستهدفها',
+          list: 'منصة تداول كريبتو، ELTX exchange، شراء توكن ELTX، محفظة Web3، بوابة DeFi، استاكينج، سوق كريبتو P2P، سواپ عبر الشبكات، دعم عربي وإنجليزي.',
+        },
+        value: {
+          title: 'قيمة واضحة',
+          items: [
+            'دعم عبر الشبكات لـ BSC و Ethereum',
+            'سواب فوري بانزلاق محسوب بدقة',
+            'مساعد ذكي داخل التطبيق لأسئلة السوق',
+            'خطوات موجهة بالعربي والإنجليزي من التسجيل للتداول',
+          ],
+        },
+      },
       trust: {
         eyebrow: 'المجتمع',
         headline: 'المستخدمين واثقين في ELTX',

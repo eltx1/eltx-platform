@@ -9,8 +9,14 @@ import type { HomeMarketEntry } from '../../app/lib/home-data';
 
 function formatUsd(value: number | null) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
-  if (value >= 1000) return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (abs >= 1000) return `${sign}$${abs.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  if (abs >= 1) return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (abs >= 0.01) return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+  if (abs >= 0.0001) return `${sign}$${abs.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}`;
+  if (abs > 0) return `${sign}<$0.0001`;
+  return '$0.00';
 }
 
 function formatChange(value: number | null | undefined) {
