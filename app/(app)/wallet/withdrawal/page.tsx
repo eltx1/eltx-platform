@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { parseUnits } from 'ethers';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
@@ -100,6 +101,14 @@ export default function WithdrawalPage() {
   }, [load]);
 
   const handleSubmit = async () => {
+    if (!amountIsPositive || !amountWei) {
+      toast({ message: t.wallet.withdrawalPage.form.invalidAmount, variant: 'error' });
+      return;
+    }
+    if (exceedsBalance) {
+      toast({ message: t.wallet.withdrawalPage.form.exceedsBalance, variant: 'error' });
+      return;
+    }
     setSubmitting(true);
     const res = await apiFetch<{ request: WithdrawalRequest }>('/wallet/withdrawals', {
       method: 'POST',
@@ -121,6 +130,24 @@ export default function WithdrawalPage() {
   const formattedBalance = formatWei(balance, decimals);
   const rules = t.wallet.withdrawalPage.rules;
   const hasPending = requests.some((r) => r.status === 'pending');
+  const balanceWei = useMemo(() => {
+    try {
+      return BigInt(balance);
+    } catch {
+      return 0n;
+    }
+  }, [balance]);
+  const amountWei = useMemo(() => {
+    if (!amount) return null;
+    try {
+      return parseUnits(amount, decimals);
+    } catch {
+      return null;
+    }
+  }, [amount, decimals]);
+  const exceedsBalance = amountWei !== null && amountWei > balanceWei;
+  const amountIsPositive = amountWei !== null && amountWei > 0n;
+  const canSubmit = !submitting && !!chain && !!address && amountIsPositive && !exceedsBalance;
 
   return (
     <div className="p-4 space-y-6">
@@ -182,6 +209,9 @@ export default function WithdrawalPage() {
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-cyan-300 focus:outline-none"
               placeholder={t.wallet.withdrawalPage.form.amount}
             />
+            {exceedsBalance && (
+              <p className="text-xs font-semibold text-amber-200">{t.wallet.withdrawalPage.form.exceedsBalance}</p>
+            )}
           </label>
           <label className="space-y-2 text-sm text-white/80">
             <span>{t.wallet.withdrawalPage.form.chain}</span>
@@ -232,7 +262,7 @@ export default function WithdrawalPage() {
             </Link>
             <button
               onClick={handleSubmit}
-              disabled={submitting || !amount || !chain || !address}
+              disabled={!canSubmit}
               className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-cyan-500 via-blue-500 to-indigo-500 px-5 py-2 text-sm font-semibold text-white shadow-lg shadow-cyan-500/20 transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {submitting && <Loader2 className="h-4 w-4 animate-spin" />}

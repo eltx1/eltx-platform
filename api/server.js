@@ -6386,12 +6386,9 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     const payload = WithdrawalCreateSchema.parse(req.body || {});
     const reason = payload.reason ? payload.reason.trim() : null;
     const decimals = getSymbolDecimals(ELTX_SYMBOL);
-    let amountWei;
-    try {
-      amountWei = ethers.parseUnits(payload.amount, decimals);
-    } catch {
-      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
-    }
+    const amountWeiStr = decimalToWeiString(payload.amount, decimals);
+    if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    const amountWei = bigIntFromValue(amountWeiStr);
     if (amountWei <= 0n)
       return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
 
@@ -6443,10 +6440,8 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
       await conn.rollback();
       return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
     }
-    const rawBal = balanceRows[0].balance_wei?.toString() || '0';
-    const normalized = rawBal.includes('.') ? rawBal.split('.')[0] : rawBal;
-    const balanceWei = BigInt(normalized);
-    if (balanceWei < amountWei) {
+    const balanceWei = bigIntFromValue(balanceRows[0].balance_wei);
+    if (balanceWei <= 0n || balanceWei < amountWei) {
       await conn.rollback();
       return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
     }
