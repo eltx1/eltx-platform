@@ -468,7 +468,10 @@ VALUES
   ('ELTX/USDT', 'ELTX', 18, 'USDT', 18, 0.0001, 0.1),
   ('ELTX/USDC', 'ELTX', 18, 'USDC', 18, 0.0001, 0.1),
   ('ELTX/BNB', 'ELTX', 18, 'BNB', 18, 0.0001, 0.0001),
-  ('ELTX/ETH', 'ELTX', 18, 'ETH', 18, 0.0001, 0.0001);
+  ('ELTX/ETH', 'ELTX', 18, 'ETH', 18, 0.0001, 0.0001),
+  ('USDT/USDC', 'USDT', 18, 'USDC', 18, 0.1, 0.1),
+  ('ETH/USDT', 'ETH', 18, 'USDT', 18, 0.0001, 0.1),
+  ('MCOIN/USDT', 'MCOIN', 18, 'USDT', 18, 0.0001, 0.1);
 
 -- spot order book
 CREATE TABLE IF NOT EXISTS spot_orders (
