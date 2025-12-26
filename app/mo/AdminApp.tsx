@@ -95,6 +95,7 @@ interface UserDetailResponse {
   fiat: Array<{ id: number; status: string; usd_amount: string; eltx_amount: string; created_at: string }>;
   deposits: Array<{ id: number; asset: string; amount: string; status: string; created_at: string }>;
   transfers: Array<{ id: number; asset: string; amount: string; from_user_id: number; to_user_id: number; created_at: string }>;
+  kyc?: AdminKycRequest | null;
 }
 
 interface StripeStatusResponse {
@@ -2079,6 +2080,15 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
     }
   };
 
+  const formatDateTime = (value?: string | null) => {
+    if (!value) return '—';
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return value;
+    }
+  };
+
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -2190,6 +2200,50 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
                 </button>
               </div>
             </form>
+
+            {details.kyc?.status === 'approved' && (
+              <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/5 p-4 shadow-inner shadow-emerald-900/30">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-emerald-200/80">KYC verified</p>
+                    <h4 className="text-lg font-semibold text-white">Identity approved</h4>
+                    <p className="text-xs text-white/60">تمت الموافقة على هوية العميل ويمكن مراجعة التفاصيل أدناه.</p>
+                  </div>
+                  <span className="rounded-full border border-emerald-300/50 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100">
+                    Approved
+                  </span>
+                </div>
+                <dl className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div>
+                    <dt className="text-[11px] uppercase tracking-wide text-white/50">Full name / الاسم</dt>
+                    <dd className="text-sm font-medium text-white">{details.kyc.full_name}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase tracking-wide text-white/50">Country / الدولة</dt>
+                    <dd className="text-sm font-medium text-white">{details.kyc.country}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase tracking-wide text-white/50">Document type</dt>
+                    <dd className="text-sm font-medium text-white">{details.kyc.document_type}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase tracking-wide text-white/50">Document number</dt>
+                    <dd className="text-sm font-medium text-white">{details.kyc.document_number || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase tracking-wide text-white/50">Filename</dt>
+                    <dd className="text-sm font-medium text-white">{details.kyc.document_filename || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] uppercase tracking-wide text-white/50">Reviewed</dt>
+                    <dd className="text-sm font-medium text-white">{formatDateTime(details.kyc.reviewed_at || details.kyc.updated_at || details.kyc.created_at)}</dd>
+                  </div>
+                </dl>
+                <div className="mt-3 text-xs text-white/60">
+                  Reviewed by {details.kyc.reviewer_username || '—'} · Request #{details.kyc.id}
+                </div>
+              </div>
+            )}
 
             <div>
               <h4 className="text-sm font-semibold uppercase text-white/60">Balances</h4>
