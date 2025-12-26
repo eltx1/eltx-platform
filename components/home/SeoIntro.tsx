@@ -1,3 +1,5 @@
+'use client';
+
 import { dict, useLang } from '../../app/lib/i18n';
 
 export default function SeoIntro() {

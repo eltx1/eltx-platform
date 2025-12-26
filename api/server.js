@@ -364,7 +364,15 @@ async function ensureWalletSchema() {
             }
             continue;
           }
-          await originalConnQuery(sql);
+          try {
+            await originalConnQuery(sql);
+          } catch (err) {
+            if (err && err.code === 'ER_CANT_DROP_FIELD_OR_KEY') {
+              console.warn('schema adjust skip', err.sqlMessage || err.message || err);
+              continue;
+            }
+            throw err;
+          }
         }
       } finally {
         conn.release();
