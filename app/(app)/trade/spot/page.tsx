@@ -120,7 +120,7 @@ type WalletAssetsResponse = {
 type ValidationState = { valid: boolean; message: string | null };
 
 const ZERO = new Decimal(0);
-const MARKET_PRIORITY = ['ELTX/USDC', 'ELTX/USDT', 'ELTX/BNB', 'ELTX/ETH'];
+const MARKET_PRIORITY = ['ELTX/USDT', 'ETH/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB'];
 
 function trimDecimal(value: string): string {
   if (!value) return '0';
