@@ -152,6 +152,10 @@ type EmailSettings = {
   admin_kyc_enabled: boolean;
   user_p2p_enabled: boolean;
   admin_p2p_enabled: boolean;
+  user_withdrawal_enabled: boolean;
+  admin_withdrawal_enabled: boolean;
+  user_support_enabled: boolean;
+  admin_support_enabled: boolean;
 };
 
 type EmailSettingsResponse = {
@@ -596,6 +600,10 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
     admin_kyc_enabled: true,
     user_p2p_enabled: true,
     admin_p2p_enabled: true,
+    user_withdrawal_enabled: true,
+    admin_withdrawal_enabled: true,
+    user_support_enabled: true,
+    admin_support_enabled: true,
   });
   const [adminRecipients, setAdminRecipients] = useState('');
   const [smtp, setSmtp] = useState<EmailSettingsResponse['smtp']>({ ready: false, missing: [] });
@@ -753,6 +761,46 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
                   disabled={!form.enabled}
                 />
                 <span>User emails for P2P trades</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.user_withdrawal_enabled}
+                  onChange={(e) => setForm({ ...form, user_withdrawal_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>User emails for withdrawals</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.admin_withdrawal_enabled}
+                  onChange={(e) => setForm({ ...form, admin_withdrawal_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>Admin alerts for withdrawals</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.user_support_enabled}
+                  onChange={(e) => setForm({ ...form, user_support_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>User emails for support tickets</span>
+              </label>
+              <label className="flex items-center gap-3 text-sm text-white/80">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-white/20 bg-black/40"
+                  checked={form.admin_support_enabled}
+                  onChange={(e) => setForm({ ...form, admin_support_enabled: e.target.checked })}
+                  disabled={!form.enabled}
+                />
+                <span>Admin alerts for support tickets</span>
               </label>
             </div>
 
