@@ -871,6 +871,11 @@ function formatWithdrawalRow(row) {
   };
 }
 
+const DEFAULT_ELTX_DECIMALS = 18;
+const ELTX_DECIMALS = (() => {
+  const raw = Number(process.env.TOKEN_ELTX_DECIMALS);
+  return normalizeDecimals(raw, DEFAULT_ELTX_DECIMALS);
+})();
 const ELTX_SYMBOL = 'ELTX';
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
@@ -884,9 +889,15 @@ const SUPPORT_STATUSES = ['open', 'answered', 'closed'];
 function getSymbolDecimals(symbol) {
   const meta = tokenMetaBySymbol[symbol];
   if (meta && meta.decimals !== undefined && meta.decimals !== null)
-    return Number(meta.decimals);
-  if (symbol === ELTX_SYMBOL) return Number(process.env.TOKEN_ELTX_DECIMALS || 18);
-  return 18;
+    return normalizeDecimals(meta.decimals, DEFAULT_ELTX_DECIMALS);
+  if (symbol === ELTX_SYMBOL) return ELTX_DECIMALS;
+  return DEFAULT_ELTX_DECIMALS;
+}
+
+function normalizeDecimals(value, fallback = DEFAULT_ELTX_DECIMALS) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 36) return fallback;
+  return Math.floor(parsed);
 }
 
 const QUOTE_TTL_MS = Number(process.env.TRADE_QUOTE_TTL_MS || 60_000);
