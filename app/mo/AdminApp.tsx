@@ -2371,10 +2371,27 @@ function KycPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
       onNotify('No document available for this request', 'error');
       return;
     }
-    const link = document.createElement('a');
-    link.href = `data:${row.document_mime || 'application/octet-stream'};base64,${row.document_base64}`;
-    link.download = row.document_filename || `kyc-${row.user_id}.bin`;
-    link.click();
+    try {
+      const base64 = row.document_base64.replace(/\s/g, '');
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const blob = new Blob([bytes], { type: row.document_mime || 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = row.document_filename || `kyc-${row.user_id}.bin`;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Failed to download document', err);
+      onNotify('Failed to download document', 'error');
+    }
   };
 
   return (
