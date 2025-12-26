@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS support_messages (
   ticket_id BIGINT UNSIGNED NOT NULL,
   sender_type ENUM('user','admin') NOT NULL,
   user_id INT NULL,
-  admin_id INT NULL,
+  admin_id INT UNSIGNED NULL,
   message TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_support_message_ticket (ticket_id, created_at),
