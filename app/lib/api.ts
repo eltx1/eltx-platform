@@ -32,13 +32,15 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
         ...(options.headers || {}),
       },
     });
+    const contentType = res.headers.get('content-type') || '';
     const raw = await res.text();
     let data: any = null;
     let parseError: string | null = null;
 
     if (raw) {
+      const isJson = contentType.includes('application/json');
       try {
-        data = JSON.parse(raw);
+        data = isJson ? JSON.parse(raw) : raw;
       } catch (err) {
         parseError = 'Invalid response from server';
         console.error('API response was not valid JSON', {
@@ -50,11 +52,16 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
       }
     }
 
-    if (!res.ok || parseError || data === null) {
+    const expectsJson = contentType.includes('application/json');
+    const failedToParseJson = expectsJson && parseError;
+    const missingExpectedData = expectsJson && data === null;
+
+    if (!res.ok || failedToParseJson || missingExpectedData) {
       if (res.status >= 500) console.error('API request failed', { url, status: res.status, body: data ?? raw });
       const message =
         data?.error?.message ||
         data?.message ||
+        (typeof data === 'string' ? data : null) ||
         parseError ||
         (res.statusText || 'Request failed' || '');
       return {

@@ -455,9 +455,30 @@ if (typeof stripeRefreshTimer.unref === 'function') {
 const startRunner = require('./background/runner');
 startRunner(pool);
 
-const loginLimiter = rateLimit({ windowMs: 60 * 1000, max: 5 });
-const walletLimiter = rateLimit({ windowMs: 60 * 1000, max: 30 });
-const supportLimiter = rateLimit({ windowMs: 60 * 1000, max: 20 });
+const rateLimitJsonHandler = (req, res) =>
+  res.status(429).json({ ok: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down' } });
+
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: rateLimitJsonHandler,
+});
+const walletLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: rateLimitJsonHandler,
+});
+const supportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: rateLimitJsonHandler,
+});
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
