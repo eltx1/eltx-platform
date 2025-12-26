@@ -6565,8 +6565,7 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
     const transactions = rows.map((row) => {
       if (row.tx_type === 'deposit') {
         const tokenAddress = (row.token_address || ZERO).toLowerCase();
-        const rawWei = row.amount_wei?.toString() ?? '0';
-        const amountWei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
+        const amountWei = toPlainIntegerString(row.amount_wei);
         const base = {
           tx_hash: row.tx_hash,
           token_address: tokenAddress,
@@ -6602,8 +6601,8 @@ app.get('/wallet/transactions', walletLimiter, async (req, res, next) => {
       const sym = row.token_symbol || '';
       const meta = sym === 'BNB' || sym === 'ETH' ? { decimals: 18 } : tokenMetaBySymbol[sym];
       const decimals = meta ? meta.decimals : 18;
-      const amtWei = BigInt(row.amount_wei || 0);
-      const feeWei = BigInt(row.fee_wei || 0);
+      const amtWei = BigInt(toPlainIntegerString(row.amount_wei));
+      const feeWei = BigInt(toPlainIntegerString(row.fee_wei));
       const net = incoming ? amtWei - feeWei : amtWei;
       return {
         tx_hash: null,
