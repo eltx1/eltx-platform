@@ -458,31 +458,6 @@ if (typeof stripeRefreshTimer.unref === 'function') {
 const startRunner = require('./background/runner');
 startRunner(pool);
 
-const rateLimitJsonHandler = (req, res) =>
-  res.status(429).json({ ok: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down' } });
-
-const loginLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: rateLimitJsonHandler,
-});
-const walletLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: rateLimitJsonHandler,
-});
-const supportLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: rateLimitJsonHandler,
-});
-
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -506,6 +481,50 @@ const adminSessionCookie = {
   path: '/',
   maxAge: ADMIN_SESSION_TTL_SECONDS * 1000,
 };
+
+const rateLimitJsonHandler = (req, res) =>
+  res.status(429).json({ ok: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down' } });
+
+const sessionRateLimitKey = (req) => {
+  const sessionId = req.cookies?.[COOKIE_NAME];
+  if (sessionId) return sessionId;
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim();
+  if (Array.isArray(forwarded) && forwarded.length && forwarded[0].trim()) return forwarded[0].trim();
+  return req.ip || req.socket?.remoteAddress || 'unknown';
+};
+
+const createSessionLimiter = (options) =>
+  rateLimit({
+    ...options,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: rateLimitJsonHandler,
+    keyGenerator: sessionRateLimitKey,
+  });
+
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: rateLimitJsonHandler,
+});
+
+const walletLimiter = createSessionLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+});
+
+const supportLimiter = createSessionLimiter({
+  windowMs: 60 * 1000,
+  max: 20,
+});
+
+const spotLimiter = createSessionLimiter({
+  windowMs: 60 * 1000,
+  max: 300,
+});
 
 async function fetchAssetLogos(symbols) {
   if (!symbols.length) return new Map();
@@ -7573,7 +7592,7 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/markets', walletLimiter, async (req, res, next) => {
+app.get('/spot/markets', spotLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const [rows] = await pool.query(
@@ -7612,7 +7631,7 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
+app.get('/spot/orderbook', spotLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const { market } = SpotOrderbookSchema.parse({ market: req.query.market });
@@ -7639,7 +7658,7 @@ app.get('/spot/orderbook', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/changes', walletLimiter, async (req, res, next) => {
+app.get('/spot/changes', spotLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const query = SpotDeltaSchema.parse({
@@ -7671,7 +7690,7 @@ app.get('/spot/changes', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/stream', walletLimiter, async (req, res, next) => {
+app.get('/spot/stream', spotLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const { market } = SpotOrderbookSchema.parse({ market: req.query.market });
@@ -7783,7 +7802,7 @@ app.get('/spot/stream', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/candles', walletLimiter, async (req, res, next) => {
+app.get('/spot/candles', spotLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const query = {
@@ -7880,7 +7899,7 @@ app.get('/spot/candles', walletLimiter, async (req, res, next) => {
   }
 });
 
-app.get('/spot/orders', walletLimiter, async (req, res, next) => {
+app.get('/spot/orders', spotLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const { market } = SpotOrdersQuerySchema.parse({ market: req.query.market });
