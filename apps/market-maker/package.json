@@ -2,9 +2,10 @@
   "name": "@eltx/market-maker",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "main": "index.ts",
   "scripts": {
-    "start": "ts-node --transpile-only index.ts"
+    "start": "ts-node --esm --transpile-only index.ts"
   },
   "dependencies": {
     "decimal.js": "^10.4.3",
