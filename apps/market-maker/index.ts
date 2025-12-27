@@ -1,5 +1,5 @@
 import { config as dotenv } from 'dotenv';
-import { createPool, Pool } from 'mysql2/promise';
+import mysql, { Pool } from 'mysql2/promise';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
@@ -86,7 +86,7 @@ let pool: Pool | null = null;
 function getPool(): Pool {
   if (pool) return pool;
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL missing');
-  pool = createPool(process.env.DATABASE_URL);
+  pool = mysql.createPool(process.env.DATABASE_URL);
   return pool;
 }
 
