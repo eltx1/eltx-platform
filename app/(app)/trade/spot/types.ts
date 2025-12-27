@@ -10,6 +10,7 @@ export type SpotMarket = {
   last_price: string | null;
   price_precision?: number;
   amount_precision?: number;
+  allow_market_orders?: boolean;
   min_price?: string | null;
   max_price?: string | null;
   price_min?: string | null;

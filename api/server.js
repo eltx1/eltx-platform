@@ -33,6 +33,9 @@ const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
 const DEFAULT_SPOT_MAX_DEVIATION_BPS = 800n;
 const DEFAULT_SPOT_CANDLE_FETCH_LIMIT = 3000;
 const WITHDRAWAL_CHAINS = ['Ethereum', 'BNB', 'Solana', 'Base'];
+const DEFAULT_MARKET_MAKER_SPREAD_BPS = 200;
+const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
+const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
 
 function normalizeSettingValue(value) {
   if (value === undefined || value === null) return null;
@@ -661,6 +664,26 @@ const SpotRiskSettingsSchema = z
     }
   );
 
+const MarketMakerSettingsSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    spread_bps: z.coerce.number().int().min(0).max(5000).optional(),
+    refresh_minutes: z.coerce.number().int().min(1).max(1440).optional(),
+    user_email: z.string().email().optional(),
+    pairs: z.union([z.string(), z.array(z.string().min(3))]).optional(),
+    target_base_pct: z.coerce.number().min(1).max(99).optional(),
+  })
+  .refine(
+    (data) =>
+      data.enabled !== undefined ||
+      data.spread_bps !== undefined ||
+      data.refresh_minutes !== undefined ||
+      data.user_email !== undefined ||
+      data.pairs !== undefined ||
+      data.target_base_pct !== undefined,
+    { message: 'At least one market maker field must be provided' }
+  );
+
 const AdminFeeUpdateSchema = z
   .object({
     swap_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
@@ -721,6 +744,7 @@ const AdminSpotMarketUpdateSchema = z
     price_precision: z.coerce.number().int().min(0).max(18).optional(),
     amount_precision: z.coerce.number().int().min(0).max(18).optional(),
     active: z.boolean().optional(),
+    allow_market_orders: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
@@ -2292,7 +2316,7 @@ function normalizeMarketSymbol(symbol) {
 async function getSpotMarket(conn, symbol, { forUpdate = false } = {}) {
   const normalized = normalizeMarketSymbol(symbol);
   const executor = conn.query ? conn : pool;
-  const sql = `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount, price_precision, amount_precision, active FROM spot_markets WHERE symbol=?${
+  const sql = `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount, price_precision, amount_precision, active, allow_market_orders FROM spot_markets WHERE symbol=?${
     forUpdate ? ' FOR UPDATE' : ''
   }`;
   const [rows] = await executor.query(sql, [normalized]);
@@ -2412,6 +2436,59 @@ async function readSpotRiskSettings(conn = pool) {
     maxDeviationBps: clampBps(BigInt(Number.parseInt(maxDeviation, 10) || Number(DEFAULT_SPOT_MAX_DEVIATION_BPS))),
     candleFetchCap: Number.parseInt(candleFetchCap, 10) || DEFAULT_SPOT_CANDLE_FETCH_LIMIT,
   };
+}
+
+async function readMarketMakerSettings(conn = pool) {
+  const enabledRaw = await getPlatformSettingValue('market_maker_enabled', '0', conn);
+  const spreadRaw = await getPlatformSettingValue(
+    'market_maker_spread_bps',
+    DEFAULT_MARKET_MAKER_SPREAD_BPS.toString(),
+    conn
+  );
+  const refreshRaw = await getPlatformSettingValue(
+    'market_maker_refresh_minutes',
+    DEFAULT_MARKET_MAKER_REFRESH_MINUTES.toString(),
+    conn
+  );
+  const userEmail = await getPlatformSettingValue('market_maker_user_email', '', conn);
+  const pairsRaw = await getPlatformSettingValue('market_maker_pairs', '', conn);
+  const targetPctRaw = await getPlatformSettingValue(
+    'market_maker_target_base_pct',
+    DEFAULT_MARKET_MAKER_TARGET_BASE_PCT.toString(),
+    conn
+  );
+
+  const spread = Number.parseInt(spreadRaw, 10);
+  const refreshMinutes = Number.parseInt(refreshRaw, 10);
+  const targetPct = Number.parseInt(targetPctRaw, 10);
+  return {
+    enabled: enabledRaw === '1' || enabledRaw?.toLowerCase?.() === 'true',
+    spread_bps: Number.isFinite(spread) ? spread : DEFAULT_MARKET_MAKER_SPREAD_BPS,
+    refresh_minutes: Number.isFinite(refreshMinutes) ? refreshMinutes : DEFAULT_MARKET_MAKER_REFRESH_MINUTES,
+    user_email: userEmail || '',
+    pairs: pairsRaw
+      ? pairsRaw
+          .split(',')
+          .map((p) => p.trim().toUpperCase())
+          .filter(Boolean)
+      : [],
+    target_base_pct: Number.isFinite(targetPct) ? targetPct : DEFAULT_MARKET_MAKER_TARGET_BASE_PCT,
+  };
+}
+
+async function updateMarketMakerSettings(partial) {
+  const tasks = [];
+  if (partial.enabled !== undefined) tasks.push(setPlatformSettingValue('market_maker_enabled', partial.enabled ? '1' : '0'));
+  if (partial.spread_bps !== undefined) tasks.push(setPlatformSettingValue('market_maker_spread_bps', partial.spread_bps.toString()));
+  if (partial.refresh_minutes !== undefined)
+    tasks.push(setPlatformSettingValue('market_maker_refresh_minutes', partial.refresh_minutes.toString()));
+  if (partial.user_email !== undefined) tasks.push(setPlatformSettingValue('market_maker_user_email', partial.user_email));
+  if (partial.pairs !== undefined)
+    tasks.push(setPlatformSettingValue('market_maker_pairs', partial.pairs.map((p) => p.trim().toUpperCase()).join(',')));
+  if (partial.target_base_pct !== undefined)
+    tasks.push(setPlatformSettingValue('market_maker_target_base_pct', partial.target_base_pct.toString()));
+  if (!tasks.length) return;
+  await Promise.all(tasks);
 }
 
 async function readSpotOrderbookVersion(conn, marketRow) {
@@ -5014,6 +5091,41 @@ app.patch('/admin/spot/protection', async (req, res, next) => {
   }
 });
 
+app.get('/admin/market-maker/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const settings = await readMarketMakerSettings();
+    res.json({ ok: true, settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/market-maker/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const parsed = MarketMakerSettingsSchema.parse(req.body || {});
+    const updates = { ...parsed };
+    if (parsed.pairs !== undefined) {
+      if (typeof parsed.pairs === 'string') {
+        updates.pairs = parsed.pairs
+          .split(',')
+          .map((p) => p.trim())
+          .filter((p) => p.length >= 3);
+      } else {
+        updates.pairs = parsed.pairs;
+      }
+    }
+    await updateMarketMakerSettings(updates);
+    const settings = await readMarketMakerSettings();
+    res.json({ ok: true, settings });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: err.message || 'Invalid input', details: err.flatten() });
+    next(err);
+  }
+});
+
 app.patch('/admin/fees', async (req, res, next) => {
   try {
     await requireAdmin(req);
@@ -6218,7 +6330,7 @@ app.get('/admin/pricing', async (req, res, next) => {
     );
     const [spotRows] = await pool.query(
       `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals,
-              min_base_amount, min_quote_amount, price_precision, amount_precision, active, created_at, updated_at
+              min_base_amount, min_quote_amount, price_precision, amount_precision, active, allow_market_orders, created_at, updated_at
          FROM spot_markets
          ORDER BY symbol`
     );
@@ -6248,6 +6360,7 @@ app.get('/admin/pricing', async (req, res, next) => {
       price_precision: row.price_precision,
       amount_precision: row.amount_precision,
       active: !!row.active,
+      allow_market_orders: row.allow_market_orders === undefined || row.allow_market_orders === null ? true : !!row.allow_market_orders,
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
@@ -6398,12 +6511,16 @@ app.patch('/admin/pricing/spot/:symbol', async (req, res, next) => {
       fields.push('active = ?');
       params.push(updates.active ? 1 : 0);
     }
+    if (updates.allow_market_orders !== undefined) {
+      fields.push('allow_market_orders = ?');
+      params.push(updates.allow_market_orders ? 1 : 0);
+    }
     if (!fields.length) return next({ status: 400, code: 'BAD_INPUT', message: 'No fields to update' });
     params.push(symbol);
     await pool.query(`UPDATE spot_markets SET ${fields.join(', ')}, updated_at = NOW() WHERE symbol = ?`, params);
     const [[market]] = await pool.query(
       `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount,
-              price_precision, amount_precision, active, created_at, updated_at
+              price_precision, amount_precision, active, allow_market_orders, created_at, updated_at
          FROM spot_markets WHERE symbol=?`,
       [symbol]
     );
@@ -7461,7 +7578,7 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
     await requireUser(req);
     const [rows] = await pool.query(
       `SELECT sm.id, sm.symbol, sm.base_asset, sm.base_decimals, sm.quote_asset, sm.quote_decimals, sm.min_base_amount, sm.min_quote_amount,
-              sm.price_precision, sm.amount_precision, sm.active,
+              sm.price_precision, sm.amount_precision, sm.active, sm.allow_market_orders,
               (SELECT price_wei FROM spot_trades WHERE market_id = sm.id ORDER BY id DESC LIMIT 1) AS last_price_wei
        FROM spot_markets sm
        WHERE sm.active = 1
@@ -7481,6 +7598,7 @@ app.get('/spot/markets', walletLimiter, async (req, res, next) => {
         min_quote_amount: trimDecimal(row.min_quote_amount),
         price_precision: row.price_precision,
         amount_precision: row.amount_precision,
+        allow_market_orders: row.allow_market_orders === undefined || row.allow_market_orders === null ? true : !!row.allow_market_orders,
         last_price: lastPriceWei > 0n ? trimDecimal(formatUnitsStr(lastPriceWei.toString(), 18)) : null,
       };
     });
@@ -7898,6 +8016,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     if (!market || !market.active) {
       await conn.rollback();
       return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not available' });
+    }
+    if (type === 'market' && market.allow_market_orders === 0) {
+      await conn.rollback();
+      return next({ status: 400, code: 'MARKET_ORDER_DISABLED', message: 'Market orders disabled for this market' });
     }
 
     const baseDecimals = market.base_decimals;

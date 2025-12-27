@@ -225,8 +225,18 @@ type SpotMarketRow = {
   price_precision: number;
   amount_precision: number;
   active: boolean;
+  allow_market_orders: boolean;
   created_at?: string;
   updated_at?: string;
+};
+
+type MarketMakerSettings = {
+  enabled: boolean;
+  spread_bps: number;
+  refresh_minutes: number;
+  user_email: string;
+  pairs: string[];
+  target_base_pct: number;
 };
 
 type P2PPaymentMethod = {
@@ -3940,15 +3950,41 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   const [swap, setSwap] = useState<SwapPricingRow[]>([]);
   const [spot, setSpot] = useState<SpotMarketRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [makerSettings, setMakerSettings] = useState<MarketMakerSettings | null>(null);
+  const [makerForm, setMakerForm] = useState({
+    enabled: false,
+    spreadPct: '2.00',
+    refreshMinutes: '30',
+    userEmail: 'info.eltx@gmail.com',
+    pairs: 'ETH/USDT, WBTC/USDT, BNB/USDT',
+    targetBasePct: '50',
+  });
+  const [savingMaker, setSavingMaker] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await apiFetch<{ swap: SwapPricingRow[]; spot: SpotMarketRow[] }>('/admin/pricing');
-    if (res.ok) {
-      setSwap(Array.isArray(res.data.swap) ? res.data.swap : []);
-      setSpot(Array.isArray(res.data.spot) ? res.data.spot : []);
+    const [pricingRes, makerRes] = await Promise.all([
+      apiFetch<{ swap: SwapPricingRow[]; spot: SpotMarketRow[] }>('/admin/pricing'),
+      apiFetch<{ settings: MarketMakerSettings }>('/admin/market-maker/settings'),
+    ]);
+    if (pricingRes.ok) {
+      setSwap(Array.isArray(pricingRes.data.swap) ? pricingRes.data.swap : []);
+      setSpot(Array.isArray(pricingRes.data.spot) ? pricingRes.data.spot : []);
     } else {
-      onNotify(res.error || 'Failed to load pricing', 'error');
+      onNotify(pricingRes.error || 'Failed to load pricing', 'error');
+    }
+    if (makerRes.ok) {
+      setMakerSettings(makerRes.data.settings);
+      setMakerForm({
+        enabled: !!makerRes.data.settings.enabled,
+        spreadPct: (makerRes.data.settings.spread_bps / 100).toFixed(2),
+        refreshMinutes: makerRes.data.settings.refresh_minutes.toString(),
+        userEmail: makerRes.data.settings.user_email,
+        pairs: makerRes.data.settings.pairs.join(', '),
+        targetBasePct: makerRes.data.settings.target_base_pct.toString(),
+      });
+    } else {
+      onNotify(makerRes.error || 'Failed to load market maker settings', 'error');
     }
     setLoading(false);
   }, [onNotify]);
@@ -4023,6 +4059,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     const minQuote = window.prompt('Minimum quote amount', row.min_quote_amount ?? '');
     const pricePrecision = window.prompt('Price precision (0-18)', row.price_precision?.toString() ?? '');
     const amountPrecision = window.prompt('Amount precision (0-18)', row.amount_precision?.toString() ?? '');
+    const allowMarketOrders = window.prompt('Allow market orders? (yes/no)', row.allow_market_orders ? 'yes' : 'no');
     const activeInput = window.prompt('Market status (active/inactive)', row.active ? 'active' : 'inactive');
     const body: Record<string, unknown> = {};
 
@@ -4039,6 +4076,13 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       const parsed = Number(amountPrecision);
       if (!Number.isInteger(parsed) || parsed < 0 || parsed > 18) return onNotify('Invalid amount precision', 'error');
       body.amount_precision = parsed;
+    }
+
+    if (allowMarketOrders !== null && allowMarketOrders.trim() !== '') {
+      const normalized = allowMarketOrders.trim().toLowerCase();
+      if (['yes', 'true', 'y', '1', 'enabled', 'on'].includes(normalized)) body.allow_market_orders = true;
+      else if (['no', 'false', 'n', '0', 'disabled', 'off'].includes(normalized)) body.allow_market_orders = false;
+      else return onNotify('Invalid market order toggle', 'error');
     }
 
     if (activeInput !== null && activeInput.trim() !== '') {
@@ -4062,6 +4106,52 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     }
   };
 
+  const saveMakerSettings = async () => {
+    const spread = Number(makerForm.spreadPct);
+    const refresh = Number(makerForm.refreshMinutes);
+    const targetPct = Number(makerForm.targetBasePct);
+    if (!Number.isFinite(spread) || spread < 0 || spread > 100) return onNotify('Enter a valid spread percentage', 'error');
+    if (!Number.isFinite(refresh) || refresh <= 0) return onNotify('Enter a valid refresh interval (minutes)', 'error');
+    if (!Number.isFinite(targetPct) || targetPct <= 0 || targetPct >= 100)
+      return onNotify('Enter a target base % between 1 and 99', 'error');
+
+    const pairs = makerForm.pairs
+      .split(',')
+      .map((p) => p.trim().toUpperCase())
+      .filter(Boolean);
+    if (!pairs.length) return onNotify('Add at least one trading pair', 'error');
+
+    const payload = {
+      enabled: makerForm.enabled,
+      spread_bps: Math.round(spread * 100),
+      refresh_minutes: Math.round(refresh),
+      user_email: makerForm.userEmail.trim(),
+      pairs,
+      target_base_pct: Math.round(targetPct),
+    };
+
+    setSavingMaker(true);
+    const res = await apiFetch<{ settings: MarketMakerSettings }>('/admin/market-maker/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    setSavingMaker(false);
+    if (res.ok) {
+      setMakerSettings(res.data.settings);
+      setMakerForm({
+        enabled: !!res.data.settings.enabled,
+        spreadPct: (res.data.settings.spread_bps / 100).toFixed(2),
+        refreshMinutes: res.data.settings.refresh_minutes.toString(),
+        userEmail: res.data.settings.user_email,
+        pairs: res.data.settings.pairs.join(', '),
+        targetBasePct: res.data.settings.target_base_pct.toString(),
+      });
+      onNotify('Market maker settings updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update market maker settings', 'error');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -4078,104 +4168,221 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
           <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-white/10 bg-white/5">
-            <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">Swap assets</div>
-            <div className="max-h-96 overflow-y-auto">
-              <table className="min-w-full divide-y divide-white/10 text-sm">
-                <thead className="bg-white/5">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Asset</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Min</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Max</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Spread</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Pool</th>
-                    <th className="px-3 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/10">
-                  {swap.map((row) => (
-                    <tr key={row.asset}>
-                      <td className="px-3 py-2">{row.asset}</td>
-                      <td className="px-3 py-2">{row.price_eltx}</td>
-                      <td className="px-3 py-2">{row.min_amount}</td>
-                      <td className="px-3 py-2">{row.max_amount ?? '—'}</td>
-                      <td className="px-3 py-2">{row.spread_bps} bps</td>
-                      <td className="px-3 py-2 text-xs text-white/70">
-                        <div className="flex flex-col">
-                          <span>
-                            {formatReserve(row.asset_reserve_wei, Number(row.asset_decimals || 18))} {row.asset}
-                          </span>
-                          <span>{formatReserve(row.eltx_reserve_wei, 18)} ELTX</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            onClick={() => editSwap(row)}
-                            className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
-                          >
-                            Edit pricing
-                          </button>
-                          <button
-                            onClick={() => editSwapPool(row)}
-                            className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
-                          >
-                            Edit pool
-                          </button>
-                        </div>
-                      </td>
+        <div className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/5">
+              <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">Swap assets</div>
+              <div className="max-h-96 overflow-y-auto">
+                <table className="min-w-full divide-y divide-white/10 text-sm">
+                  <thead className="bg-white/5">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Asset</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Min</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Max</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Spread</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Pool</th>
+                      <th className="px-3 py-2"></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-white/10">
+                    {swap.map((row) => (
+                      <tr key={row.asset}>
+                        <td className="px-3 py-2">{row.asset}</td>
+                        <td className="px-3 py-2">{row.price_eltx}</td>
+                        <td className="px-3 py-2">{row.min_amount}</td>
+                        <td className="px-3 py-2">{row.max_amount ?? '—'}</td>
+                        <td className="px-3 py-2">{row.spread_bps} bps</td>
+                        <td className="px-3 py-2 text-xs text-white/70">
+                          <div className="flex flex-col">
+                            <span>
+                              {formatReserve(row.asset_reserve_wei, Number(row.asset_decimals || 18))} {row.asset}
+                            </span>
+                            <span>{formatReserve(row.eltx_reserve_wei, 18)} ELTX</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={() => editSwap(row)}
+                              className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+                            >
+                              Edit pricing
+                            </button>
+                            <button
+                              onClick={() => editSwapPool(row)}
+                              className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+                            >
+                              Edit pool
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-white/10 bg-white/5">
+              <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">Spot markets</div>
+              <div className="max-h-96 overflow-y-auto">
+                <table className="min-w-full divide-y divide-white/10 text-sm">
+                  <thead className="bg-white/5">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Market</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Base min</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Quote min</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price precision</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Amount precision</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Market orders</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
+                      <th className="px-3 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10">
+                    {spot.map((row) => (
+                      <tr key={row.symbol}>
+                        <td className="px-3 py-2">{row.symbol}</td>
+                        <td className="px-3 py-2">{row.min_base_amount}</td>
+                        <td className="px-3 py-2">{row.min_quote_amount}</td>
+                        <td className="px-3 py-2">{row.price_precision}</td>
+                        <td className="px-3 py-2">{row.amount_precision}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                              row.allow_market_orders ? 'bg-blue-500/10 text-blue-200' : 'bg-amber-500/10 text-amber-100'
+                            }`}
+                          >
+                            {row.allow_market_orders ? 'Enabled' : 'Limit only'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                              row.active ? 'bg-emerald-500/10 text-emerald-200' : 'bg-red-500/10 text-red-200'
+                            }`}
+                          >
+                            {row.active ? 'Active' : 'Disabled'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <button
+                            onClick={() => editSpot(row)}
+                            className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-white/5">
-            <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">Spot markets</div>
-            <div className="max-h-96 overflow-y-auto">
-              <table className="min-w-full divide-y divide-white/10 text-sm">
-                <thead className="bg-white/5">
-                  <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Market</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Base min</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Quote min</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price precision</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Amount precision</th>
-                    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
-                    <th className="px-3 py-2"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/10">
-                  {spot.map((row) => (
-                    <tr key={row.symbol}>
-                      <td className="px-3 py-2">{row.symbol}</td>
-                      <td className="px-3 py-2">{row.min_base_amount}</td>
-                      <td className="px-3 py-2">{row.min_quote_amount}</td>
-                      <td className="px-3 py-2">{row.price_precision}</td>
-                      <td className="px-3 py-2">{row.amount_precision}</td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                            row.active ? 'bg-emerald-500/10 text-emerald-200' : 'bg-red-500/10 text-red-200'
-                          }`}
-                        >
-                          {row.active ? 'Active' : 'Disabled'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <button
-                          onClick={() => editSpot(row)}
-                          className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="text-md font-semibold">Market maker</h4>
+                <p className="text-sm text-white/60">Configure the background bot that seeds limit liquidity.</p>
+              </div>
+              {makerSettings && (
+                <span
+                  className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                    makerSettings.enabled ? 'bg-emerald-500/10 text-emerald-200' : 'bg-white/10 text-white/70'
+                  }`}
+                >
+                  {makerSettings.enabled ? 'Enabled' : 'Disabled'}
+                </span>
+              )}
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <label className="flex items-center gap-3 text-sm font-medium text-white/80">
+                <input
+                  type="checkbox"
+                  checked={makerForm.enabled}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, enabled: e.target.checked }))}
+                  className="h-4 w-4 rounded border-white/30 bg-black/40"
+                />
+                Enable bot
+              </label>
+
+              <div>
+                <label className="text-xs uppercase text-white/60">Spread (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={makerForm.spreadPct}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, spreadPct: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase text-white/60">Refresh cadence (minutes)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={1440}
+                  value={makerForm.refreshMinutes}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, refreshMinutes: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase text-white/60">Target base inventory (%)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={makerForm.targetBasePct}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, targetBasePct: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs uppercase text-white/60">Bot user email</label>
+                <input
+                  type="email"
+                  value={makerForm.userEmail}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, userEmail: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                  placeholder="user@example.com"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="text-xs uppercase text-white/60">Trading pairs (comma separated)</label>
+                <textarea
+                  value={makerForm.pairs}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, pairs: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                  rows={2}
+                />
+                <p className="mt-1 text-xs text-white/50">Pairs must exist in spot markets (example: ETH/USDT, WBTC/USDT).</p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                onClick={saveMakerSettings}
+                disabled={savingMaker}
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium transition hover:bg-blue-500 disabled:opacity-60"
+              >
+                <ShieldCheck className="h-4 w-4" /> {savingMaker ? 'Saving…' : 'Save bot settings'}
+              </button>
+              <button
+                onClick={load}
+                className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/30 hover:text-white"
+              >
+                <RefreshCw className="h-4 w-4" /> Refresh
+              </button>
             </div>
           </div>
         </div>
