@@ -449,7 +449,9 @@ CREATE TABLE IF NOT EXISTS spot_markets (
   price_precision INT UNSIGNED NOT NULL DEFAULT 18,
   amount_precision INT UNSIGNED NOT NULL DEFAULT 18,
   active TINYINT(1) NOT NULL DEFAULT 1,
+  allow_market_orders TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uniq_symbol (symbol)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE spot_markets
@@ -462,7 +464,9 @@ ALTER TABLE spot_markets
   ADD COLUMN IF NOT EXISTS price_precision INT UNSIGNED NOT NULL DEFAULT 18 AFTER min_quote_amount,
   ADD COLUMN IF NOT EXISTS amount_precision INT UNSIGNED NOT NULL DEFAULT 18 AFTER price_precision,
   ADD COLUMN IF NOT EXISTS active TINYINT(1) NOT NULL DEFAULT 1 AFTER amount_precision,
-  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER active;
+  ADD COLUMN IF NOT EXISTS allow_market_orders TINYINT(1) NOT NULL DEFAULT 1 AFTER active,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER allow_market_orders,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
 INSERT IGNORE INTO spot_markets (symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount)
 VALUES
   ('ELTX/USDT', 'ELTX', 18, 'USDT', 18, 0.0001, 0.1),
@@ -474,6 +478,11 @@ VALUES
   ('USDT/USDC', 'USDT', 18, 'USDC', 18, 0.1, 0.1),
   ('ETH/USDT', 'ETH', 18, 'USDT', 18, 0.0001, 0.1),
   ('MCOIN/USDT', 'MCOIN', 18, 'USDT', 18, 0.0001, 0.1);
+
+UPDATE spot_markets
+   SET allow_market_orders = 0,
+       updated_at = NOW()
+ WHERE symbol IN ('ETH/USDT', 'WBTC/USDT', 'BNB/USDT');
 
 -- spot order book
 CREATE TABLE IF NOT EXISTS spot_orders (
@@ -689,3 +698,9 @@ ALTER TABLE ai_message_ledger
 
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('ai_daily_free_messages', '10');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('ai_message_price_eltx', '1');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_enabled', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_spread_bps', '200');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_refresh_minutes', '30');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_user_email', 'info.eltx@gmail.com');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_pairs', 'ETH/USDT,WBTC/USDT,BNB/USDT');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_target_base_pct', '50');

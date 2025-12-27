@@ -338,6 +338,10 @@ export default function SpotTradePage() {
   }, []);
 
   const selectedMarketMeta = useMemo(() => markets.find((m) => m.symbol === selectedMarket) || null, [markets, selectedMarket]);
+  const marketAllowsMarketOrders = selectedMarketMeta?.allow_market_orders !== false;
+  useEffect(() => {
+    if (!marketAllowsMarketOrders && formType === 'market') setFormType('limit');
+  }, [marketAllowsMarketOrders, formType]);
 
   const baseSymbol = selectedMarketMeta?.base_asset || null;
   const quoteSymbol = selectedMarketMeta?.quote_asset || null;
@@ -420,6 +424,8 @@ export default function SpotTradePage() {
 
   const validation = useMemo<ValidationState>(() => {
     if (!selectedMarketMeta) return { valid: false, message: null };
+    if (formType === 'market' && !marketAllowsMarketOrders)
+      return { valid: false, message: t.spotTrade.errors.marketOrderDisabled };
     if (!amount.trim()) return { valid: false, message: t.spotTrade.errors.amountRequired };
     if (!amountDecimal || !amountDecimal.isFinite() || amountDecimal.lte(0))
       return { valid: false, message: t.spotTrade.errors.invalidAmount };
@@ -494,6 +500,7 @@ export default function SpotTradePage() {
     formType,
     makerFeeRate,
     marketEstimation,
+    marketAllowsMarketOrders,
     price,
     priceDecimal,
     pricePrecision,
@@ -521,6 +528,8 @@ export default function SpotTradePage() {
         case 'INSUFFICIENT_LIQUIDITY':
         case 'NO_LIQUIDITY':
           return t.spotTrade.errors.insufficientLiquidity;
+        case 'MARKET_ORDER_DISABLED':
+          return t.spotTrade.errors.marketOrderDisabled;
         case 'SLIPPAGE_EXCEEDED':
           return t.spotTrade.errors.slippageExceeded;
         case 'PRICE_DEVIATION_EXCEEDED':
@@ -544,6 +553,7 @@ export default function SpotTradePage() {
       t.spotTrade.errors.invalidAmount,
       t.spotTrade.errors.invalidPrice,
       t.spotTrade.errors.marketNotFound,
+      t.spotTrade.errors.marketOrderDisabled,
       t.spotTrade.errors.orderNotFound,
       t.spotTrade.errors.orderNotOpen,
       t.spotTrade.errors.priceDeviationExceeded,
@@ -858,12 +868,20 @@ export default function SpotTradePage() {
                   {t.spotTrade.limit}
                 </button>
                 <button
-                  className={`py-2 rounded-lg font-semibold transition ${formType === 'market' ? 'bg-white text-black shadow' : 'bg-white/10 text-white'}`}
+                  disabled={!marketAllowsMarketOrders}
+                  className={`py-2 rounded-lg font-semibold transition ${
+                    formType === 'market' ? 'bg-white text-black shadow' : 'bg-white/10 text-white'
+                  } ${!marketAllowsMarketOrders ? 'opacity-50 cursor-not-allowed' : ''}`}
                   onClick={() => setFormType('market')}
                 >
                   {t.spotTrade.marketOrder}
                 </button>
               </div>
+              {!marketAllowsMarketOrders && (
+                <div className="rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                  {t.spotTrade.errors.marketOrderDisabled}
+                </div>
+              )}
 
               {selectedMarketMeta && (
                 <div className="grid grid-cols-2 gap-3 text-xs rounded-xl bg-white/5 p-3 border border-white/10">
