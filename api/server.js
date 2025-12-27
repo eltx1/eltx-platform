@@ -5442,6 +5442,20 @@ app.get('/admin/users/:id', async (req, res, next) => {
     );
     if (!user) return next({ status: 404, code: 'NOT_FOUND', message: 'User not found' });
 
+    const [[lastLoginRow]] = await pool.query(
+      'SELECT attempted_at FROM login_attempts WHERE user_id=? AND success=1 ORDER BY attempted_at DESC LIMIT 1',
+      [userId]
+    );
+
+    const [[lastStripePurchaseRow]] = await pool.query(
+      `SELECT id, currency, usd_amount, completed_at, created_at
+         FROM fiat_purchases
+        WHERE user_id=? AND status='succeeded'
+        ORDER BY COALESCE(completed_at, created_at) DESC
+        LIMIT 1`,
+      [userId]
+    );
+
     const [balancesRows] = await pool.query(
       'SELECT asset, balance_wei, created_at FROM user_balances WHERE user_id=? ORDER BY asset',
       [userId]
@@ -5571,7 +5585,28 @@ app.get('/admin/users/:id', async (req, res, next) => {
     );
     const approvedKyc = kycRows.length ? presentKycRow(kycRows[0]) : null;
 
-    res.json({ ok: true, user, balances, staking, fiat, deposits, transfers, kyc: approvedKyc });
+    res.json({
+      ok: true,
+      user: {
+        ...user,
+        last_login_at: lastLoginRow?.attempted_at || null,
+      },
+      last_stripe_purchase: lastStripePurchaseRow
+        ? {
+            id: lastStripePurchaseRow.id,
+            currency: lastStripePurchaseRow.currency,
+            usd_amount: formatDecimalValue(lastStripePurchaseRow.usd_amount || 0, 2),
+            completed_at: lastStripePurchaseRow.completed_at,
+            created_at: lastStripePurchaseRow.created_at,
+          }
+        : null,
+      balances,
+      staking,
+      fiat,
+      deposits,
+      transfers,
+      kyc: approvedKyc,
+    });
   } catch (err) {
     next(err);
   }

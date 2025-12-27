@@ -86,10 +86,18 @@ interface UserRow {
   language: string;
   created_at: string;
   updated_at: string;
+  last_login_at?: string | null;
 }
 
 interface UserDetailResponse {
   user: UserRow;
+  last_stripe_purchase: {
+    id: number;
+    currency: string;
+    usd_amount: string;
+    completed_at: string | null;
+    created_at: string;
+  } | null;
   balances: Array<{ asset: string; balance: string; balance_wei: string; created_at: string }>;
   staking: Array<{ id: number; plan_name: string; amount: string; status: string; start_date: string; end_date: string }>;
   fiat: Array<{ id: number; status: string; usd_amount: string; eltx_amount: string; created_at: string }>;
@@ -2182,7 +2190,7 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
       const res = await apiFetch<UserDetailResponse>(`/admin/users/${user.id}`);
       if (res.ok) {
         setDetails(res.data);
-        setSelected(user);
+        setSelected(res.data.user);
       } else {
         onNotify(res.error || 'Failed to load user details', 'error');
       }
@@ -2248,6 +2256,12 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
     }
   };
 
+  const formatAmountWithCurrency = (amount?: string | null, currency?: string | null) => {
+    if (!amount) return '—';
+    const ticker = (currency || 'USD').toUpperCase();
+    return `${ticker} ${amount}`;
+  };
+
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
       <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
@@ -2311,6 +2325,45 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
               >
                 <KeyRound className="h-3 w-3" /> Reset password
               </button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30">
+                <p className="text-[11px] uppercase tracking-wide text-white/50">User ID / رقم المستخدم</p>
+                <p className="mt-1 text-lg font-semibold text-white">{selected.id}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30">
+                <p className="text-[11px] uppercase tracking-wide text-white/50">Registered / تاريخ التسجيل</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatDateTime(selected.created_at)}</p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30">
+                <p className="text-[11px] uppercase tracking-wide text-white/50">Last login / آخر تسجيل دخول</p>
+                <p className="mt-1 text-sm font-semibold text-white">{formatDateTime(details.user.last_login_at)}</p>
+              </div>
+              <div className="md:col-span-2 lg:col-span-3 rounded-xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-[11px] uppercase tracking-wide text-white/50">Last Stripe purchase / آخر عملية Stripe ناجحة</p>
+                  {details.last_stripe_purchase?.id ? (
+                    <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">Succeeded</span>
+                  ) : null}
+                </div>
+                {details.last_stripe_purchase ? (
+                  <div className="mt-1 space-y-1 text-sm text-white">
+                    <div className="flex items-center gap-2">
+                      <DollarSign className="h-4 w-4 text-emerald-300" />
+                      <span className="font-semibold">
+                        {formatAmountWithCurrency(details.last_stripe_purchase.usd_amount, details.last_stripe_purchase.currency)}
+                      </span>
+                    </div>
+                    <div className="text-white/70">
+                      {formatDateTime(details.last_stripe_purchase.completed_at || details.last_stripe_purchase.created_at)}
+                    </div>
+                    <div className="text-xs text-white/50">Purchase ID: {details.last_stripe_purchase.id}</div>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm text-white/60">No successful Stripe purchases recorded yet.</p>
+                )}
+              </div>
             </div>
 
             <form
