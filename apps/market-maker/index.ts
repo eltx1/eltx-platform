@@ -14,8 +14,16 @@ dotenv({ path: localEnv, override: false });
 dotenv({ path: rootEnv, override: false });
 
 const API_BASE = process.env.MARKET_MAKER_API_BASE || 'http://localhost:4000';
+const USER_AGENT = process.env.MARKET_MAKER_USER_AGENT || 'eltx-market-maker/0.1';
 const PASSWORD = process.env.MARKET_MAKER_PASSWORD;
 const FALLBACK_EMAIL = process.env.MARKET_MAKER_EMAIL || process.env.MARKET_MAKER_USER_EMAIL || '';
+const STATIC_COOKIES = [
+  process.env.MARKET_MAKER_EXTRA_COOKIES,
+  process.env.MARKET_MAKER_CF_CLEARANCE && `cf_clearance=${process.env.MARKET_MAKER_CF_CLEARANCE}`,
+]
+  .map((c) => (c || '').trim())
+  .filter(Boolean)
+  .join('; ');
 
 const SETTINGS_KEYS = [
   'market_maker_enabled',
@@ -125,16 +133,51 @@ function log(tag: string, message: string, extra?: Record<string, unknown>) {
 let sessionCookie = '';
 let sessionEmail = '';
 
+function applyDefaultHeaders(headers: Headers, includeSessionCookie: boolean) {
+  if (!headers.has('User-Agent')) headers.set('User-Agent', USER_AGENT);
+  const cookies = [headers.get('Cookie'), STATIC_COOKIES];
+  if (includeSessionCookie && sessionCookie) cookies.push(sessionCookie);
+  const combinedCookie = cookies.filter(Boolean).join('; ');
+  if (combinedCookie) headers.set('Cookie', combinedCookie);
+  return headers;
+}
+
+function isCloudflareBlock(res: Response) {
+  if (res.status !== 403) return false;
+  const server = res.headers.get('server') || '';
+  const cfRay = res.headers.get('cf-ray');
+  const contentType = res.headers.get('content-type') || '';
+  const isHtml = contentType.includes('text/html');
+  return isHtml && (cfRay || /cloudflare/i.test(server));
+}
+
+async function buildFetchError(res: Response, context: string) {
+  const contentType = res.headers.get('content-type') || '';
+  if (isCloudflareBlock(res)) {
+    throw new Error(
+      `${context} blocked by Cloudflare (403). Set MARKET_MAKER_API_BASE to the origin (bypassing CDN) or provide MARKET_MAKER_CF_CLEARANCE / MARKET_MAKER_EXTRA_COOKIES and MARKET_MAKER_USER_AGENT.`
+    );
+  }
+  let detail = '';
+  if (contentType.includes('application/json')) {
+    const json = await res.json().catch(() => null);
+    const message = json?.error?.message || json?.message;
+    if (message) detail = `: ${message}`;
+  } else {
+    const preview = (await res.text().catch(() => '')).slice(0, 120);
+    if (preview) detail = `: ${preview}`;
+  }
+  throw new Error(`${context} failed (${res.status})${detail}`);
+}
+
 async function login(email: string, password: string) {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: applyDefaultHeaders(new Headers({ 'Content-Type': 'application/json' }), false),
     body: JSON.stringify({ email, password }),
     redirect: 'manual',
   });
-  if (!res.ok) {
-    throw new Error(`login failed (${res.status})`);
-  }
+  if (!res.ok) await buildFetchError(res, 'login');
   const setCookie = res.headers.get('set-cookie');
   if (!setCookie) throw new Error('missing session cookie');
   sessionCookie = setCookie.split(';')[0];
@@ -144,8 +187,11 @@ async function login(email: string, password: string) {
 
 async function authFetch(path: string, options: RequestInit = {}, retries = 1): Promise<Response> {
   const headers = new Headers(options.headers || {});
-  if (sessionCookie) headers.set('Cookie', sessionCookie);
+  applyDefaultHeaders(headers, true);
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (isCloudflareBlock(res)) {
+    await buildFetchError(res, 'request');
+  }
   if (res.status === 401 && retries > 0) {
     if (!sessionEmail || !PASSWORD) throw new Error('Cannot refresh session without credentials');
     await login(sessionEmail, PASSWORD);
