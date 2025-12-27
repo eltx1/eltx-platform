@@ -40,8 +40,8 @@ export default function P2PPage() {
   const { lang } = useLang();
   const t = dict[lang];
 
-  const [tradeSide, setTradeSide] = useState<'buy' | 'sell'>('buy');
-  const [asset, setAsset] = useState('USDC');
+  const [tradeSide, setTradeSide] = useState<'buy' | 'sell'>('sell');
+  const [asset, setAsset] = useState('USDT');
   const [amount, setAmount] = useState('');
   const [paymentSearch, setPaymentSearch] = useState('');
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(null);
@@ -222,6 +222,12 @@ export default function P2PPage() {
               className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100 transition hover:border-emerald-400/70 hover:text-white"
             >
               <PlusCircle className="h-4 w-4" /> {t.p2p.actions.addOffer}
+            </Link>
+            <Link
+              href="/p2p/offers"
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white/80 transition hover:text-white"
+            >
+              {t.p2p.actions.viewOffers}
             </Link>
             <Link
               href="/p2p/trades"
