@@ -824,7 +824,21 @@ export const dict = {
         dispute: 'Open dispute',
         view: 'Open',
         addOffer: 'Add offer',
+        viewOffers: 'Your offers',
         viewTrades: 'Your trades',
+      },
+      myOffers: {
+        kicker: 'Your P2P offers',
+        title: 'Your offers',
+        empty: 'You have not created any offers yet.',
+        cancel: 'Cancel offer',
+        cancelConfirm: 'Cancel this offer?',
+        cancelled: 'Offer cancelled.',
+      },
+      offerStatuses: {
+        active: 'Active',
+        paused: 'Paused',
+        cancelled: 'Cancelled',
       },
       offerForm: {
         kicker: 'Create P2P offer',
@@ -1760,7 +1774,21 @@ export const dict = {
         dispute: 'فتح نزاع',
         view: 'عرض',
         addOffer: 'إضافة عرض',
+        viewOffers: 'عروضك',
         viewTrades: 'صفقاتك',
+      },
+      myOffers: {
+        kicker: 'عروض الـ P2P بتاعتك',
+        title: 'عروضك',
+        empty: 'مافيش عروض انت عاملها لسه.',
+        cancel: 'إلغاء العرض',
+        cancelConfirm: 'تلغي العرض ده؟',
+        cancelled: 'تم إلغاء العرض.',
+      },
+      offerStatuses: {
+        active: 'نشط',
+        paused: 'موقوف مؤقتًا',
+        cancelled: 'ملغي',
       },
       offerForm: {
         kicker: 'إنشاء عرض P2P',

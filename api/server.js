@@ -799,6 +799,9 @@ const P2POffersQuerySchema = z.object({
   payment_method_id: z.coerce.number().int().positive().optional(),
 });
 
+const P2POfferIdSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
 const P2PTradeCreateSchema = z.object({
   offer_id: z.number().int().positive(),
   amount: z.string(),
@@ -3837,6 +3840,37 @@ app.get('/p2p/offers', walletLimiter, async (req, res, next) => {
   }
 });
 
+app.get('/p2p/offers/mine', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      'SELECT o.*, u.username FROM p2p_offers o JOIN users u ON u.id=o.user_id WHERE o.user_id=? ORDER BY o.updated_at DESC LIMIT 100',
+      [userId]
+    );
+    const offerIds = rows.map((row) => row.id);
+    let methodMap = {};
+    if (offerIds.length) {
+      const [methodRows] = await pool.query(
+        `SELECT opm.offer_id, pm.id, pm.name
+           FROM p2p_offer_payment_methods opm
+           JOIN p2p_payment_methods pm ON pm.id = opm.payment_method_id
+          WHERE opm.offer_id IN (?)
+          ORDER BY pm.name`,
+        [offerIds]
+      );
+      methodMap = methodRows.reduce((acc, row) => {
+        if (!acc[row.offer_id]) acc[row.offer_id] = [];
+        acc[row.offer_id].push({ id: row.id, name: row.name });
+        return acc;
+      }, {});
+    }
+    const offers = rows.map((row) => presentOfferRow(row, methodMap[row.id] || []));
+    res.json({ ok: true, offers });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post('/p2p/offers', walletLimiter, async (req, res, next) => {
   let conn;
   try {
@@ -3948,6 +3982,54 @@ app.post('/p2p/offers', walletLimiter, async (req, res, next) => {
     next(err);
   } finally {
     if (conn) conn.release();
+  }
+});
+
+app.post('/p2p/offers/:id/cancel', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const { id: offerId } = P2POfferIdSchema.parse(req.params);
+    const [[offer]] = await pool.query(
+      `SELECT o.*, u.username
+         FROM p2p_offers o
+         JOIN users u ON u.id=o.user_id
+        WHERE o.id=? AND o.user_id=?
+        LIMIT 1`,
+      [offerId, userId]
+    );
+    if (!offer) {
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Offer not found' });
+    }
+    if (offer.status === 'cancelled') {
+      return next({ status: 400, code: 'OFFER_CANCELLED', message: 'Offer already cancelled' });
+    }
+    if (offer.status !== 'active' && offer.status !== 'paused') {
+      return next({ status: 400, code: 'OFFER_INACTIVE', message: 'Offer is not active' });
+    }
+
+    await pool.query('UPDATE p2p_offers SET status=?, updated_at=NOW() WHERE id=?', ['cancelled', offerId]);
+    const [[updated]] = await pool.query(
+      `SELECT o.*, u.username
+         FROM p2p_offers o
+         JOIN users u ON u.id=o.user_id
+        WHERE o.id=?
+        LIMIT 1`,
+      [offerId]
+    );
+    const [methodRows] = await pool.query(
+      `SELECT pm.id, pm.name
+         FROM p2p_offer_payment_methods opm
+         JOIN p2p_payment_methods pm ON pm.id=opm.payment_method_id
+        WHERE opm.offer_id=?
+        ORDER BY pm.name`,
+      [offerId]
+    );
+    res.json({ ok: true, offer: presentOfferRow(updated, methodRows) });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid offer', details: err.flatten() });
+    }
+    next(err);
   }
 });
 
