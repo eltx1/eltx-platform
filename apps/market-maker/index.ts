@@ -315,20 +315,26 @@ async function cycle(settings: MarketMakerSettings) {
 
 async function main() {
   log('START', `api=${API_BASE}`);
+  let lastSettings: MarketMakerSettings | null = null;
   while (true) {
     const started = Date.now();
+    let delayMinutes = 1;
     try {
       const settings = buildSettings(await fetchSettings());
+      lastSettings = settings;
       if (!settings.enabled) {
         log('SKIP', 'market maker disabled');
       } else {
         await cycle(settings);
       }
+      delayMinutes = Math.max(1, settings.refreshMinutes);
     } catch (err: any) {
       log('ERROR', err?.message || String(err));
+      if (lastSettings) {
+        delayMinutes = Math.max(1, lastSettings.refreshMinutes);
+      }
     }
     const duration = Date.now() - started;
-    const delayMinutes = Math.max(1, buildSettings(await fetchSettings()).refreshMinutes);
     const remaining = delayMinutes * 60_000 - duration;
     await sleep(Math.max(5_000, remaining));
   }
