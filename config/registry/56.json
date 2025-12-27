@@ -6,5 +6,9 @@
   "USDC": {
     "address": "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
     "decimals": 18
+  },
+  "WBTC": {
+    "address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c",
+    "decimals": 18
   }
 }

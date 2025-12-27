@@ -99,7 +99,7 @@ type WalletAssetsResponse = {
 
 type ValidationState = { valid: boolean; message: string | null };
 
-const MARKET_PRIORITY = ['ELTX/USDT', 'ETH/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB'];
+const MARKET_PRIORITY = ['ELTX/USDT', 'WBTC/USDT', 'BNB/USDT', 'ETH/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB'];
 
 function sortMarkets(markets: SpotMarket[]): SpotMarket[] {
   const prioritize = (symbol: string) =>

@@ -795,7 +795,7 @@ const P2PDisputeResolveSchema = z.object({
 
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const SUPPORTED_CHAINS = [56, 1];
-const DEFAULT_CHAIN_BY_SYMBOL = { BNB: 56, ETH: 1, ELTX: CHAIN_ID };
+const DEFAULT_CHAIN_BY_SYMBOL = { BNB: 56, ETH: 1, WBTC: 56, ELTX: CHAIN_ID };
 
 // token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
@@ -2855,7 +2855,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
 
 const TransferSchema = z.object({
   to_user_id: z.coerce.number().int().positive(),
-  asset: z.enum(['BNB', 'ETH', 'USDC', 'USDT', 'ELTX']),
+  asset: z.enum(['BNB', 'ETH', 'USDC', 'USDT', 'WBTC', 'ELTX']),
   amount: z.string(),
 });
 
