@@ -1,5 +1,6 @@
 import { config as dotenv } from 'dotenv';
-import mysql, { Pool } from 'mysql2/promise';
+import mysql from 'mysql2/promise';
+import type { Pool } from 'mysql2/promise';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import Decimal from 'decimal.js';
