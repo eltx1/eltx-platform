@@ -10,29 +10,9 @@ import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
 import SpotMarketChart from '../../../../components/trade/SpotMarketChart';
 import { getDefaultSpotSlippageBps, subscribeSpotSlippage } from '../../../lib/settings';
-
-type SpotMarket = {
-  id: number;
-  symbol: string;
-  base_asset: string;
-  base_decimals: number;
-  quote_asset: string;
-  quote_decimals: number;
-  min_base_amount: string;
-  min_quote_amount: string;
-  last_price: string | null;
-  price_precision?: number;
-  amount_precision?: number;
-  min_price?: string | null;
-  max_price?: string | null;
-  price_min?: string | null;
-  price_max?: string | null;
-};
-
-type MarketsResponse = {
-  markets: SpotMarket[];
-  fees?: { maker_bps?: number | null; taker_bps?: number | null };
-};
+import SpotMarketSelector from '../../../../components/trade/SpotMarketSelector';
+import type { MarketsResponse, SpotMarket } from './types';
+import { ZERO, formatWithPrecision, safeDecimal, trimDecimal } from './utils';
 
 type SpotFees = { maker: number; taker: number };
 
@@ -119,31 +99,7 @@ type WalletAssetsResponse = {
 
 type ValidationState = { valid: boolean; message: string | null };
 
-const ZERO = new Decimal(0);
 const MARKET_PRIORITY = ['ELTX/USDT', 'ETH/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB'];
-
-function trimDecimal(value: string): string {
-  if (!value) return '0';
-  if (!value.includes('.')) return value;
-  const trimmed = value.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
-  const normalized = trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed;
-  return normalized.length ? normalized : '0';
-}
-
-function safeDecimal(value: string | number | null | undefined): Decimal {
-  try {
-    if (value === null || value === undefined) return ZERO;
-    const normalized = typeof value === 'string' && value.trim() === '' ? '0' : value;
-    return new Decimal(normalized as Decimal.Value);
-  } catch {
-    return ZERO;
-  }
-}
-
-function formatWithPrecision(value: Decimal, precision: number): string {
-  const places = Math.min(Math.max(0, precision), 8);
-  return trimDecimal(value.toFixed(places, Decimal.ROUND_DOWN));
-}
 
 function sortMarkets(markets: SpotMarket[]): SpotMarket[] {
   const prioritize = (symbol: string) =>
@@ -201,6 +157,7 @@ export default function SpotTradePage() {
   const [markets, setMarkets] = useState<SpotMarket[]>([]);
   const [fees, setFees] = useState<SpotFees>({ maker: 0, taker: 0 });
   const [selectedMarket, setSelectedMarket] = useState('');
+  const [marketSelectorOpen, setMarketSelectorOpen] = useState(false);
   const [orderbook, setOrderbook] = useState<{ bids: OrderbookLevel[]; asks: OrderbookLevel[] }>({ bids: [], asks: [] });
   const [trades, setTrades] = useState<OrderbookResponse['trades']>([]);
   const [orders, setOrders] = useState<SpotOrder[]>([]);
@@ -623,6 +580,11 @@ export default function SpotTradePage() {
     return null;
   }, [bestAskDecimal, bestBidDecimal, selectedMarketMeta?.last_price]);
 
+  const displayPriceLabel = useMemo(
+    () => (displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'),
+    [displayPrice, pricePrecision]
+  );
+
   const asksDisplay = useMemo(() => {
     let cumulative = ZERO;
     return orderbook.asks.map((level, idx) => {
@@ -746,6 +708,32 @@ export default function SpotTradePage() {
 
   return (
     <div className="p-4 space-y-6 overflow-x-hidden">
+      <SpotMarketSelector
+        open={marketSelectorOpen}
+        markets={markets}
+        selectedMarket={selectedMarket}
+        onClose={() => setMarketSelectorOpen(false)}
+        onSelect={(symbol) => {
+          setSelectedMarket(symbol);
+          setMarketSelectorOpen(false);
+          setAmount('');
+          setPrice('');
+          setErrorBanner('');
+        }}
+        strings={{
+          title: t.spotTrade.marketSelector.title,
+          searchPlaceholder: t.spotTrade.marketSelector.searchPlaceholder,
+          favorites: t.spotTrade.marketSelector.favorites,
+          all: t.spotTrade.marketSelector.all,
+          quotes: t.spotTrade.marketSelector.quotes,
+          empty: t.spotTrade.marketSelector.empty,
+          lastPrice: t.spotTrade.lastPrice,
+          base: t.spotTrade.marketSelector.base,
+          quote: t.spotTrade.marketSelector.quote,
+          minOrder: t.spotTrade.marketSelector.minOrder,
+        }}
+      />
+
       <div className="space-y-2">
         <h1 className="text-xl font-semibold">{t.spotTrade.title}</h1>
         <p className="text-sm opacity-80">{t.spotTrade.subtitle}</p>
@@ -773,24 +761,34 @@ export default function SpotTradePage() {
           <div className="grid gap-6 2xl:grid-cols-[400px,1fr] xl:grid-cols-[360px,1fr]">
             <div className="space-y-4 bg-white/5 rounded-2xl p-4 shadow-lg shadow-black/10">
               <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
-                  <label className="block text-xs mb-1 opacity-70">{t.spotTrade.market}</label>
-                  <select
-                    value={selectedMarket}
-                    onChange={(e) => {
-                      setSelectedMarket(e.target.value);
-                      setAmount('');
-                      setPrice('');
-                      setErrorBanner('');
-                    }}
-                    className="w-full p-2 rounded-lg bg-black/20 border border-white/15 text-sm"
+                <div className="flex-1 space-y-2">
+                  <label className="block text-xs opacity-70">{t.spotTrade.market}</label>
+                  <button
+                    type="button"
+                    onClick={() => setMarketSelectorOpen(true)}
+                    className="w-full rounded-xl border border-white/15 bg-black/25 px-3 py-3 text-left transition hover:border-cyan-400/50 hover:bg-white/10"
                   >
-                    {markets.map((m) => (
-                      <option key={m.symbol} value={m.symbol}>
-                        {m.symbol}
-                      </option>
-                    ))}
-                  </select>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-base font-semibold">
+                            {selectedMarket || t.spotTrade.marketSelector.placeholder}
+                          </span>
+                          {quoteSymbol && (
+                            <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold uppercase text-white/70">
+                              {quoteSymbol}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-white/60">
+                          {t.spotTrade.lastPrice}: {displayPriceLabel} {quoteSymbol}
+                        </div>
+                      </div>
+                      <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white/80">
+                        {t.spotTrade.marketSelector.open}
+                      </span>
+                    </div>
+                  </button>
                 </div>
                 <div className="hidden md:flex flex-col items-end text-xs gap-1">
                   <span className={`px-2 py-1 rounded-full ${streamConnected ? 'bg-green-500/20 text-green-200' : 'bg-yellow-500/20 text-yellow-100'}`}>
