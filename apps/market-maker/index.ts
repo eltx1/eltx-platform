@@ -253,14 +253,16 @@ async function placeOrder(payload: { market: string; side: 'buy' | 'sell'; type:
 
 async function fetchPrices(): Promise<Record<string, Decimal>> {
   const ids = Object.values(COINGECKO_IDS).join(',');
-  const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usdt`, {
+  // CoinGecko does not return USDT quotes in /simple/price anymore, so we fetch USD
+  // prices and treat them as a 1:1 reference for USDT pairs.
+  const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`, {
     headers: { 'User-Agent': 'eltx-market-maker' },
   });
   if (!res.ok) throw new Error(`coingecko failed (${res.status})`);
   const json = await res.json();
   const prices: Record<string, Decimal> = {};
   for (const [symbol, id] of Object.entries(COINGECKO_IDS)) {
-    const val = json[id]?.usdt;
+    const val = json[id]?.usd;
     if (val !== undefined && val !== null) {
       prices[symbol] = new Decimal(val);
     }
