@@ -1100,6 +1100,18 @@ async function ensureSellerEligibility(conn, userId) {
   return { eligible: Date.now() >= eligibleAt.getTime(), availableAt: eligibleAt };
 }
 
+function publicUsername(username, userId) {
+  const fallback = userId ? `user-${userId}` : 'user';
+  if (!username) return fallback;
+  const trimmed = String(username).trim();
+  if (!trimmed) return fallback;
+  if (trimmed.includes('@')) {
+    const local = trimmed.split('@')[0];
+    return local || fallback;
+  }
+  return trimmed;
+}
+
 function presentPaymentMethodRow(row) {
   return {
     id: row.id,
@@ -1116,7 +1128,7 @@ function presentPaymentMethodRow(row) {
 function presentOfferRow(row, paymentMethods = []) {
   return {
     id: row.id,
-    user: { id: row.user_id, username: row.username },
+    user: { id: row.user_id, username: publicUsername(row.username, row.user_id) },
     side: row.side,
     asset: row.asset,
     currency: row.currency || 'USD',
@@ -1138,8 +1150,8 @@ function presentTradeRow(row) {
     offer_id: row.offer_id,
     buyer_id: row.buyer_id,
     seller_id: row.seller_id,
-    buyer_username: row.buyer_username,
-    seller_username: row.seller_username,
+    buyer_username: publicUsername(row.buyer_username, row.buyer_id),
+    seller_username: publicUsername(row.seller_username, row.seller_id),
     payment_method_id: row.payment_method_id,
     payment_method_name: row.payment_method_name,
     asset: row.asset,
@@ -1172,6 +1184,8 @@ async function getP2PTradeEmailContext(tradeId) {
   if (!row) return null;
   const amount = trimDecimal(row.amount);
   const fiat = formatDecimalValue(row.fiat_amount, 2);
+  const buyerUsername = publicUsername(row.buyer_username, row.buyer_id);
+  const sellerUsername = publicUsername(row.seller_username, row.seller_id);
   return {
     tradeId: row.id,
     status: row.status,
@@ -1180,8 +1194,8 @@ async function getP2PTradeEmailContext(tradeId) {
     amount,
     fiat,
     payment: row.payment_method_name,
-    buyer: { email: row.buyer_email, username: row.buyer_username, language: row.buyer_language || 'en' },
-    seller: { email: row.seller_email, username: row.seller_username, language: row.seller_language || 'en' },
+    buyer: { email: row.buyer_email, username: buyerUsername, language: row.buyer_language || 'en' },
+    seller: { email: row.seller_email, username: sellerUsername, language: row.seller_language || 'en' },
   };
 }
 
@@ -4262,7 +4276,7 @@ app.get('/p2p/trades/:id', walletLimiter, async (req, res, next) => {
         id: row.id,
         message: row.message,
         sender_id: row.sender_id,
-        username: row.username,
+        username: publicUsername(row.username, row.sender_id),
         created_at: row.created_at,
       })),
     });
@@ -5027,6 +5041,7 @@ app.get('/admin/p2p/disputes', async (req, res, next) => {
     await requireAdmin(req);
     const [rows] = await pool.query(
       `SELECT d.*, t.asset, t.amount, t.fiat_amount, t.status AS trade_status,
+              t.buyer_id, t.seller_id,
               bu.username AS buyer_username, su.username AS seller_username,
               pm.name AS payment_method_name, au.username AS admin_username
          FROM p2p_disputes d
@@ -5054,8 +5069,8 @@ app.get('/admin/p2p/disputes', async (req, res, next) => {
         amount: trimDecimal(row.amount),
         fiat_amount: formatDecimalValue(row.fiat_amount, 2),
         status: row.trade_status,
-        buyer_username: row.buyer_username,
-        seller_username: row.seller_username,
+        buyer_username: publicUsername(row.buyer_username, row.buyer_id),
+        seller_username: publicUsername(row.seller_username, row.seller_id),
         payment_method_name: row.payment_method_name,
       },
     }));
