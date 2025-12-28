@@ -774,6 +774,7 @@ const AdminSpotMarketUpdateSchema = z
 const AdminStripePricingUpdateSchema = z
   .object({
     price_eltx: z.string().optional(),
+    price_usdt: z.string().optional(),
     min_usd: z.string().optional(),
     max_usd: z.string().nullable().optional(),
   })
@@ -976,6 +977,7 @@ const ELTX_DECIMALS = (() => {
   return normalizeDecimals(raw, DEFAULT_ELTX_DECIMALS);
 })();
 const ELTX_SYMBOL = 'ELTX';
+const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const DEFAULT_WITHDRAWAL_FEE_BPS = 1000;
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
@@ -992,6 +994,7 @@ function getSymbolDecimals(symbol) {
   if (meta && meta.decimals !== undefined && meta.decimals !== null)
     return normalizeDecimals(meta.decimals, DEFAULT_ELTX_DECIMALS);
   if (symbol === ELTX_SYMBOL) return ELTX_DECIMALS;
+  if (symbol?.toUpperCase() === 'USDT' || symbol?.toUpperCase() === 'USDC') return 6;
   return DEFAULT_ELTX_DECIMALS;
 }
 
@@ -3043,6 +3046,8 @@ const SpotCandlesQuerySchema = z.object({
 const StripeSessionSchema = z.object({
   amount_usd: z.union([z.string(), z.number()]),
   expected_price_eltx: z.string().optional(),
+  expected_price_asset: z.string().optional(),
+  asset: z.string().optional(),
 });
 
 const MAX_KYC_FILE_BYTES = 8 * 1024 * 1024; // 8MB
@@ -3191,18 +3196,34 @@ app.post('/stripe/webhook', async (req, res) => {
 app.get('/fiat/stripe/rate', walletLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
-    const pricing = await getStripePricing(pool);
+    const assetParam = (req.query?.asset || ELTX_SYMBOL).toString();
+    const assetRaw = assetParam ? assetParam.toUpperCase() : ELTX_SYMBOL;
+    const asset = STRIPE_SUPPORTED_ASSETS.includes(assetRaw) ? assetRaw : ELTX_SYMBOL;
+    const pricing = await getStripePricing(pool, asset);
     const min = pricing.min.toFixed(2, Decimal.ROUND_UP);
     const max = pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null;
+    const prices = STRIPE_SUPPORTED_ASSETS.map((sym) => {
+      const price = pricing.prices?.[sym];
+      return {
+        asset: sym,
+        price_asset: price ? price.toFixed(18, Decimal.ROUND_DOWN) : null,
+        price_eltx: price ? price.toFixed(18, Decimal.ROUND_DOWN) : null,
+        decimals: getSymbolDecimals(sym),
+        updated_at: pricing.updatedAt,
+      };
+    }).filter((row) => row.price_asset);
     res.json({
       ok: true,
       pricing: {
         asset: pricing.asset,
+        price_asset: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
         price_eltx: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
+        decimals: getSymbolDecimals(pricing.asset),
         min_usd: min,
         max_usd: max,
         updated_at: pricing.updatedAt,
       },
+      prices,
       stripe: getStripeStatusPayload('public'),
     });
   } catch (err) {
@@ -3225,6 +3246,10 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
     const payload = StripeSessionSchema.parse(req.body || {});
     const amountInput =
       typeof payload.amount_usd === 'number' ? payload.amount_usd.toString() : String(payload.amount_usd || '').trim();
+    const assetInput = (payload.asset || ELTX_SYMBOL).toString().toUpperCase();
+    if (!STRIPE_SUPPORTED_ASSETS.includes(assetInput)) {
+      return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Unsupported purchase asset' });
+    }
     let amountDecimal;
     try {
       amountDecimal = new Decimal(amountInput || '0');
@@ -3238,7 +3263,18 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    const pricing = await getStripePricing(conn);
+    const pricing = await getStripePricing(conn, assetInput);
+    const price = pricing.price;
+    const expectedPriceRaw = payload.expected_price_asset ?? payload.expected_price_eltx;
+    if (expectedPriceRaw) {
+      try {
+        const expectedPrice = new Decimal(expectedPriceRaw);
+        if (!expectedPrice.eq(price)) {
+          await conn.rollback();
+          return next({ status: 409, code: 'PRICE_CHANGED', message: 'Price changed, please refresh the quote.' });
+        }
+      } catch {}
+    }
     const min = pricing.min;
     const max = pricing.max;
     if (amountDecimal.lt(min)) {
@@ -3267,17 +3303,31 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid amount' });
     }
 
-    const price = pricing.price;
-    const eltxDecimal = amountDecimal.mul(price);
-    const eltxAmount = eltxDecimal.toFixed(18, Decimal.ROUND_DOWN);
-    const eltxWei = ethers.parseUnits(eltxAmount, 18).toString();
+    const decimals = getSymbolDecimals(assetInput);
+    const assetDecimal = amountDecimal.mul(price);
+    const assetAmount = assetDecimal.toFixed(decimals, Decimal.ROUND_DOWN);
+    const assetWei = ethers.parseUnits(assetAmount, decimals).toString();
+    const eltxAmount = assetInput === ELTX_SYMBOL ? assetAmount : '0';
+    const eltxWei = assetInput === ELTX_SYMBOL ? assetWei : '0';
 
     const [[userRow]] = await conn.query('SELECT email FROM users WHERE id=? LIMIT 1', [userId]);
 
     const [insert] = await conn.query(
-      `INSERT INTO fiat_purchases (user_id, status, currency, usd_amount, usd_amount_minor, price_eltx, eltx_amount, eltx_amount_wei)
-       VALUES (?, 'pending', 'USD', ?, ?, ?, ?, ?)`,
-      [userId, normalizedUsd, amountMinor, price.toFixed(18, Decimal.ROUND_DOWN), eltxAmount, eltxWei]
+      `INSERT INTO fiat_purchases (user_id, status, currency, asset, asset_decimals, usd_amount, usd_amount_minor, price_asset, price_eltx, asset_amount, eltx_amount, asset_amount_wei, eltx_amount_wei)
+       VALUES (?, 'pending', 'USD', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId,
+        assetInput,
+        decimals,
+        normalizedUsd,
+        amountMinor,
+        price.toFixed(18, Decimal.ROUND_DOWN),
+        price.toFixed(18, Decimal.ROUND_DOWN),
+        assetAmount,
+        eltxAmount,
+        assetWei,
+        eltxWei,
+      ]
     );
     const purchaseId = insert.insertId;
 
@@ -3297,7 +3347,7 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
           quantity: 1,
           price_data: {
             currency: 'usd',
-            product_data: { name: 'ELTX Purchase' },
+            product_data: { name: `${assetInput} Purchase` },
             unit_amount: amountMinor,
           },
         },
@@ -3316,11 +3366,16 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
         max_usd: max ? max.toFixed(2, Decimal.ROUND_DOWN) : null,
       },
       quote: {
+        asset: assetInput,
+        price_asset: price.toFixed(18, Decimal.ROUND_DOWN),
         price_eltx: price.toFixed(18, Decimal.ROUND_DOWN),
         eltx_amount: eltxAmount,
         eltx_amount_wei: eltxWei,
+        asset_amount: assetAmount,
+        asset_amount_wei: assetWei,
         usd_amount: normalizedUsd,
       },
+      asset: assetInput,
     });
   } catch (err) {
     if (conn) {
@@ -3338,7 +3393,7 @@ app.get('/fiat/stripe/purchases', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query(
-      `SELECT id, user_id, status, currency, usd_amount, usd_amount_minor, price_eltx, eltx_amount, eltx_amount_wei,
+      `SELECT id, user_id, status, currency, asset, asset_decimals, usd_amount, usd_amount_minor, price_asset, price_eltx, asset_amount, eltx_amount, asset_amount_wei, eltx_amount_wei,
               credited, stripe_payment_intent_id, stripe_session_id, amount_charged_minor,
               created_at, completed_at, credited_at
          FROM fiat_purchases
@@ -3359,7 +3414,7 @@ app.get('/fiat/stripe/session/:sessionId', walletLimiter, async (req, res, next)
     const sessionId = req.params.sessionId;
     if (!sessionId) return next({ status: 400, code: 'BAD_INPUT', message: 'Session id required' });
     const [[row]] = await pool.query(
-      `SELECT id, user_id, status, currency, usd_amount, usd_amount_minor, price_eltx, eltx_amount, eltx_amount_wei,
+      `SELECT id, user_id, status, currency, asset, asset_decimals, usd_amount, usd_amount_minor, price_asset, price_eltx, asset_amount, eltx_amount, asset_amount_wei, eltx_amount_wei,
               credited, stripe_payment_intent_id, stripe_session_id, amount_charged_minor,
               created_at, completed_at, credited_at
          FROM fiat_purchases
@@ -5459,14 +5514,30 @@ app.get('/admin/stripe/pricing', async (req, res, next) => {
   try {
     await requireAdmin(req);
     const pricing = await getStripePricing(pool);
+    const priceEltx =
+      pricing.prices?.[ELTX_SYMBOL]?.toFixed(18, Decimal.ROUND_DOWN) || pricing.price.toFixed(18, Decimal.ROUND_DOWN);
+    const priceUsdt =
+      pricing.prices?.USDT?.toFixed(18, Decimal.ROUND_DOWN) || pricing.price.toFixed(18, Decimal.ROUND_DOWN);
+    const assets = STRIPE_SUPPORTED_ASSETS.map((sym) => {
+      const price = pricing.prices?.[sym];
+      return {
+        asset: sym,
+        price_asset: price ? price.toFixed(18, Decimal.ROUND_DOWN) : null,
+        price_eltx: price ? price.toFixed(18, Decimal.ROUND_DOWN) : null,
+        decimals: getSymbolDecimals(sym),
+        updated_at: pricing.updatedAt,
+      };
+    }).filter((row) => row.price_asset);
     res.json({
       ok: true,
       pricing: {
         asset: pricing.asset,
-        price_eltx: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
+        price_eltx: priceEltx,
+        price_usdt: priceUsdt,
         min_usd: pricing.min.toFixed(2, Decimal.ROUND_UP),
         max_usd: pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null,
         updated_at: pricing.updatedAt,
+        assets,
       },
     });
   } catch (err) {
@@ -5492,6 +5563,14 @@ app.patch('/admin/stripe/pricing', async (req, res, next) => {
       if (normalized === null)
         return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid ELTX price value' });
       fields.push('price_eltx = ?');
+      params.push(normalized);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, 'price_usdt')) {
+      const normalized = normalizePositiveDecimal(updates.price_usdt, 18);
+      if (normalized === null)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid USDT price value' });
+      fields.push('price_usdt = ?');
       params.push(normalized);
     }
 
@@ -5521,14 +5600,30 @@ app.patch('/admin/stripe/pricing', async (req, res, next) => {
     }
 
     const pricing = await getStripePricing(pool);
+    const priceEltx =
+      pricing.prices?.[ELTX_SYMBOL]?.toFixed(18, Decimal.ROUND_DOWN) || pricing.price.toFixed(18, Decimal.ROUND_DOWN);
+    const priceUsdt =
+      pricing.prices?.USDT?.toFixed(18, Decimal.ROUND_DOWN) || pricing.price.toFixed(18, Decimal.ROUND_DOWN);
+    const assets = STRIPE_SUPPORTED_ASSETS.map((sym) => {
+      const price = pricing.prices?.[sym];
+      return {
+        asset: sym,
+        price_asset: price ? price.toFixed(18, Decimal.ROUND_DOWN) : null,
+        price_eltx: price ? price.toFixed(18, Decimal.ROUND_DOWN) : null,
+        decimals: getSymbolDecimals(sym),
+        updated_at: pricing.updatedAt,
+      };
+    }).filter((row) => row.price_asset);
     res.json({
       ok: true,
       pricing: {
         asset: pricing.asset,
-        price_eltx: pricing.price.toFixed(18, Decimal.ROUND_DOWN),
+        price_eltx: priceEltx,
+        price_usdt: priceUsdt,
         min_usd: pricing.min.toFixed(2, Decimal.ROUND_UP),
         max_usd: pricing.max ? pricing.max.toFixed(2, Decimal.ROUND_DOWN) : null,
         updated_at: pricing.updatedAt,
+        assets,
       },
     });
   } catch (err) {
@@ -5763,7 +5858,7 @@ app.get('/admin/users/:id', async (req, res, next) => {
     });
 
     const [fiatRows] = await pool.query(
-      `SELECT id, status, usd_amount, eltx_amount, price_eltx, created_at, updated_at
+      `SELECT id, status, asset, asset_decimals, usd_amount, asset_amount, eltx_amount, price_asset, price_eltx, created_at, updated_at
          FROM fiat_purchases
          WHERE user_id=?
          ORDER BY created_at DESC
@@ -5774,8 +5869,11 @@ app.get('/admin/users/:id', async (req, res, next) => {
     const fiat = fiatRows.map((row) => ({
       id: row.id,
       status: row.status,
+      asset: (row.asset || ELTX_SYMBOL).toUpperCase(),
       usd_amount: formatDecimalValue(row.usd_amount || 0, 2),
+      asset_amount: trimDecimal(row.asset_amount || row.eltx_amount),
       eltx_amount: trimDecimal(row.eltx_amount),
+      price_asset: trimDecimal(row.price_asset ?? row.price_eltx),
       price_eltx: trimDecimal(row.price_eltx),
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -6684,7 +6782,7 @@ app.get('/admin/fiat/purchases', async (req, res, next) => {
     await requireAdmin(req);
     const { limit, offset } = PaginationSchema.parse(req.query || {});
     const [rows] = await pool.query(
-      `SELECT id, user_id, status, currency, usd_amount, price_eltx, eltx_amount, eltx_amount_wei,
+      `SELECT id, user_id, status, currency, asset, asset_decimals, usd_amount, price_asset, price_eltx, asset_amount, eltx_amount, asset_amount_wei, eltx_amount_wei,
               credited, created_at, updated_at, completed_at, credited_at, stripe_session_id, stripe_payment_intent_id
          FROM fiat_purchases
          ORDER BY created_at DESC
@@ -6697,9 +6795,14 @@ app.get('/admin/fiat/purchases', async (req, res, next) => {
       status: row.status,
       currency: row.currency,
       usd_amount: formatDecimalValue(row.usd_amount || 0, 2),
+      asset: (row.asset || ELTX_SYMBOL).toUpperCase(),
+      asset_decimals: Number(row.asset_decimals || getSymbolDecimals(row.asset || ELTX_SYMBOL)),
+      price_asset: trimDecimal(row.price_asset ?? row.price_eltx),
       price_eltx: trimDecimal(row.price_eltx),
       eltx_amount: trimDecimal(row.eltx_amount),
+      asset_amount: trimDecimal(row.asset_amount ?? row.eltx_amount),
       eltx_amount_wei: bigIntFromValue(row.eltx_amount_wei || 0).toString(),
+      asset_amount_wei: bigIntFromValue(row.asset_amount_wei || row.eltx_amount_wei || 0).toString(),
       credited: !!row.credited,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -8924,27 +9027,48 @@ function isTruthyFlag(value) {
 
 async function ensureStripePricingRow(conn) {
   try {
-    await conn.query('INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd, max_usd) VALUES (1, 1, 10, NULL)');
+    await conn.query(
+      'INSERT IGNORE INTO stripe_pricing (id, price_eltx, price_usdt, min_usd, max_usd) VALUES (1, 1, 1, 10, NULL)'
+    );
+    await conn.query(
+      'UPDATE stripe_pricing SET price_usdt = CASE WHEN price_usdt IS NULL OR price_usdt <= 0 THEN price_eltx ELSE price_usdt END WHERE id=1'
+    );
   } catch (err) {
     console.warn('[stripe] failed to initialize stripe_pricing row', err.message || err);
   }
 }
 
-async function getStripePricing(conn = pool) {
+async function getStripePricing(conn = pool, asset = ELTX_SYMBOL) {
   await ensureStripePricingRow(conn);
 
-  const [rows] = await conn.query('SELECT price_eltx, min_usd, max_usd, updated_at FROM stripe_pricing WHERE id=1 LIMIT 1');
+  const [rows] = await conn.query(
+    'SELECT price_eltx, price_usdt, min_usd, max_usd, updated_at FROM stripe_pricing WHERE id=1 LIMIT 1'
+  );
   const row = rows[0];
 
   if (!row)
     throw { status: 503, code: 'STRIPE_PRICING_MISSING', message: 'Stripe pricing is not configured.' };
 
-  let price;
+  const prices = {};
+  const targetAsset = (asset || ELTX_SYMBOL).toUpperCase();
+
   try {
-    price = new Decimal(row.price_eltx);
+    const eltxPrice = new Decimal(row.price_eltx);
+    if (eltxPrice.isFinite() && eltxPrice.gt(0)) prices[ELTX_SYMBOL] = eltxPrice;
   } catch {}
+
+  try {
+    const usdtPrice = new Decimal(row.price_usdt ?? row.price_eltx);
+    if (usdtPrice.isFinite() && usdtPrice.gt(0)) prices.USDT = usdtPrice;
+  } catch {}
+
+  const price = prices[targetAsset] || prices[ELTX_SYMBOL];
   if (!price || !price.isFinite() || price.lte(0))
-    throw { status: 503, code: 'STRIPE_PRICE_INVALID', message: 'Invalid Stripe ELTX price. Please configure pricing.' };
+    throw {
+      status: 503,
+      code: 'STRIPE_PRICE_INVALID',
+      message: `Invalid Stripe ${targetAsset} price. Please configure pricing.`,
+    };
 
   let min;
   try {
@@ -8961,20 +9085,33 @@ async function getStripePricing(conn = pool) {
     } catch {}
   }
 
-  return { asset: STRIPE_PRICING_ASSET, price, min, max, updatedAt: row?.updated_at || null };
+  return { asset: targetAsset, price, min, max, updatedAt: row?.updated_at || null, prices };
 }
 
 function formatFiatPurchaseRow(row) {
+  const assetSymbol = (row.asset || ELTX_SYMBOL).toUpperCase();
+  const decimalsRaw = row.asset_decimals !== undefined && row.asset_decimals !== null ? Number(row.asset_decimals) : null;
+  const assetDecimals = Number.isFinite(decimalsRaw) && decimalsRaw > 0 ? decimalsRaw : getSymbolDecimals(assetSymbol);
+  const priceAssetRaw = row.price_asset !== undefined && row.price_asset !== null ? row.price_asset : row.price_eltx;
+  const assetAmountRaw =
+    row.asset_amount !== undefined && row.asset_amount !== null ? row.asset_amount : row.eltx_amount;
+  const assetAmountWeiRaw =
+    row.asset_amount_wei !== undefined && row.asset_amount_wei !== null ? row.asset_amount_wei : row.eltx_amount_wei;
   const usdMinorRaw = row.usd_amount_minor !== undefined && row.usd_amount_minor !== null ? row.usd_amount_minor : 0;
   const usdMinor = Number(usdMinorRaw);
   return {
     id: row.id,
     status: row.status,
+    asset: assetSymbol,
+    asset_decimals: assetDecimals,
     usd_amount: row.usd_amount?.toString() || '0',
     usd_amount_minor: Number.isFinite(usdMinor) ? usdMinor : 0,
-    price_eltx: row.price_eltx?.toString() || '0',
+    price_asset: priceAssetRaw?.toString() || row.price_eltx?.toString() || '0',
+    price_eltx: row.price_eltx?.toString() || priceAssetRaw?.toString() || '0',
     eltx_amount: row.eltx_amount?.toString() || '0',
     eltx_amount_wei: toPlainIntegerString(row.eltx_amount_wei),
+    asset_amount: assetAmountRaw?.toString() || row.eltx_amount?.toString() || '0',
+    asset_amount_wei: toPlainIntegerString(assetAmountWeiRaw),
     credited: isTruthyFlag(row.credited),
     stripe_payment_intent_id: row.stripe_payment_intent_id || null,
     stripe_session_id: row.stripe_session_id || null,
@@ -9000,8 +9137,12 @@ async function creditFiatPurchase(conn, purchase, refs = {}) {
     return;
   }
 
-  const eltxWei = BigInt(toPlainIntegerString(purchase.eltx_amount_wei));
-  if (eltxWei <= 0n) {
+  const assetSymbol = (purchase.asset || ELTX_SYMBOL).toUpperCase();
+  const decimalsRaw =
+    purchase.asset_decimals !== undefined && purchase.asset_decimals !== null ? Number(purchase.asset_decimals) : null;
+  const assetDecimals = Number.isFinite(decimalsRaw) && decimalsRaw > 0 ? decimalsRaw : getSymbolDecimals(assetSymbol);
+  const amountWei = BigInt(toPlainIntegerString(purchase.asset_amount_wei ?? purchase.eltx_amount_wei));
+  if (amountWei <= 0n) {
     await conn.query('UPDATE fiat_purchases SET credited=1, credited_at=NOW() WHERE id=?', [purchase.id]);
     return;
   }
@@ -9010,7 +9151,7 @@ async function creditFiatPurchase(conn, purchase, refs = {}) {
     `INSERT INTO user_balances (user_id, asset, balance_wei, created_at)
      VALUES (?, ?, ?, NOW())
      ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
-    [purchase.user_id, ELTX_SYMBOL, eltxWei.toString()]
+    [purchase.user_id, assetSymbol, amountWei.toString()]
   );
 
   const txHash = refs.paymentIntentId
@@ -9031,7 +9172,7 @@ async function creditFiatPurchase(conn, purchase, refs = {}) {
        amount_wei=VALUES(amount_wei),
        source='stripe',
        last_update_at=NOW()`,
-    [purchase.user_id, 0, 'stripe', ELTX_SYMBOL, txHash, 'stripe', ZERO_ADDRESS, eltxWei.toString()]
+    [purchase.user_id, 0, 'stripe', assetSymbol, txHash, 'stripe', ZERO_ADDRESS, amountWei.toString()]
   );
   const depositId = depositRes.insertId;
 

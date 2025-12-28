@@ -16,11 +16,20 @@ type FiatRateResponse = {
   ok: boolean;
   pricing: {
     asset: string;
-    price_eltx: string;
+    price_asset: string | null;
+    price_eltx?: string | null;
     min_usd: string;
     max_usd: string | null;
     updated_at?: string | null;
+    decimals?: number | null;
   } | null;
+  prices?: Array<{
+    asset: string;
+    price_asset: string | null;
+    price_eltx?: string | null;
+    updated_at?: string | null;
+    decimals?: number | null;
+  }>;
   stripe: {
     enabled: boolean;
     publishableKey?: string | null;
@@ -31,9 +40,19 @@ type FiatRateResponse = {
 type FiatSessionResponse = {
   ok: boolean;
   sessionId: string;
+  asset: string;
   publishableKey?: string | null;
   limits: { min_usd: string; max_usd: string | null };
-  quote: { price_eltx: string; eltx_amount: string; eltx_amount_wei: string; usd_amount: string };
+  quote: {
+    asset: string;
+    price_asset: string;
+    price_eltx?: string;
+    asset_amount: string;
+    eltx_amount?: string;
+    asset_amount_wei: string;
+    eltx_amount_wei?: string;
+    usd_amount: string;
+  };
 };
 
 type FiatPurchase = {
@@ -41,9 +60,14 @@ type FiatPurchase = {
   status: 'pending' | 'succeeded' | 'failed' | 'canceled' | 'expired' | 'refunded';
   usd_amount: string;
   usd_amount_minor: number;
+  price_asset?: string | null;
   price_eltx: string;
   eltx_amount: string;
   eltx_amount_wei: string;
+  asset_amount?: string | null;
+  asset_amount_wei?: string | null;
+  asset?: string;
+  asset_decimals?: number | null;
   credited: boolean;
   stripe_payment_intent_id?: string | null;
   stripe_session_id?: string | null;
@@ -95,6 +119,8 @@ export default function ClientBuy() {
 
   const [usdAmount, setUsdAmount] = useState('100');
   const [rate, setRate] = useState<FiatRateResponse['pricing']>(null);
+  const [selectedAsset, setSelectedAsset] = useState('ELTX');
+  const [availableAssets, setAvailableAssets] = useState<string[]>(['ELTX', 'USDT']);
   const [loadingRate, setLoadingRate] = useState(true);
   const [stripeEnabled, setStripeEnabled] = useState(false);
   const [stripeKey, setStripeKey] = useState<string | null>(null);
@@ -112,7 +138,7 @@ export default function ClientBuy() {
     () => new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }),
     []
   );
-  const eltxFormatter = useMemo(
+  const assetFormatter = useMemo(
     () => new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }),
     []
   );
@@ -149,17 +175,17 @@ export default function ClientBuy() {
     }
   }, [usdAmount]);
 
-  const estimatedEltx = useMemo(() => {
-    if (!parsedAmount || !rate?.price_eltx) return '0';
+  const estimatedAsset = useMemo(() => {
+    if (!parsedAmount || !rate?.price_asset) return '0';
     try {
-      const price = new Decimal(rate.price_eltx || '0');
+      const price = new Decimal(rate.price_asset || '0');
       if (!price.isFinite()) return '0';
       const result = parsedAmount.mul(price);
       return result.toFixed(6);
     } catch {
       return '0';
     }
-  }, [parsedAmount, rate?.price_eltx]);
+  }, [parsedAmount, rate?.price_asset]);
 
   const amountValid = useMemo(() => {
     if (!parsedAmount) return false;
@@ -169,11 +195,21 @@ export default function ClientBuy() {
     return true;
   }, [parsedAmount, minUsd, maxUsd]);
 
-  const loadRate = useCallback(async () => {
+  const loadRate = useCallback(async (asset?: string) => {
+    const targetAsset = (asset || selectedAsset || 'ELTX').toUpperCase();
     setLoadingRate(true);
-    const res = await apiFetch<FiatRateResponse>('/fiat/stripe/rate');
+    const res = await apiFetch<FiatRateResponse>(`/fiat/stripe/rate?asset=${encodeURIComponent(targetAsset)}`);
     if (res.ok) {
       setRate(res.data.pricing);
+      if (res.data.pricing?.asset) {
+        setSelectedAsset(res.data.pricing.asset.toUpperCase());
+      }
+      if (Array.isArray(res.data.prices)) {
+        const merged = res.data.prices
+          .map((row) => row.asset?.toUpperCase?.())
+          .filter(Boolean) as string[];
+        setAvailableAssets((prev) => Array.from(new Set([...prev, ...merged])));
+      }
       setStripeEnabled(res.data.stripe?.enabled ?? false);
       const incomingKey = res.data.stripe?.publishableKey || null;
       if (incomingKey) setStripeKey(incomingKey);
@@ -185,7 +221,7 @@ export default function ClientBuy() {
       setError(res.error || t.common.genericError);
     }
     setLoadingRate(false);
-  }, [t.common.genericError]);
+  }, [selectedAsset, t.common.genericError]);
 
   const loadPurchases = useCallback(async () => {
     setLoadingPurchases(true);
@@ -246,6 +282,14 @@ export default function ClientBuy() {
     setUsdAmount(sanitized);
   };
 
+  const handleAssetChange = (asset: string) => {
+    const normalized = asset.toUpperCase();
+    if (normalized === selectedAsset) return;
+    setSessionFeedback({ status: null, purchase: null });
+    setSelectedAsset(normalized);
+    loadRate(normalized);
+  };
+
   const handleCheckout = async () => {
     setError(null);
     setSessionFeedback({ status: null, purchase: null });
@@ -253,7 +297,7 @@ export default function ClientBuy() {
       setError(t.buy.errors.stripeUnavailable);
       return;
     }
-    if (!rate?.price_eltx) {
+    if (!rate?.price_asset) {
       setError(t.common.genericError);
       return;
     }
@@ -278,7 +322,12 @@ export default function ClientBuy() {
     setLoadingCheckout(true);
     const res = await apiFetch<FiatSessionResponse>('/fiat/stripe/session', {
       method: 'POST',
-      body: JSON.stringify({ amount_usd: normalizedUsd, expected_price_eltx: rate.price_eltx }),
+      body: JSON.stringify({
+        amount_usd: normalizedUsd,
+        expected_price_asset: rate.price_asset || undefined,
+        expected_price_eltx: rate.price_eltx || undefined,
+        asset: selectedAsset,
+      }),
     });
     setLoadingCheckout(false);
     if (!res.ok) {
@@ -305,8 +354,10 @@ export default function ClientBuy() {
     return <div className="p-6 text-white/70">{t.trade.signInRequired}</div>;
   }
 
+  const successAsset = sessionFeedback.purchase?.asset || selectedAsset;
   const stripeReady = stripeEnabled && (stripeKey?.length ?? 0) > 0;
   const showStripeNotice = !loadingRate && !stripeEnabled;
+  const successBody = t.buy.successBody.replace('{asset}', successAsset);
 
   return (
     <div className="space-y-8">
@@ -321,6 +372,30 @@ export default function ClientBuy() {
           </div>
         </div>
         <p className="text-sm text-white/60">{t.buy.intro}</p>
+
+        <div className="space-y-2">
+          <span className="text-xs uppercase tracking-wide text-white/60">{t.buy.assetLabel}</span>
+          <div className="flex flex-wrap gap-2">
+            {availableAssets.map((asset) => {
+              const isActive = asset.toUpperCase() === selectedAsset;
+              return (
+                <button
+                  key={asset}
+                  onClick={() => handleAssetChange(asset)}
+                  disabled={loadingRate || loadingCheckout}
+                  className={`rounded-full px-3 py-1 text-sm font-semibold transition ${
+                    isActive
+                      ? 'bg-indigo-500 text-white shadow'
+                      : 'border border-white/10 bg-black/40 text-white/80 hover:border-white/20'
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                >
+                  {asset.toUpperCase()}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-white/50">{t.buy.assetHint}</p>
+        </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="space-y-2">
@@ -349,10 +424,13 @@ export default function ClientBuy() {
           <div className="space-y-2">
             <span className="text-xs uppercase tracking-wide text-white/60">{t.buy.receiveLabel}</span>
             <div className="rounded-xl border border-white/10 bg-black/40 px-4 py-3 text-lg">
-              {eltxFormatter.format(Number(estimatedEltx || '0'))} ELTX
+              {assetFormatter.format(Number(estimatedAsset || '0'))} {selectedAsset}
             </div>
             <div className="text-xs text-white/50">
-              {t.buy.rateLabel}: {loadingRate ? '…' : `${eltxFormatter.format(Number(rate?.price_eltx || '0'))} ELTX / USD`}
+              {t.buy.rateLabel.replace('{asset}', selectedAsset)}:{' '}
+              {loadingRate
+                ? '…'
+                : `${assetFormatter.format(Number(rate?.price_asset || '0'))} ${selectedAsset} / USD`}
             </div>
           </div>
         </div>
@@ -389,7 +467,7 @@ export default function ClientBuy() {
             <CheckCircle2 className="h-4 w-4" />
             <div>
               <div className="font-medium">{t.buy.successTitle}</div>
-              <div className="text-xs text-green-200/80">{t.buy.successBody}</div>
+              <div className="text-xs text-green-200/80">{successBody}</div>
             </div>
           </div>
         )}
@@ -427,7 +505,7 @@ export default function ClientBuy() {
                 <tr>
                   <th className="px-4 py-3 text-left font-medium">{t.buy.table.date}</th>
                   <th className="px-4 py-3 text-left font-medium">{t.buy.table.amount}</th>
-                  <th className="px-4 py-3 text-left font-medium">{t.buy.table.eltx}</th>
+                  <th className="px-4 py-3 text-left font-medium">{t.buy.table.asset}</th>
                   <th className="px-4 py-3 text-left font-medium">{t.buy.table.status}</th>
                   <th className="px-4 py-3 text-left font-medium">{t.buy.table.reference}</th>
                 </tr>
@@ -440,9 +518,21 @@ export default function ClientBuy() {
                   const badgeClass = STATUS_THEME[statusKey] || 'bg-white/10 text-white';
                   const created = new Date(purchase.created_at);
                   const reference = purchase.stripe_payment_intent_id || purchase.stripe_session_id || '-';
-                  const eltxDisplay = purchase.eltx_amount
-                    ? eltxFormatter.format(Number(purchase.eltx_amount))
-                    : formatWei(purchase.eltx_amount_wei, 18);
+                  const assetSymbol = (purchase.asset || 'ELTX').toUpperCase();
+                  const decimals =
+                    purchase.asset_decimals !== undefined && purchase.asset_decimals !== null
+                      ? Number(purchase.asset_decimals)
+                      : assetSymbol === 'USDT'
+                      ? 6
+                      : 18;
+                  const assetDisplay =
+                    purchase.asset_amount && !Number.isNaN(Number(purchase.asset_amount))
+                      ? assetFormatter.format(Number(purchase.asset_amount))
+                      : purchase.asset_amount_wei
+                      ? formatWei(purchase.asset_amount_wei, Number.isFinite(decimals) ? decimals : 18)
+                      : purchase.eltx_amount
+                      ? assetFormatter.format(Number(purchase.eltx_amount))
+                      : formatWei(purchase.eltx_amount_wei, Number.isFinite(decimals) ? decimals : 18);
                   return (
                     <tr key={purchase.id} className="bg-black/20">
                       <td className="px-4 py-3 align-top text-white/80">
@@ -456,7 +546,9 @@ export default function ClientBuy() {
                       <td className="px-4 py-3 align-top text-white/80">
                         <div>{currencyFormatter.format(purchase.usd_amount_minor / 100)}</div>
                       </td>
-                      <td className="px-4 py-3 align-top text-white/80">{eltxDisplay}</td>
+                      <td className="px-4 py-3 align-top text-white/80">
+                        {assetDisplay} {assetSymbol}
+                      </td>
                       <td className="px-4 py-3 align-top">
                         <span className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs ${badgeClass}`}>
                           {label}
