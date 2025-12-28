@@ -212,6 +212,7 @@ INSERT IGNORE INTO asset_prices (asset, price_eltx, min_amount, spread_bps) VALU
 CREATE TABLE IF NOT EXISTS stripe_pricing (
   id TINYINT UNSIGNED NOT NULL DEFAULT 1,
   price_eltx DECIMAL(36,18) NOT NULL,
+  price_usdt DECIMAL(36,18) NOT NULL DEFAULT 1,
   min_usd DECIMAL(36,18) NOT NULL DEFAULT 10,
   max_usd DECIMAL(36,18) DEFAULT NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -219,12 +220,13 @@ CREATE TABLE IF NOT EXISTS stripe_pricing (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 ALTER TABLE stripe_pricing
   ADD COLUMN IF NOT EXISTS price_eltx DECIMAL(36,18) NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS price_usdt DECIMAL(36,18) NOT NULL DEFAULT 1 AFTER price_eltx,
   ADD COLUMN IF NOT EXISTS min_usd DECIMAL(36,18) NOT NULL DEFAULT 10 AFTER price_eltx,
   ADD COLUMN IF NOT EXISTS max_usd DECIMAL(36,18) NULL DEFAULT NULL AFTER min_usd,
   ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER max_usd;
 -- initialize with neutral defaults so Stripe pricing stays independent from asset swap pricing
-INSERT IGNORE INTO stripe_pricing (id, price_eltx, min_usd, max_usd)
-VALUES (1, 1, 10, NULL);
+INSERT IGNORE INTO stripe_pricing (id, price_eltx, price_usdt, min_usd, max_usd)
+VALUES (1, 1, 1, 10, NULL);
 
 -- fiat purchases via card (Stripe)
 CREATE TABLE IF NOT EXISTS fiat_purchases (
@@ -233,12 +235,17 @@ CREATE TABLE IF NOT EXISTS fiat_purchases (
   stripe_session_id VARCHAR(191) NULL,
   stripe_payment_intent_id VARCHAR(191) NULL,
   status ENUM('pending','succeeded','failed','canceled','expired','refunded') NOT NULL DEFAULT 'pending',
+  asset VARCHAR(32) NOT NULL DEFAULT 'ELTX',
+  asset_decimals INT UNSIGNED NULL,
   currency VARCHAR(8) NOT NULL DEFAULT 'USD',
   usd_amount DECIMAL(12,2) NOT NULL,
   usd_amount_minor BIGINT UNSIGNED NOT NULL,
   amount_charged_minor BIGINT UNSIGNED NULL,
+  price_asset DECIMAL(36,18) NOT NULL DEFAULT 0,
   price_eltx DECIMAL(36,18) NOT NULL,
+  asset_amount DECIMAL(36,18) NOT NULL DEFAULT 0,
   eltx_amount DECIMAL(36,18) NOT NULL,
+  asset_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   eltx_amount_wei DECIMAL(65,0) NOT NULL,
   credited TINYINT(1) NOT NULL DEFAULT 0,
   wallet_deposit_id BIGINT UNSIGNED NULL,
@@ -254,6 +261,34 @@ CREATE TABLE IF NOT EXISTS fiat_purchases (
   UNIQUE KEY uniq_fiat_purchase_intent (stripe_payment_intent_id),
   CONSTRAINT fk_fiat_purchases_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE fiat_purchases
+  ADD COLUMN IF NOT EXISTS stripe_session_id VARCHAR(191) NULL AFTER user_id,
+  ADD COLUMN IF NOT EXISTS stripe_payment_intent_id VARCHAR(191) NULL AFTER stripe_session_id,
+  ADD COLUMN IF NOT EXISTS status ENUM('pending','succeeded','failed','canceled','expired','refunded') NOT NULL DEFAULT 'pending' AFTER stripe_payment_intent_id,
+  ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER status,
+  ADD COLUMN IF NOT EXISTS asset_decimals INT UNSIGNED NULL AFTER asset,
+  ADD COLUMN IF NOT EXISTS currency VARCHAR(8) NOT NULL DEFAULT 'USD' AFTER asset_decimals,
+  ADD COLUMN IF NOT EXISTS usd_amount DECIMAL(12,2) NOT NULL AFTER currency,
+  ADD COLUMN IF NOT EXISTS usd_amount_minor BIGINT UNSIGNED NOT NULL AFTER usd_amount,
+  ADD COLUMN IF NOT EXISTS amount_charged_minor BIGINT UNSIGNED NULL AFTER usd_amount_minor,
+  ADD COLUMN IF NOT EXISTS price_asset DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER amount_charged_minor,
+  ADD COLUMN IF NOT EXISTS price_eltx DECIMAL(36,18) NOT NULL AFTER price_asset,
+  ADD COLUMN IF NOT EXISTS asset_amount DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER price_eltx,
+  ADD COLUMN IF NOT EXISTS eltx_amount DECIMAL(36,18) NOT NULL AFTER price_eltx,
+  ADD COLUMN IF NOT EXISTS asset_amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER eltx_amount,
+  ADD COLUMN IF NOT EXISTS eltx_amount_wei DECIMAL(65,0) NOT NULL AFTER eltx_amount,
+  ADD COLUMN IF NOT EXISTS credited TINYINT(1) NOT NULL DEFAULT 0 AFTER eltx_amount_wei,
+  ADD COLUMN IF NOT EXISTS wallet_deposit_id BIGINT UNSIGNED NULL AFTER credited,
+  ADD COLUMN IF NOT EXISTS failure_code VARCHAR(64) NULL AFTER wallet_deposit_id,
+  ADD COLUMN IF NOT EXISTS failure_message TEXT NULL AFTER failure_code,
+  ADD COLUMN IF NOT EXISTS metadata JSON NULL AFTER failure_message,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER metadata,
+  ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at,
+  ADD COLUMN IF NOT EXISTS completed_at DATETIME NULL AFTER updated_at,
+  ADD COLUMN IF NOT EXISTS credited_at DATETIME NULL AFTER completed_at,
+  ADD INDEX IF NOT EXISTS idx_fiat_purchases_user_status (user_id, status),
+  ADD UNIQUE KEY IF NOT EXISTS uniq_fiat_purchase_session (stripe_session_id),
+  ADD UNIQUE KEY IF NOT EXISTS uniq_fiat_purchase_intent (stripe_payment_intent_id);
 
 -- staking configuration
 CREATE TABLE IF NOT EXISTS staking_plans (

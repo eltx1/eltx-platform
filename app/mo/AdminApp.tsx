@@ -100,7 +100,15 @@ interface UserDetailResponse {
   } | null;
   balances: Array<{ asset: string; balance: string; balance_wei: string; created_at: string }>;
   staking: Array<{ id: number; plan_name: string; amount: string; status: string; start_date: string; end_date: string }>;
-  fiat: Array<{ id: number; status: string; usd_amount: string; eltx_amount: string; created_at: string }>;
+  fiat: Array<{
+    id: number;
+    status: string;
+    asset: string;
+    usd_amount: string;
+    asset_amount: string;
+    price_asset?: string;
+    created_at: string;
+  }>;
   deposits: Array<{ id: number; asset: string; amount: string; status: string; created_at: string }>;
   transfers: Array<{ id: number; asset: string; amount: string; from_user_id: number; to_user_id: number; created_at: string }>;
   kyc?: AdminKycRequest | null;
@@ -128,9 +136,11 @@ interface StripePricingResponse {
   pricing: {
     asset: string;
     price_eltx: string;
+    price_usdt?: string;
     min_usd: string;
     max_usd: string | null;
     updated_at?: string | null;
+    assets?: Array<{ asset: string; price_asset: string | null; price_eltx?: string | null; decimals?: number | null; updated_at?: string | null }>;
   };
 }
 
@@ -4436,7 +4446,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
   const [statusLoading, setStatusLoading] = useState(true);
   const [pricing, setPricing] = useState<StripePricingResponse['pricing'] | null>(null);
   const [pricingLoading, setPricingLoading] = useState(true);
-  const [pricingForm, setPricingForm] = useState({ price_eltx: '', min_usd: '', max_usd: '' });
+  const [pricingForm, setPricingForm] = useState({ price_eltx: '', price_usdt: '', min_usd: '', max_usd: '' });
   const [savingPricing, setSavingPricing] = useState(false);
 
   const loadPurchases = useCallback(async () => {
@@ -4454,6 +4464,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
       setPricing(res.data.pricing);
       setPricingForm({
         price_eltx: res.data.pricing.price_eltx,
+        price_usdt: res.data.pricing.price_usdt || res.data.pricing.price_eltx,
         min_usd: res.data.pricing.min_usd,
         max_usd: res.data.pricing.max_usd || '',
       });
@@ -4484,7 +4495,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
     loadPricing();
   }, [loadPurchases, loadStatus, loadPricing]);
 
-  const handlePricingChange = (field: 'price_eltx' | 'min_usd' | 'max_usd', value: string) => {
+  const handlePricingChange = (field: 'price_eltx' | 'price_usdt' | 'min_usd' | 'max_usd', value: string) => {
     setPricingForm((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -4493,6 +4504,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
     const payload: Record<string, unknown> = {};
 
     if (pricingForm.price_eltx.trim()) payload.price_eltx = pricingForm.price_eltx.trim();
+    if (pricingForm.price_usdt.trim()) payload.price_usdt = pricingForm.price_usdt.trim();
     if (pricingForm.min_usd.trim()) payload.min_usd = pricingForm.min_usd.trim();
     payload.max_usd = pricingForm.max_usd.trim() ? pricingForm.max_usd.trim() : null;
 
@@ -4505,6 +4517,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
       setPricing(res.data.pricing);
       setPricingForm({
         price_eltx: res.data.pricing.price_eltx,
+        price_usdt: res.data.pricing.price_usdt || res.data.pricing.price_eltx,
         min_usd: res.data.pricing.min_usd,
         max_usd: res.data.pricing.max_usd || '',
       });
@@ -4577,7 +4590,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
 
       <div className="rounded-2xl border border-white/10 bg-white/5">
         <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">
-          ELTX pricing (Stripe)
+          Card pricing (Stripe)
         </div>
         {pricingLoading ? (
           <div className="flex h-56 items-center justify-center">
@@ -4585,7 +4598,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
           </div>
         ) : pricing ? (
           <div className="space-y-4 p-4 text-sm text-white/80">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-4">
               <label className="space-y-2">
                 <span className="text-[11px] uppercase tracking-wide text-white/50">ELTX per USD</span>
                 <input
@@ -4597,6 +4610,20 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
                   disabled={savingPricing}
                 />
                 <span className="block text-[11px] text-white/50">Current: {pricing.price_eltx}</span>
+              </label>
+              <label className="space-y-2">
+                <span className="text-[11px] uppercase tracking-wide text-white/50">USDT per USD</span>
+                <input
+                  type="text"
+                  value={pricingForm.price_usdt}
+                  onChange={(e) => handlePricingChange('price_usdt', e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
+                  placeholder="1.00"
+                  disabled={savingPricing}
+                />
+                <span className="block text-[11px] text-white/50">
+                  Current: {pricing.price_usdt || pricing.price_eltx}
+                </span>
               </label>
               <label className="space-y-2">
                 <span className="text-[11px] uppercase tracking-wide text-white/50">Minimum USD</span>
@@ -4624,8 +4651,24 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
               </label>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/50">
-              <div>
-                <div>Asset: {pricing.asset}</div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>Configured assets:</span>
+                  {pricing.assets?.length ? (
+                    pricing.assets.map((row) => (
+                      <span
+                        key={row.asset}
+                        className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/80"
+                      >
+                        {row.asset} @ {row.price_asset}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/60">
+                      ELTX
+                    </span>
+                  )}
+                </div>
                 {pricing.updated_at && <div>Updated: {new Date(pricing.updated_at).toLocaleString()}</div>}
               </div>
               <button
@@ -4655,7 +4698,7 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
                 <tr>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">User</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">USD</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">ELTX</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Asset</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
                   <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Created</th>
                 </tr>
@@ -4665,7 +4708,9 @@ function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'succ
                   <tr key={row.id}>
                     <td className="px-3 py-2">#{row.user_id}</td>
                     <td className="px-3 py-2">${row.usd_amount}</td>
-                    <td className="px-3 py-2">{row.eltx_amount}</td>
+                    <td className="px-3 py-2">
+                      {row.asset_amount || row.eltx_amount} {row.asset || 'ELTX'}
+                    </td>
                     <td className="px-3 py-2">
                       <span className="rounded-full bg-white/10 px-2 py-1 text-xs uppercase text-white/70">{row.status}</span>
                     </td>
