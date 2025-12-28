@@ -710,6 +710,7 @@ const AdminFeeUpdateSchema = z
     spot_maker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     spot_taker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     transfer_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    withdrawal_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
   })
   .refine(
     (data) =>
@@ -717,7 +718,8 @@ const AdminFeeUpdateSchema = z
       data.spot_trade_fee_bps !== undefined ||
       data.spot_maker_fee_bps !== undefined ||
       data.spot_taker_fee_bps !== undefined ||
-      data.transfer_fee_bps !== undefined,
+      data.transfer_fee_bps !== undefined ||
+      data.withdrawal_fee_bps !== undefined,
     {
       message: 'At least one fee field must be provided',
     }
@@ -933,6 +935,12 @@ function addDays(dateStr, days) {
 function formatWithdrawalRow(row) {
   const decimals = Number(row.asset_decimals || getSymbolDecimals(row.asset || ELTX_SYMBOL));
   const amountWei = row.amount_wei?.toString() || '0';
+  const amountWeiBig = bigIntFromValue(amountWei);
+  const feeBps = Number(row.fee_bps ?? 0);
+  const feeWeiBig = bigIntFromValue(row.fee_wei ?? 0);
+  const netWeiBig = row.net_amount_wei !== undefined && row.net_amount_wei !== null ? bigIntFromValue(row.net_amount_wei) : amountWeiBig - feeWeiBig;
+  const safeNetWei = netWeiBig >= 0n ? netWeiBig : 0n;
+  const safeFeeWei = feeWeiBig >= 0n ? feeWeiBig : 0n;
   const createdAt = row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at;
   const updatedAt = row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at;
   const handledAt = row.handled_at instanceof Date ? row.handled_at.toISOString() : row.handled_at;
@@ -942,7 +950,12 @@ function formatWithdrawalRow(row) {
     asset: row.asset || ELTX_SYMBOL,
     asset_decimals: decimals,
     amount_wei: amountWei,
-    amount_formatted: trimDecimal(formatUnitsStr(amountWei, decimals)),
+    amount_formatted: trimDecimal(formatUnitsStr(amountWeiBig.toString(), decimals)),
+    fee_bps: feeBps,
+    fee_wei: safeFeeWei.toString(),
+    fee_formatted: trimDecimal(formatUnitsStr(safeFeeWei.toString(), decimals)),
+    net_amount_wei: safeNetWei.toString(),
+    net_amount_formatted: trimDecimal(formatUnitsStr(safeNetWei.toString(), decimals)),
     chain: row.chain,
     address: row.address,
     reason: row.reason || null,
@@ -963,6 +976,8 @@ const ELTX_DECIMALS = (() => {
   return normalizeDecimals(raw, DEFAULT_ELTX_DECIMALS);
 })();
 const ELTX_SYMBOL = 'ELTX';
+const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
+const DEFAULT_WITHDRAWAL_FEE_BPS = 1000;
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
 const DEFAULT_AI_DAILY_FREE = 10;
@@ -1281,7 +1296,13 @@ function enqueueWithdrawalEmails(event, withdrawal, userContact) {
   if (!withdrawal) return;
   const lang = userContact?.language || 'en';
   const statusLabel = getWithdrawalStatusLabel(withdrawal.status, lang);
-  const amountLabel = `${withdrawal.amount_formatted || withdrawal.amount_wei} ${withdrawal.asset || ELTX_SYMBOL}`;
+  const assetSymbol = withdrawal.asset || ELTX_SYMBOL;
+  const netAmount = withdrawal.net_amount_formatted || withdrawal.amount_formatted || withdrawal.amount_wei;
+  const grossAmount = withdrawal.amount_formatted || withdrawal.amount_wei;
+  const feeAmount = withdrawal.fee_formatted || withdrawal.fee_wei || null;
+  const amountLabel = `${netAmount} ${assetSymbol}`;
+  const grossLabel = `${grossAmount} ${assetSymbol}`;
+  const feeLabel = feeAmount ? `${feeAmount} ${assetSymbol}` : null;
   const destination = shrinkAddress(withdrawal.address);
   const chain = withdrawal.chain || '—';
   const reason = withdrawal.reason || null;
@@ -1292,6 +1313,8 @@ function enqueueWithdrawalEmails(event, withdrawal, userContact) {
       amount: amountLabel,
       chain,
       destination,
+      grossAmount: grossLabel,
+      fee: feeLabel,
       reason,
       status: statusLabel,
       rejection: rejection || null,
@@ -2279,16 +2302,19 @@ async function readPlatformFeeSettings(conn = pool) {
   const makerVal = await getPlatformSettingValue('spot_maker_fee_bps', spotVal, conn);
   const takerVal = await getPlatformSettingValue('spot_taker_fee_bps', spotVal, conn);
   const transferVal = await getPlatformSettingValue('transfer_fee_bps', '0', conn);
+  const withdrawalVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString(), conn);
   const swapFeeBps = clampBps(BigInt(Number.parseInt(swapVal, 10) || 0));
   const spotMakerFeeBps = clampBps(BigInt(Number.parseInt(makerVal, 10) || 0));
   const spotTakerFeeBps = clampBps(BigInt(Number.parseInt(takerVal, 10) || 0));
   const transferFeeBps = clampBps(BigInt(Number.parseInt(transferVal, 10) || 0));
+  const withdrawalFeeBps = clampBps(BigInt(Number.parseInt(withdrawalVal, 10) || 0));
   return {
     swap_fee_bps: Number(swapFeeBps),
     spot_trade_fee_bps: Number(spotTakerFeeBps),
     spot_maker_fee_bps: Number(spotMakerFeeBps),
     spot_taker_fee_bps: Number(spotTakerFeeBps),
     transfer_fee_bps: Number(transferFeeBps),
+    withdrawal_fee_bps: Number(withdrawalFeeBps),
   };
 }
 
@@ -3075,6 +3101,7 @@ const CANDLE_INTERVALS = {
 
 const WithdrawalCreateSchema = z.object({
   amount: z.string().min(1),
+  asset: z.enum(WITHDRAWAL_ASSETS),
   chain: z.enum(WITHDRAWAL_CHAINS),
   address: z.string().min(8).max(191),
   reason: z.string().trim().max(255).optional().nullable(),
@@ -4695,6 +4722,7 @@ app.patch('/admin/withdrawals/:id', async (req, res, next) => {
          ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
         [row.user_id, asset, amountWei.toString()]
       );
+      await conn.query('DELETE FROM platform_fees WHERE fee_type=? AND reference=?', ['withdrawal', `withdrawal:${id}`]);
     }
 
     await conn.query(
@@ -5257,6 +5285,8 @@ app.patch('/admin/fees', async (req, res, next) => {
       tasks.push(setPlatformSettingValue('spot_taker_fee_bps', updates.spot_taker_fee_bps.toString()));
     if (updates.transfer_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('transfer_fee_bps', updates.transfer_fee_bps.toString()));
+    if (updates.withdrawal_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('withdrawal_fee_bps', updates.withdrawal_fee_bps.toString()));
     await Promise.all(tasks);
     const [settings, balances] = await Promise.all([readPlatformFeeSettings(), readPlatformFeeBalances()]);
     res.json({ ok: true, settings, balances });
@@ -7190,15 +7220,17 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
 app.get('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
+    const feeVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString());
+    const feeBps = Number(clampBps(BigInt(Number.parseInt(feeVal, 10) || 0)));
     const [rows] = await pool.query(
-      `SELECT id, user_id, asset, asset_decimals, amount_wei, chain, address, reason, status, reject_reason, handled_by_admin_id, handled_at, created_at, updated_at
+      `SELECT id, user_id, asset, asset_decimals, amount_wei, fee_bps, fee_wei, net_amount_wei, chain, address, reason, status, reject_reason, handled_by_admin_id, handled_at, created_at, updated_at
          FROM wallet_withdrawals
         WHERE user_id=?
         ORDER BY created_at DESC
         LIMIT 50`,
       [userId]
     );
-    res.json({ ok: true, requests: rows.map(formatWithdrawalRow) });
+    res.json({ ok: true, requests: rows.map(formatWithdrawalRow), fee_bps: feeBps });
   } catch (err) {
     next(err);
   }
@@ -7210,12 +7242,19 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     const userId = await requireUser(req);
     const payload = WithdrawalCreateSchema.parse(req.body || {});
     const reason = payload.reason ? payload.reason.trim() : null;
-    const decimals = getSymbolDecimals(ELTX_SYMBOL);
+    const asset = payload.asset.toUpperCase();
+    const decimals = getSymbolDecimals(asset);
     const amountWeiStr = decimalToWeiString(payload.amount, decimals);
     if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
     const amountWei = bigIntFromValue(amountWeiStr);
     if (amountWei <= 0n)
       return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    const feeVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString());
+    const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
+    const feeWei = (amountWei * feeBps) / 10000n;
+    const netWei = amountWei - feeWei;
+    if (netWei <= 0n)
+      return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Amount must exceed withdrawal fee' });
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -7259,7 +7298,7 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
 
     const [balanceRows] = await conn.query(
       'SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE',
-      [userId, ELTX_SYMBOL]
+      [userId, asset]
     );
     if (!balanceRows.length) {
       await conn.rollback();
@@ -7273,13 +7312,21 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
 
     await conn.query(
       'UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND asset=?',
-      [amountWei.toString(), userId, ELTX_SYMBOL]
+      [amountWei.toString(), userId, asset]
     );
     const [insert] = await conn.query(
-      `INSERT INTO wallet_withdrawals (user_id, asset, asset_decimals, amount_wei, chain, address, reason, status, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?, 'pending', NOW(), NOW())`,
-      [userId, ELTX_SYMBOL, decimals, amountWei.toString(), payload.chain, payload.address, reason]
+      `INSERT INTO wallet_withdrawals (user_id, asset, asset_decimals, amount_wei, fee_bps, fee_wei, net_amount_wei, chain, address, reason, status, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?, 'pending', NOW(), NOW())`,
+      [userId, asset, decimals, amountWei.toString(), Number(feeBps), feeWei.toString(), netWei.toString(), payload.chain, payload.address, reason]
     );
+    if (feeWei > 0n) {
+      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+        'withdrawal',
+        `withdrawal:${insert.insertId}`,
+        asset,
+        feeWei.toString(),
+      ]);
+    }
     await conn.commit();
     const [[row]] = await conn.query('SELECT * FROM wallet_withdrawals WHERE id=? LIMIT 1', [insert.insertId]);
     const userContact = await getUserContact(userId, conn);
