@@ -115,12 +115,14 @@ export default function DashboardPage() {
   }, [changeStats]);
 
   return (
-    <div className="p-4 space-y-4 overflow-x-hidden">
-      <h1 className="text-xl font-semibold">{t.dashboard.title}</h1>
-      <div className="p-5 rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="p-3 sm:p-4 space-y-4 overflow-x-hidden">
+      <h1 className="text-lg font-semibold sm:text-xl">{t.dashboard.title}</h1>
+      <div className="rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between px-4 py-4 sm:px-5 sm:py-5">
         <div className="space-y-2">
-          <div className="text-sm opacity-80">{t.dashboard.balanceCard.title}</div>
-          <div className="text-2xl font-bold">
+          <div className="text-xs font-semibold uppercase tracking-wide text-white/70">
+            {t.dashboard.balanceCard.title}
+          </div>
+          <div className="text-2xl font-bold sm:text-3xl">
             {loadingBalance ? t.trade.loading : balanceDisplay}
           </div>
           {!loadingBalance && !hasBalance && (
@@ -151,8 +153,8 @@ export default function DashboardPage() {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-1">
               <p className="text-xs uppercase text-white/60">{t.dashboard.ai.kicker}</p>
-              <h2 className="text-lg font-semibold">{t.dashboard.ai.title}</h2>
-              <p className="text-sm text-white/60">{t.dashboard.ai.description}</p>
+              <h2 className="text-base font-semibold sm:text-lg">{t.dashboard.ai.title}</h2>
+              <p className="text-sm text-white/70">{t.dashboard.ai.description}</p>
             </div>
             <a href="/ai" className="btn btn-primary self-start sm:self-auto">
               {t.dashboard.ai.cta}
@@ -161,8 +163,8 @@ export default function DashboardPage() {
         </div>
 
         <div className="pt-8 border-t border-white/10">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/80">Payments</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Payments</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
             <SectionCard
               title={t.dashboard.cards.buy.title}
               subtitle={t.dashboard.cards.buy.subtitle}
@@ -191,8 +193,8 @@ export default function DashboardPage() {
         </div>
 
         <div className="pt-8 border-t border-white/10">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/80">Trade</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Trade</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
             <SectionCard title="ELTX Swap" subtitle="Convert to ELTX" href="/trade" icon={ArrowLeftRight} />
             <SectionCard title="Spot Trade" subtitle="Order book trading" href="/trade/spot" icon={CandlestickChart} />
             <SectionCard
@@ -205,8 +207,8 @@ export default function DashboardPage() {
         </div>
 
         <div className="pt-8 border-t border-white/10">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/80">Earn</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Earn</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
             <SectionCard title="Staking" href="/staking" icon={Coins} />
             <SectionCard
               title={t.dashboard.cards.invite.title}
@@ -218,8 +220,8 @@ export default function DashboardPage() {
         </div>
 
         <div className="pt-8 border-t border-white/10">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-white/80">Profile</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Profile</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
             <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
             <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
             <SectionCard
