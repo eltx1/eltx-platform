@@ -83,9 +83,9 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm md:items-center">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-md md:items-center">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0b0d12] shadow-2xl shadow-black/40 md:rounded-2xl">
+      <div className="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0b0d12]/95 shadow-2xl shadow-black/50 md:rounded-2xl">
         <div className="flex items-center justify-between px-4 pt-3 pb-2 md:px-6">
           <div className="flex flex-col gap-1">
             <span className="h-1 w-12 rounded-full bg-white/15 md:hidden" />
@@ -101,14 +101,14 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
           </button>
         </div>
 
-        <div className="space-y-3 border-t border-white/5 bg-white/5 px-4 py-3 md:border-none md:bg-transparent md:px-6 md:py-4">
+        <div className="space-y-3 border-t border-white/5 bg-white/10 px-4 py-3 md:border-none md:bg-transparent md:px-6 md:py-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/50" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={strings.searchPlaceholder}
-              className="w-full rounded-2xl border border-white/10 bg-black/40 px-10 py-2 text-sm text-white placeholder:text-white/50 focus:border-cyan-400 focus:outline-none"
+              className="w-full rounded-2xl border border-white/15 bg-black/70 px-10 py-2 text-sm text-white placeholder:text-white/50 focus:border-cyan-400 focus:outline-none"
             />
           </div>
 
@@ -121,8 +121,8 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
                   onClick={() => setActiveQuote('favorites')}
                   className={`flex items-center gap-1 rounded-full border px-3 py-1 transition ${
                     activeQuote === 'favorites'
-                      ? 'border-amber-400/60 bg-amber-500/10 text-amber-100'
-                      : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:text-white'
+                      ? 'border-amber-400/60 bg-amber-500/20 text-amber-100'
+                      : 'border-white/15 bg-white/10 text-white/80 hover:border-white/25 hover:text-white'
                   }`}
                 >
                   <Star className="h-3.5 w-3.5 fill-current" />
@@ -136,8 +136,8 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
                   onClick={() => setActiveQuote(quote)}
                   className={`rounded-full border px-3 py-1 transition ${
                     activeQuote === quote
-                      ? 'border-cyan-400/60 bg-cyan-500/10 text-cyan-100'
-                      : 'border-white/10 bg-white/5 text-white/70 hover:border-white/20 hover:text-white'
+                      ? 'border-cyan-400/60 bg-cyan-500/20 text-cyan-50'
+                      : 'border-white/15 bg-white/10 text-white/80 hover:border-white/25 hover:text-white'
                   }`}
                 >
                   {quote === 'all' ? strings.all : quote}
@@ -149,7 +149,7 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
 
         <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4 md:px-6 md:pb-6">
           {filteredMarkets.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/15 bg-white/5 p-6 text-sm text-white/60">
+            <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/20 bg-white/10 p-6 text-sm text-white/70">
               {strings.empty}
             </div>
           ) : (
@@ -166,8 +166,8 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
                   onClick={() => onSelect(market.symbol)}
                   className={`w-full rounded-2xl border px-3 py-3 text-left transition md:px-4 md:py-4 ${
                     isActive
-                      ? 'border-cyan-400/50 bg-cyan-500/5 shadow-lg shadow-cyan-500/10'
-                      : 'border-white/10 bg-white/5 hover:border-cyan-300/40 hover:bg-white/10'
+                      ? 'border-cyan-400/50 bg-cyan-500/15 shadow-lg shadow-cyan-500/15'
+                      : 'border-white/15 bg-white/10 hover:border-cyan-300/40 hover:bg-white/15'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
