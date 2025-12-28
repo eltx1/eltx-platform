@@ -602,13 +602,13 @@ export default function SpotTradePage() {
       cumulative = cumulative.plus(base);
       return {
         key: `ask-${idx}`,
-        price: trimDecimal(level.price),
-        amount: trimDecimal(level.base_amount),
+        price: formatWithPrecision(safeDecimal(level.price), pricePrecision),
+        amount: formatWithPrecision(base, amountPrecision),
         cumulative: formatWithPrecision(cumulative, baseDecimals),
         rawPrice: level.price,
       };
     });
-  }, [orderbook.asks, baseDecimals]);
+  }, [orderbook.asks, baseDecimals, amountPrecision, pricePrecision]);
 
   const bidsDisplay = useMemo(() => {
     let cumulative = ZERO;
@@ -617,13 +617,13 @@ export default function SpotTradePage() {
       cumulative = cumulative.plus(base);
       return {
         key: `bid-${idx}`,
-        price: trimDecimal(level.price),
-        amount: trimDecimal(level.base_amount),
+        price: formatWithPrecision(safeDecimal(level.price), pricePrecision),
+        amount: formatWithPrecision(base, amountPrecision),
         cumulative: formatWithPrecision(cumulative, baseDecimals),
         rawPrice: level.price,
       };
     });
-  }, [orderbook.bids, baseDecimals]);
+  }, [orderbook.bids, baseDecimals, amountPrecision, pricePrecision]);
 
   const recentTrades = useMemo(() => trades.slice(0, 20), [trades]);
 
@@ -1059,13 +1059,13 @@ export default function SpotTradePage() {
                             key={level.key}
                             type="button"
                             onClick={() => handleLevelClick(level.rawPrice)}
-                            className={`w-full grid grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
+                            className={`w-full grid min-w-0 grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
                               idx === 0 ? 'bg-red-500/10' : 'hover:bg-red-500/10'
                             }`}
                           >
-                            <span className="text-red-300">{level.price}</span>
-                            <span className="text-right">{level.amount}</span>
-                            <span className="text-right opacity-80">{level.cumulative}</span>
+                            <span className="truncate font-mono tabular-nums text-red-300">{level.price}</span>
+                            <span className="truncate text-right font-mono tabular-nums">{level.amount}</span>
+                            <span className="truncate text-right font-mono tabular-nums opacity-80">{level.cumulative}</span>
                           </button>
                         ))
                       )}
@@ -1089,13 +1089,13 @@ export default function SpotTradePage() {
                             key={level.key}
                             type="button"
                             onClick={() => handleLevelClick(level.rawPrice)}
-                            className={`w-full grid grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
+                            className={`w-full grid min-w-0 grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
                               idx === 0 ? 'bg-green-500/10' : 'hover:bg-green-500/10'
                             }`}
                           >
-                            <span className="text-green-300">{level.price}</span>
-                            <span className="text-right">{level.amount}</span>
-                            <span className="text-right opacity-80">{level.cumulative}</span>
+                            <span className="truncate font-mono tabular-nums text-green-300">{level.price}</span>
+                            <span className="truncate text-right font-mono tabular-nums">{level.amount}</span>
+                            <span className="truncate text-right font-mono tabular-nums opacity-80">{level.cumulative}</span>
                           </button>
                         ))
                       )}
@@ -1117,10 +1117,10 @@ export default function SpotTradePage() {
                         recentTrades.map((trade) => (
                           <div key={trade.id} className="grid grid-cols-4 gap-2">
                             <span className="opacity-70">{new Date(trade.created_at).toLocaleTimeString()}</span>
-                            <span className={trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'}>
-                              {trimDecimal(trade.price)}
+                            <span className={`${trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'} font-mono tabular-nums`}>
+                              {formatWithPrecision(safeDecimal(trade.price), pricePrecision)}
                             </span>
-                            <span>{trimDecimal(trade.base_amount)}</span>
+                            <span className="font-mono tabular-nums">{formatWithPrecision(safeDecimal(trade.base_amount), amountPrecision)}</span>
                             <span className={trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'}>
                               {trade.taker_side === 'buy' ? t.spotTrade.buy : t.spotTrade.sell}
                             </span>
@@ -1160,23 +1160,23 @@ export default function SpotTradePage() {
                           ) : asksDisplay.length === 0 ? (
                             <div className="opacity-70">—</div>
                           ) : (
-                            asksDisplay.map((level, idx) => (
-                              <button
-                                key={level.key}
-                                type="button"
-                                onClick={() => handleLevelClick(level.rawPrice)}
-                                className={`w-full grid grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
-                                  idx === 0 ? 'bg-red-500/10' : 'hover:bg-red-500/10'
-                                }`}
-                              >
-                                <span className="text-red-300">{level.price}</span>
-                                <span className="text-right">{level.amount}</span>
-                                <span className="text-right opacity-80">{level.cumulative}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
+                        asksDisplay.map((level, idx) => (
+                          <button
+                            key={level.key}
+                            type="button"
+                            onClick={() => handleLevelClick(level.rawPrice)}
+                            className={`w-full grid min-w-0 grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
+                              idx === 0 ? 'bg-red-500/10' : 'hover:bg-red-500/10'
+                            }`}
+                          >
+                            <span className="truncate font-mono tabular-nums text-red-300">{level.price}</span>
+                            <span className="truncate text-right font-mono tabular-nums">{level.amount}</span>
+                            <span className="truncate text-right font-mono tabular-nums opacity-80">{level.cumulative}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
 
                       <div>
                         <div className="grid grid-cols-3 gap-2 mb-1 font-semibold opacity-70">
@@ -1190,23 +1190,23 @@ export default function SpotTradePage() {
                           ) : bidsDisplay.length === 0 ? (
                             <div className="opacity-70">—</div>
                           ) : (
-                            bidsDisplay.map((level, idx) => (
-                              <button
-                                key={level.key}
-                                type="button"
-                                onClick={() => handleLevelClick(level.rawPrice)}
-                                className={`w-full grid grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
-                                  idx === 0 ? 'bg-green-500/10' : 'hover:bg-green-500/10'
-                                }`}
-                              >
-                                <span className="text-green-300">{level.price}</span>
-                                <span className="text-right">{level.amount}</span>
-                                <span className="text-right opacity-80">{level.cumulative}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </div>
+                        bidsDisplay.map((level, idx) => (
+                          <button
+                            key={level.key}
+                            type="button"
+                            onClick={() => handleLevelClick(level.rawPrice)}
+                            className={`w-full grid min-w-0 grid-cols-3 gap-2 text-left rounded px-1 py-0.5 transition ${
+                              idx === 0 ? 'bg-green-500/10' : 'hover:bg-green-500/10'
+                            }`}
+                          >
+                            <span className="truncate font-mono tabular-nums text-green-300">{level.price}</span>
+                            <span className="truncate text-right font-mono tabular-nums">{level.amount}</span>
+                            <span className="truncate text-right font-mono tabular-nums opacity-80">{level.cumulative}</span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
                     </div>
                   ) : (
                     <div>
@@ -1223,10 +1223,12 @@ export default function SpotTradePage() {
                           recentTrades.map((trade) => (
                             <div key={trade.id} className="grid grid-cols-4 gap-2">
                               <span className="opacity-70">{new Date(trade.created_at).toLocaleTimeString()}</span>
-                              <span className={trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'}>
-                                {trimDecimal(trade.price)}
+                              <span className={`${trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'} font-mono tabular-nums`}>
+                                {formatWithPrecision(safeDecimal(trade.price), pricePrecision)}
                               </span>
-                              <span>{trimDecimal(trade.base_amount)}</span>
+                              <span className="font-mono tabular-nums">
+                                {formatWithPrecision(safeDecimal(trade.base_amount), amountPrecision)}
+                              </span>
                               <span className={trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'}>
                                 {trade.taker_side === 'buy' ? t.spotTrade.buy : t.spotTrade.sell}
                               </span>
@@ -1258,13 +1260,23 @@ export default function SpotTradePage() {
                           </div>
                           <div className="text-right">
                             <div className="text-[11px]">{t.spotTrade.orders.status[order.status]}</div>
-                            {order.price && <div>{order.price}</div>}
+                            {order.price && (
+                              <div className="font-mono tabular-nums">
+                                {formatWithPrecision(safeDecimal(order.price), pricePrecision)}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="flex justify-between">
                           <span>{t.trade.amount}</span>
                           <span>
-                            {order.remaining_base_amount}/{order.base_amount}
+                            <span className="font-mono tabular-nums">
+                              {formatWithPrecision(safeDecimal(order.remaining_base_amount), amountPrecision)}
+                            </span>
+                            /
+                            <span className="font-mono tabular-nums">
+                              {formatWithPrecision(safeDecimal(order.base_amount), amountPrecision)}
+                            </span>
                           </span>
                         </div>
                         {order.status === 'open' && (
