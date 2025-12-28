@@ -140,9 +140,10 @@ type FeeSettings = {
   spot_maker_fee_bps: number;
   spot_taker_fee_bps: number;
   transfer_fee_bps: number;
+  withdrawal_fee_bps: number;
 };
 
-type FeeBalanceRow = { fee_type: 'swap' | 'spot'; asset: string; amount: string; amount_wei: string; entries: number };
+type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
 
 type AiSettings = { daily_free_messages: number; message_price_eltx: string };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
@@ -288,8 +289,14 @@ type AdminWithdrawalRow = {
   user_email?: string | null;
   user_username?: string | null;
   asset: string;
+  asset_decimals?: number;
   amount_formatted: string;
   amount_wei: string;
+  fee_bps?: number;
+  fee_wei?: string;
+  fee_formatted?: string;
+  net_amount_wei?: string;
+  net_amount_formatted?: string;
   chain: string;
   address: string;
   reason?: string | null;
@@ -2886,7 +2893,14 @@ function WithdrawalsPanel({ onNotify }: { onNotify: (message: string, variant?: 
                       <div className="text-white/60">{row.user_email || `User ${row.user_id}`}</div>
                     </td>
                     <td className="px-3 py-2 text-white/80">
-                      {row.amount_formatted} {row.asset}
+                      <div className="font-semibold">
+                        {row.net_amount_formatted || row.amount_formatted} {row.asset}
+                      </div>
+                      <div className="text-[11px] text-white/60">
+                        Requested: {row.amount_formatted} {row.asset} · Fee:{' '}
+                        {row.fee_formatted && row.fee_formatted !== '0' ? `${row.fee_formatted} ${row.asset}` : '0'}{' '}
+                        {typeof row.fee_bps === 'number' ? `(${(row.fee_bps / 100).toFixed(2)}%)` : ''}
+                      </div>
                     </td>
                     <td className="px-3 py-2 text-white/80">{row.chain}</td>
                     <td className="px-3 py-2 text-white/80">{row.address}</td>
@@ -3569,9 +3583,10 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     spot_maker_fee_bps: 0,
     spot_taker_fee_bps: 0,
     transfer_fee_bps: 0,
+    withdrawal_fee_bps: 0,
   });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
-  const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00' });
+  const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00', withdrawal: '10.00' });
   const [protection, setProtection] = useState<SpotProtectionSettings>({
     max_slippage_bps: 0,
     max_deviation_bps: 0,
@@ -3587,11 +3602,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
   const syncFormWithSettings = useCallback((next: FeeSettings) => {
     const makerBps = next.spot_maker_fee_bps ?? next.spot_trade_fee_bps ?? 0;
     const takerBps = next.spot_taker_fee_bps ?? next.spot_trade_fee_bps ?? makerBps;
+    const withdrawalBps = next.withdrawal_fee_bps ?? 0;
     setForm({
       swap: (next.swap_fee_bps / 100).toFixed(2),
       spotMaker: (makerBps / 100).toFixed(2),
       spotTaker: (takerBps / 100).toFixed(2),
       transfer: (next.transfer_fee_bps / 100).toFixed(2),
+      withdrawal: (withdrawalBps / 100).toFixed(2),
     });
   }, []);
 
@@ -3644,11 +3661,11 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
   const groupedBalances = useMemo(() => {
     return balances.reduce(
       (acc, row) => {
-        const key = row.fee_type === 'swap' ? 'swap' : 'spot';
+        const key = row.fee_type === 'swap' ? 'swap' : row.fee_type === 'withdrawal' ? 'withdrawal' : 'spot';
         acc[key].push(row);
         return acc;
       },
-      { swap: [] as FeeBalanceRow[], spot: [] as FeeBalanceRow[] }
+      { swap: [] as FeeBalanceRow[], spot: [] as FeeBalanceRow[], withdrawal: [] as FeeBalanceRow[] }
     );
   }, [balances]);
 
@@ -3658,8 +3675,9 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     const spotMakerBps = parsePercentToBps(form.spotMaker);
     const spotTakerBps = parsePercentToBps(form.spotTaker);
     const transferBps = parsePercentToBps(form.transfer);
+    const withdrawalBps = parsePercentToBps(form.withdrawal);
 
-    if (swapBps === null || spotMakerBps === null || spotTakerBps === null || transferBps === null) {
+    if (swapBps === null || spotMakerBps === null || spotTakerBps === null || transferBps === null || withdrawalBps === null) {
       onNotify('Enter valid percentage values between 0 and 100', 'error');
       return;
     }
@@ -3668,6 +3686,7 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     if (spotMakerBps !== settings.spot_maker_fee_bps) payload.spot_maker_fee_bps = spotMakerBps;
     if (spotTakerBps !== settings.spot_taker_fee_bps) payload.spot_taker_fee_bps = spotTakerBps;
     if (transferBps !== settings.transfer_fee_bps) payload.transfer_fee_bps = transferBps;
+    if (withdrawalBps !== settings.withdrawal_fee_bps) payload.withdrawal_fee_bps = withdrawalBps;
     if (!Object.keys(payload).length) {
       onNotify('No fee changes to save');
       return;
@@ -3784,7 +3803,7 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <StatCard
               title="Swap commission"
               value={`${(settings.swap_fee_bps / 100).toFixed(2)}%`}
@@ -3803,12 +3822,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
               subtitle="Deducted once per peer-to-peer transfer"
               icon={Users}
             />
+            <StatCard
+              title="On-chain withdrawals"
+              value={`${(settings.withdrawal_fee_bps / 100).toFixed(2)}%`}
+              subtitle="Fee retained when users request payouts"
+              icon={Download}
+            />
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
             <h4 className="text-md font-semibold">Update fees</h4>
             <p className="mt-1 text-sm text-white/60">Values are percentages; 0.50% equals 50 bps.</p>
-            <div className="mt-4 grid gap-4 md:grid-cols-4">
+            <div className="mt-4 grid gap-4 md:grid-cols-5">
               <div>
                 <label className="text-xs uppercase text-white/60">Swap fee (%)</label>
                 <input
@@ -3854,6 +3879,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                   step={0.01}
                   value={form.transfer}
                   onChange={(e) => setForm((prev) => ({ ...prev, transfer: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Withdrawal fee (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={form.withdrawal}
+                  onChange={(e) => setForm((prev) => ({ ...prev, withdrawal: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
                 />
               </div>
@@ -3936,9 +3973,10 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {renderBalanceTable('Swap fees collected', groupedBalances.swap)}
             {renderBalanceTable('Spot fees collected', groupedBalances.spot)}
+            {renderBalanceTable('Withdrawal fees collected', groupedBalances.withdrawal)}
           </div>
         </div>
       )}
