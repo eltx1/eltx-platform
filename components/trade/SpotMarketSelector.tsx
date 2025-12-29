@@ -85,7 +85,7 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#0a0d14] md:items-center">
       <div className="absolute inset-0" onClick={onClose} />
-      <div className="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-[#0f1624] shadow-2xl shadow-black/50 md:rounded-2xl">
+      <div className="relative z-10 flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl border border-white/10 bg-black shadow-2xl shadow-black/50 md:rounded-2xl">
         <div className="flex items-center justify-between px-4 pt-3 pb-2 md:px-6">
           <div className="flex flex-col gap-1">
             <span className="h-1 w-12 rounded-full bg-white/30 md:hidden" />
@@ -147,9 +147,9 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 pb-4 md:px-6 md:pb-6">
+        <div className="flex flex-1 flex-col gap-2 overflow-y-auto bg-black px-4 pb-4 md:px-6 md:pb-6">
           {filteredMarkets.length === 0 ? (
-            <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/25 bg-[#131b26] p-6 text-sm text-white/70">
+            <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-white/25 bg-black p-6 text-sm text-white/70">
               {strings.empty}
             </div>
           ) : (
@@ -167,7 +167,7 @@ export default function SpotMarketSelector({ open, markets, selectedMarket, onCl
                   className={`w-full rounded-2xl border px-3 py-3 text-left transition md:px-4 md:py-4 ${
                     isActive
                       ? 'border-cyan-400/70 bg-[#12324d] shadow-lg shadow-cyan-500/20'
-                      : 'border-white/15 bg-[#131b26] hover:border-cyan-300/40 hover:bg-[#1a2433]'
+                      : 'border-white/15 bg-black hover:border-cyan-300/40 hover:bg-[#1a2433]'
                   }`}
                 >
                   <div className="flex items-center justify-between gap-3">
