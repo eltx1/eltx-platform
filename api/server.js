@@ -3331,6 +3331,10 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
     );
     const purchaseId = insert.insertId;
 
+    const lineItemName = 'Technical Consulting Services';
+    const lineItemDescription =
+      'Consulting and digital services fulfillment; credits are applied internally after payment.';
+
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       payment_method_types: ['card'],
@@ -3341,13 +3345,14 @@ app.post('/fiat/stripe/session', walletLimiter, async (req, res, next) => {
       metadata: { purchaseId: String(purchaseId), userId: String(userId) },
       payment_intent_data: {
         metadata: { purchaseId: String(purchaseId), userId: String(userId) },
+        description: lineItemName,
       },
       line_items: [
         {
           quantity: 1,
           price_data: {
             currency: 'usd',
-            product_data: { name: `${assetInput} Purchase` },
+            product_data: { name: lineItemName, description: lineItemDescription },
             unit_amount: amountMinor,
           },
         },
