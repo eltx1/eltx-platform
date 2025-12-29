@@ -7419,8 +7419,19 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     );
     const [insert] = await conn.query(
       `INSERT INTO wallet_withdrawals (user_id, asset, asset_decimals, amount_wei, fee_bps, fee_wei, net_amount_wei, chain, address, reason, status, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?, 'pending', NOW(), NOW())`,
-      [userId, asset, decimals, amountWei.toString(), Number(feeBps), feeWei.toString(), netWei.toString(), payload.chain, payload.address, reason]
+       VALUES (?,?,?,?,?,?,?,?,?,?, 'pending', NOW(), NOW())`,
+      [
+        userId,
+        asset,
+        decimals,
+        amountWei.toString(),
+        Number(feeBps),
+        feeWei.toString(),
+        netWei.toString(),
+        payload.chain,
+        payload.address,
+        reason,
+      ]
     );
     if (feeWei > 0n) {
       await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
