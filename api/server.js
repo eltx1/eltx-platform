@@ -711,6 +711,7 @@ const AdminFeeUpdateSchema = z
     spot_taker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     transfer_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     withdrawal_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    withdrawal_min_usdt: z.union([z.string(), z.number()]).optional(),
   })
   .refine(
     (data) =>
@@ -719,7 +720,8 @@ const AdminFeeUpdateSchema = z
       data.spot_maker_fee_bps !== undefined ||
       data.spot_taker_fee_bps !== undefined ||
       data.transfer_fee_bps !== undefined ||
-      data.withdrawal_fee_bps !== undefined,
+      data.withdrawal_fee_bps !== undefined ||
+      data.withdrawal_min_usdt !== undefined,
     {
       message: 'At least one fee field must be provided',
     }
@@ -980,6 +982,8 @@ const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const DEFAULT_WITHDRAWAL_FEE_BPS = 1000;
+const WITHDRAWAL_MIN_USDT_SETTING = 'withdrawal_min_usdt';
+const DEFAULT_WITHDRAWAL_MIN_USDT = '0';
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
 const DEFAULT_AI_DAILY_FREE = 10;
@@ -2306,6 +2310,7 @@ async function readPlatformFeeSettings(conn = pool) {
   const takerVal = await getPlatformSettingValue('spot_taker_fee_bps', spotVal, conn);
   const transferVal = await getPlatformSettingValue('transfer_fee_bps', '0', conn);
   const withdrawalVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString(), conn);
+  const withdrawalLimits = await readWithdrawalLimits(conn);
   const swapFeeBps = clampBps(BigInt(Number.parseInt(swapVal, 10) || 0));
   const spotMakerFeeBps = clampBps(BigInt(Number.parseInt(makerVal, 10) || 0));
   const spotTakerFeeBps = clampBps(BigInt(Number.parseInt(takerVal, 10) || 0));
@@ -2318,6 +2323,31 @@ async function readPlatformFeeSettings(conn = pool) {
     spot_taker_fee_bps: Number(spotTakerFeeBps),
     transfer_fee_bps: Number(transferFeeBps),
     withdrawal_fee_bps: Number(withdrawalFeeBps),
+    withdrawal_min_usdt: withdrawalLimits.USDT.min,
+    withdrawal_min_usdt_wei: withdrawalLimits.USDT.min_wei,
+  };
+}
+
+function normalizeWithdrawalMin(value, decimals) {
+  const minWeiStr = decimalToWeiString(value, decimals);
+  if (!minWeiStr) return null;
+  return {
+    wei: minWeiStr,
+    decimal: trimDecimal(formatUnitsStr(minWeiStr, decimals)),
+  };
+}
+
+async function readWithdrawalLimits(conn = pool) {
+  const usdtDecimals = getSymbolDecimals('USDT');
+  const rawMinUsdt = await getPlatformSettingValue(WITHDRAWAL_MIN_USDT_SETTING, DEFAULT_WITHDRAWAL_MIN_USDT, conn);
+  const normalized = normalizeWithdrawalMin(rawMinUsdt, usdtDecimals);
+  const minUsdtWei = normalized?.wei ? bigIntFromValue(normalized.wei) : 0n;
+  const minUsdtFormatted = normalized?.decimal || '0';
+  return {
+    USDT: {
+      min_wei: minUsdtWei.toString(),
+      min: minUsdtFormatted,
+    },
   };
 }
 
@@ -5342,6 +5372,13 @@ app.patch('/admin/fees', async (req, res, next) => {
       tasks.push(setPlatformSettingValue('transfer_fee_bps', updates.transfer_fee_bps.toString()));
     if (updates.withdrawal_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('withdrawal_fee_bps', updates.withdrawal_fee_bps.toString()));
+    if (updates.withdrawal_min_usdt !== undefined) {
+      const usdtDecimals = getSymbolDecimals('USDT');
+      const normalized = normalizeWithdrawalMin(updates.withdrawal_min_usdt, usdtDecimals);
+      if (!normalized)
+        return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid USDT withdrawal minimum' });
+      tasks.push(setPlatformSettingValue(WITHDRAWAL_MIN_USDT_SETTING, normalized.decimal));
+    }
     await Promise.all(tasks);
     const [settings, balances] = await Promise.all([readPlatformFeeSettings(), readPlatformFeeBalances()]);
     res.json({ ok: true, settings, balances });
@@ -7325,6 +7362,7 @@ app.get('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     const userId = await requireUser(req);
     const feeVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString());
     const feeBps = Number(clampBps(BigInt(Number.parseInt(feeVal, 10) || 0)));
+    const limits = await readWithdrawalLimits();
     const [rows] = await pool.query(
       `SELECT id, user_id, asset, asset_decimals, amount_wei, fee_bps, fee_wei, net_amount_wei, chain, address, reason, status, reject_reason, handled_by_admin_id, handled_at, created_at, updated_at
          FROM wallet_withdrawals
@@ -7333,7 +7371,7 @@ app.get('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
         LIMIT 50`,
       [userId]
     );
-    res.json({ ok: true, requests: rows.map(formatWithdrawalRow), fee_bps: feeBps });
+    res.json({ ok: true, requests: rows.map(formatWithdrawalRow), fee_bps: feeBps, limits });
   } catch (err) {
     next(err);
   }
@@ -7358,6 +7396,16 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     const netWei = amountWei - feeWei;
     if (netWei <= 0n)
       return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Amount must exceed withdrawal fee' });
+    const limits = await readWithdrawalLimits();
+    const minUsdtWei = limits.USDT?.min_wei ? bigIntFromValue(limits.USDT.min_wei) : 0n;
+    if (asset === 'USDT' && minUsdtWei > 0n && amountWei < minUsdtWei) {
+      const formattedMin = trimDecimal(formatUnitsStr(minUsdtWei.toString(), decimals));
+      return next({
+        status: 400,
+        code: 'WITHDRAWAL_BELOW_MIN',
+        message: `Minimum USDT withdrawal is ${formattedMin} USDT`,
+      });
+    }
 
     conn = await pool.getConnection();
     await conn.beginTransaction();

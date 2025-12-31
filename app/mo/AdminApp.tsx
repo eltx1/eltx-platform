@@ -151,6 +151,8 @@ type FeeSettings = {
   spot_taker_fee_bps: number;
   transfer_fee_bps: number;
   withdrawal_fee_bps: number;
+  withdrawal_min_usdt?: string;
+  withdrawal_min_usdt_wei?: string;
 };
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
@@ -3594,9 +3596,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     spot_taker_fee_bps: 0,
     transfer_fee_bps: 0,
     withdrawal_fee_bps: 0,
+    withdrawal_min_usdt: '0',
+    withdrawal_min_usdt_wei: '0',
   });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
-  const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00', withdrawal: '10.00' });
+  const [form, setForm] = useState({
+    swap: '0.50',
+    spotMaker: '0.50',
+    spotTaker: '0.50',
+    transfer: '0.00',
+    withdrawal: '10.00',
+    withdrawalMinUsdt: '0',
+  });
   const [protection, setProtection] = useState<SpotProtectionSettings>({
     max_slippage_bps: 0,
     max_deviation_bps: 0,
@@ -3613,12 +3624,14 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     const makerBps = next.spot_maker_fee_bps ?? next.spot_trade_fee_bps ?? 0;
     const takerBps = next.spot_taker_fee_bps ?? next.spot_trade_fee_bps ?? makerBps;
     const withdrawalBps = next.withdrawal_fee_bps ?? 0;
+    const minUsdt = next.withdrawal_min_usdt ?? '0';
     setForm({
       swap: (next.swap_fee_bps / 100).toFixed(2),
       spotMaker: (makerBps / 100).toFixed(2),
       spotTaker: (takerBps / 100).toFixed(2),
       transfer: (next.transfer_fee_bps / 100).toFixed(2),
       withdrawal: (withdrawalBps / 100).toFixed(2),
+      withdrawalMinUsdt: minUsdt,
     });
   }, []);
 
@@ -3668,6 +3681,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     return Math.floor(num);
   };
 
+  const parseWithdrawalMinUsdt = (value: string) => {
+    const normalized = value.trim();
+    if (!normalized.length) return { display: '0', wei: '0' };
+    if (!/^\d+(\.\d{0,6})?$/.test(normalized)) return null;
+    try {
+      const wei = parseUnits(normalized, 6);
+      return { display: normalized, wei: wei.toString() };
+    } catch {
+      return null;
+    }
+  };
+
   const groupedBalances = useMemo(() => {
     return balances.reduce(
       (acc, row) => {
@@ -3686,9 +3711,14 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     const spotTakerBps = parsePercentToBps(form.spotTaker);
     const transferBps = parsePercentToBps(form.transfer);
     const withdrawalBps = parsePercentToBps(form.withdrawal);
+    const withdrawalMinUsdt = parseWithdrawalMinUsdt(form.withdrawalMinUsdt);
 
     if (swapBps === null || spotMakerBps === null || spotTakerBps === null || transferBps === null || withdrawalBps === null) {
       onNotify('Enter valid percentage values between 0 and 100', 'error');
+      return;
+    }
+    if (withdrawalMinUsdt === null) {
+      onNotify('Enter a valid USDT withdrawal minimum (up to 6 decimals)', 'error');
       return;
     }
 
@@ -3697,6 +3727,8 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     if (spotTakerBps !== settings.spot_taker_fee_bps) payload.spot_taker_fee_bps = spotTakerBps;
     if (transferBps !== settings.transfer_fee_bps) payload.transfer_fee_bps = transferBps;
     if (withdrawalBps !== settings.withdrawal_fee_bps) payload.withdrawal_fee_bps = withdrawalBps;
+    const currentMinWei = settings.withdrawal_min_usdt_wei || '0';
+    if (withdrawalMinUsdt.wei !== currentMinWei) payload.withdrawal_min_usdt = withdrawalMinUsdt.display;
     if (!Object.keys(payload).length) {
       onNotify('No fee changes to save');
       return;
@@ -3903,6 +3935,19 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                   onChange={(e) => setForm((prev) => ({ ...prev, withdrawal: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
                 />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs uppercase text-white/60">USDT withdrawal minimum</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.000001}
+                  value={form.withdrawalMinUsdt}
+                  onChange={(e) => setForm((prev) => ({ ...prev, withdrawalMinUsdt: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                  placeholder="10.0"
+                />
+                <p className="mt-1 text-[11px] text-white/50">Applies to on-chain USDT requests. Use 0 to disable.</p>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-3">

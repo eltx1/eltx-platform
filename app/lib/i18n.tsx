@@ -222,6 +222,7 @@ export const dict = {
         feeLabel: 'Withdrawal fee',
         feeNotice: 'The {fee} fee covers platform service, transfer processing, and blockchain gas costs.',
         netLabel: 'You will receive',
+        minimumLabel: 'Minimum withdrawal',
         form: {
           amount: 'Amount',
           asset: 'Asset',
@@ -230,6 +231,8 @@ export const dict = {
           reason: 'Withdrawal reason',
           invalidAmount: 'Enter a valid amount greater than zero',
           exceedsBalance: 'Amount exceeds your available balance',
+          belowMinimum: 'Amount is below the minimum withdrawal',
+          minAmount: 'Minimum withdrawal: {amount}',
           submit: 'Send withdrawal request',
           submitting: 'Submitting…',
         },
@@ -1183,6 +1186,7 @@ export const dict = {
         feeLabel: 'رسوم السحب',
         feeNotice: 'الرسوم {fee} بتغطي خدمة المنصة، معالجة التحويل، ورسوم الشبكة والجاز.',
         netLabel: 'الصافي بعد الرسوم',
+        minimumLabel: 'الحد الأدنى للسحب',
         form: {
           amount: 'المبلغ',
           asset: 'الأصل',
@@ -1191,6 +1195,8 @@ export const dict = {
           reason: 'سبب السحب',
           invalidAmount: 'من فضلك اكتب مبلغ صالح أكبر من صفر',
           exceedsBalance: 'المبلغ أكبر من رصيدك المتاح',
+          belowMinimum: 'المبلغ أقل من الحد الأدنى للسحب',
+          minAmount: 'الحد الأدنى للسحب: {amount}',
           submit: 'إرسال طلب السحب',
           submitting: 'جاري الإرسال…',
         },
