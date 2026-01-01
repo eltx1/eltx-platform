@@ -13,7 +13,6 @@ import {
   Coins,
   ArrowLeftRight,
   CandlestickChart,
-  ShoppingCart,
   Gift,
   Handshake,
   LifeBuoy,
@@ -165,12 +164,6 @@ export default function DashboardPage() {
         <div className="pt-8 border-t border-white/10">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Payments</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-            <SectionCard
-              title={t.dashboard.cards.buy.title}
-              subtitle={t.dashboard.cards.buy.subtitle}
-              href="/buy"
-              icon={ShoppingCart}
-            />
             <SectionCard
               title={t.dashboard.cards.wallet.title}
               subtitle={t.dashboard.cards.wallet.subtitle}
