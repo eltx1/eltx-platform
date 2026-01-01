@@ -31,10 +31,36 @@ const MARKET_ASSETS = [
   { symbol: 'SOL', label: 'Solana', provider: 'coingecko' as const, providerId: 'solana', logoSetting: 'market_logo_sol_url' },
 ];
 
-const MARKET_CACHE_TTL_MS = 60 * 1000;
+const MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
+const HOME_OVERVIEW_TIMEOUT_MS = 1200;
+const FALLBACK_MARKETS: HomeMarketEntry[] = MARKET_ASSETS.map((asset) => ({
+  symbol: asset.symbol,
+  label: asset.label,
+  priceUsd: null,
+  change24h: null,
+  source: 'fallback',
+  updatedAt: null,
+}));
+type HomeOverview = { userCount: number; markets: HomeMarketEntry[] };
+const FALLBACK_OVERVIEW: HomeOverview = { userCount: 0, markets: FALLBACK_MARKETS };
 let cachedMarkets: HomeMarketEntry[] | null = null;
 let cachedMarketsAt = 0;
 let pendingMarkets: Promise<HomeMarketEntry[]> | null = null;
+
+function resolveWithTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch(() => {
+        clearTimeout(timer);
+        resolve(fallback);
+      });
+  });
+}
 
 async function ensureCacheTable(db: Pool) {
   await db.query(CACHE_TABLE_SQL);
@@ -120,7 +146,7 @@ async function fetchCoingeckoPrices(): Promise<Record<string, { price: number; c
   if (!ids.length) return {};
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new Error('timeout')), 7000);
+  const timeout = setTimeout(() => controller.abort(new Error('timeout')), 3000);
 
   try {
     const url = new URL('https://api.coingecko.com/api/v3/simple/price');
@@ -154,12 +180,12 @@ async function fetchCoingeckoPrices(): Promise<Record<string, { price: number; c
 }
 
 async function buildMarketEntries(): Promise<HomeMarketEntry[]> {
-  const db = getDb();
   const now = Date.now();
   if (cachedMarkets && now - cachedMarketsAt < MARKET_CACHE_TTL_MS) return cachedMarkets;
   if (pendingMarkets) return pendingMarkets;
 
   pendingMarkets = (async () => {
+    const db = getDb();
     const cache = await readCache(db);
     const logos = await fetchMarketLogos(db).catch(() => ({}));
     const external = await fetchCoingeckoPrices().catch(() => ({}));
@@ -213,7 +239,11 @@ async function buildMarketEntries(): Promise<HomeMarketEntry[]> {
 }
 
 export async function getHomeOverview() {
-  try {
+  if (!process.env.DATABASE_URL) {
+    return FALLBACK_OVERVIEW;
+  }
+
+  const loadOverviewWithDb = async (): Promise<HomeOverview> => {
     const db = getDb();
     const [userCount, markets] = await Promise.all([
       fetchUserCount(db).catch(() => 0),
@@ -224,8 +254,12 @@ export async function getHomeOverview() {
       userCount,
       markets,
     };
+  };
+
+  try {
+    return await resolveWithTimeout(loadOverviewWithDb(), HOME_OVERVIEW_TIMEOUT_MS, FALLBACK_OVERVIEW);
   } catch (err) {
     console.error('[home] failed to load overview', err);
-    return { userCount: 0, markets: [] };
+    return FALLBACK_OVERVIEW;
   }
 }
