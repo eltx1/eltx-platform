@@ -19,6 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
+import DashboardMarketBoard from '../../../components/dashboard/DashboardMarketBoard';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { formatWei } from '../../lib/format';
@@ -149,6 +150,10 @@ export default function DashboardPage() {
         </a>
       </div>
       <div className="space-y-8 pt-2">
+        <div className="pt-8 border-t border-white/10">
+          <DashboardMarketBoard />
+        </div>
+
         <div className="pt-8 border-t border-white/10">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Payments</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
