@@ -12,6 +12,7 @@ import SeoIntro from '../components/home/SeoIntro';
 import { getHomeOverview } from './lib/home-data';
 import ScrollToTopOnLoad from '../components/ScrollToTopOnLoad';
 
+export const revalidate = 120;
 
 export default async function Page() {
   const overview = await getHomeOverview();

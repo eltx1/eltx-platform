@@ -16,6 +16,7 @@ import {
   Gift,
   Handshake,
   LifeBuoy,
+  Sparkles,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { apiFetch } from '../../lib/api';
@@ -116,27 +117,27 @@ export default function DashboardPage() {
   return (
     <div className="p-3 sm:p-4 space-y-4 overflow-x-hidden">
       <h1 className="text-lg font-semibold sm:text-xl">{t.dashboard.title}</h1>
-      <div className="rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between px-4 py-4 sm:px-5 sm:py-5">
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-white/70">
+      <div className="rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between px-3.5 py-3.5 sm:px-5 sm:py-5">
+        <div className="space-y-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70">
             {t.dashboard.balanceCard.title}
           </div>
-          <div className="text-2xl font-bold sm:text-3xl">
+          <div className="text-xl font-bold leading-tight sm:text-3xl sm:leading-tight">
             {loadingBalance ? t.trade.loading : balanceDisplay}
           </div>
           {!loadingBalance && !hasBalance && (
-            <div className="text-xs opacity-70">{t.dashboard.balanceCard.empty}</div>
+            <div className="text-[11px] opacity-70">{t.dashboard.balanceCard.empty}</div>
           )}
           {eltxAsset && (
-            <div className="pt-2 space-y-2 text-xs">
-              <div className={`flex flex-wrap items-center justify-between gap-2 ${changeColor}`}>
+            <div className="pt-1.5 space-y-1.5 text-[11px] sm:text-xs">
+              <div className={`flex flex-wrap items-center justify-between gap-2 leading-snug ${changeColor}`}>
                 <span>{t.dashboard.balanceCard.change24h}</span>
                 <span>
                   {changeStats ? changeStats.formattedValue : t.dashboard.balanceCard.noChange}
                   {changeStats?.formattedPercent ? ` (${changeStats.formattedPercent})` : ''}
                 </span>
               </div>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-white/70">
+              <div className="flex flex-wrap items-center justify-between gap-2 leading-snug text-white/70">
                 <span>{t.dashboard.balanceCard.lastMovement}</span>
                 <span className="text-right">{lastMovementLabel}</span>
               </div>
@@ -148,19 +149,6 @@ export default function DashboardPage() {
         </a>
       </div>
       <div className="space-y-8 pt-2">
-        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30 sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
-              <p className="text-xs uppercase text-white/60">{t.dashboard.ai.kicker}</p>
-              <h2 className="text-base font-semibold sm:text-lg">{t.dashboard.ai.title}</h2>
-              <p className="text-sm text-white/70">{t.dashboard.ai.description}</p>
-            </div>
-            <a href="/ai" className="btn btn-primary self-start sm:self-auto">
-              {t.dashboard.ai.cta}
-            </a>
-          </div>
-        </div>
-
         <div className="pt-8 border-t border-white/10">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">Payments</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
@@ -208,6 +196,19 @@ export default function DashboardPage() {
               subtitle={t.dashboard.cards.invite.subtitle}
               href="/referrals"
               icon={Gift}
+            />
+          </div>
+        </div>
+
+        <div className="pt-8 border-t border-white/10">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/70">{t.dashboard.ai.kicker}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+            <SectionCard
+              title={t.dashboard.cards.aiAgent.title}
+              subtitle={t.dashboard.cards.aiAgent.subtitle}
+              href="/ai"
+              icon={Sparkles}
+              badge={t.dashboard.ai.kicker}
             />
           </div>
         </div>
