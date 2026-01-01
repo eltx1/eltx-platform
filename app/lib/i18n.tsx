@@ -145,6 +145,14 @@ export const dict = {
         settings: { title: 'Settings', subtitle: '' },
         partners: { title: 'Partners', subtitle: '' },
       },
+      market: {
+        kicker: 'Market',
+        title: 'Market mini board',
+        subtitle: 'Quick market glance tailored for your dashboard.',
+        refresh: 'Refresh',
+        tradeCta: 'Trade now',
+        empty: 'No markets to display yet.',
+      },
     },
     referrals: {
       title: 'Invite & Earn',
@@ -1106,6 +1114,14 @@ export const dict = {
         kyc: { title: 'اعرف عميلك ومكافحة غسل الأموال', subtitle: 'فعّل هويتك' },
         settings: { title: 'الإعدادات', subtitle: '' },
         partners: { title: 'الشركاء', subtitle: '' },
+      },
+      market: {
+        kicker: 'السوق',
+        title: 'لوحة سوق مصغرة',
+        subtitle: 'نظرة سريعة على الأسعار داخل لوحة التحكم بتصميم متناسق.',
+        refresh: 'تحديث',
+        tradeCta: 'تداول الآن',
+        empty: 'مافيش أسواق متاحة للعرض دلوقتي.',
       },
     },
     referrals: {

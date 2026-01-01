@@ -179,7 +179,7 @@ async function fetchCoingeckoPrices(): Promise<Record<string, { price: number; c
   }
 }
 
-async function buildMarketEntries(): Promise<HomeMarketEntry[]> {
+export async function buildMarketEntries(): Promise<HomeMarketEntry[]> {
   const now = Date.now();
   if (cachedMarkets && now - cachedMarketsAt < MARKET_CACHE_TTL_MS) return cachedMarkets;
   if (pendingMarkets) return pendingMarkets;
@@ -261,5 +261,18 @@ export async function getHomeOverview() {
   } catch (err) {
     console.error('[home] failed to load overview', err);
     return FALLBACK_OVERVIEW;
+  }
+}
+
+export async function getHomeMarkets() {
+  if (!process.env.DATABASE_URL) {
+    return FALLBACK_MARKETS;
+  }
+
+  try {
+    return await resolveWithTimeout(buildMarketEntries(), HOME_OVERVIEW_TIMEOUT_MS, FALLBACK_MARKETS);
+  } catch (err) {
+    console.error('[home] failed to load markets', err);
+    return FALLBACK_MARKETS;
   }
 }
