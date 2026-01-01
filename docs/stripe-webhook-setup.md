@@ -19,6 +19,6 @@ The API exposes a single webhook endpoint for Stripe events:
 - If you fix the webhook configuration **after** a live checkout already succeeded, Stripe will not re-send past events automatically. Use the Stripe Dashboard to **Resend** the relevant event or perform a new test/live checkout to trigger a fresh event with the correct signature.
 
 ## Default return URLs (for reference)
-- Success: `https://eltx.online/buy?status=success&session_id={CHECKOUT_SESSION_ID}`
-- Cancel: `https://eltx.online/buy?status=cancelled`
+- Success: `https://eltx.online/wallet`
+- Cancel: `https://eltx.online/wallet`
 - You can override them with environment variables `STRIPE_SUCCESS_URL` and `STRIPE_CANCEL_URL`, or change the base with `APP_BASE_URL`/`STRIPE_RETURN_URL_BASE`.

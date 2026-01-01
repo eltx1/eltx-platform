@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { ArrowUpRight, Copy, HandCoins, Search, ShoppingBag } from 'lucide-react';
+import { ArrowUpRight, Copy, HandCoins, Search } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
@@ -448,20 +448,7 @@ export default function WalletPage() {
       </div>
       <div className="pt-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/20">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Link
-              href="/buy"
-              className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-gradient-to-br from-emerald-500/15 via-emerald-400/10 to-emerald-600/20 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-500/10 transition hover:border-emerald-200/50"
-            >
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <ShoppingBag className="h-4 w-4" />
-                  <span>{t.wallet.actions.buy}</span>
-                </div>
-                <p className="text-xs text-white/80">{t.buy.subtitle}</p>
-              </div>
-              <ArrowUpRight className="h-4 w-4 text-white/70 group-hover:text-white" />
-            </Link>
+          <div className="grid gap-3 sm:grid-cols-2">
             <Link
               href="/p2p"
               className="group flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-gradient-to-br from-amber-500/15 via-amber-400/10 to-amber-600/20 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-amber-500/10 transition hover:border-amber-200/50"

@@ -51,12 +51,12 @@ function normalizeBaseUrl(value) {
 
 function buildDefaultSuccessUrl(base) {
   const normalized = normalizeBaseUrl(base) || STRIPE_BASE_FALLBACK;
-  return `${normalized}/buy?status=success&session_id={CHECKOUT_SESSION_ID}`;
+  return `${normalized}/wallet`;
 }
 
 function buildDefaultCancelUrl(base) {
   const normalized = normalizeBaseUrl(base) || STRIPE_BASE_FALLBACK;
-  return `${normalized}/buy?status=cancelled`;
+  return `${normalized}/wallet`;
 }
 
 function parsePositiveNumberSetting(value, fallback) {

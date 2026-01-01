@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CandlestickChart, Coins, CreditCard, Home, Wallet } from 'lucide-react';
+import { CandlestickChart, Coins, Home, Wallet } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
 
 function NavItem({ href, label, icon: Icon, active }: { href: string; label: string; icon: typeof Home; active: boolean }) {
@@ -62,7 +62,6 @@ export default function AppBottomNav() {
     { href: '/dashboard', label: t.appNav.home, icon: Home },
     { href: '/wallet', label: t.appNav.wallet, icon: Wallet },
     { href: '/trade/spot', label: t.appNav.spotTrade, icon: CandlestickChart, activeRoot: '/trade' },
-    { href: '/buy', label: t.appNav.buy, icon: CreditCard },
     { href: '/staking', label: t.appNav.staking, icon: Coins },
   ];
 
