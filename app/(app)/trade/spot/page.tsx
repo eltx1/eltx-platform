@@ -99,7 +99,34 @@ type WalletAssetsResponse = {
 
 type ValidationState = { valid: boolean; message: string | null };
 
+type SpotStreamPayload = {
+  market?: { symbol: string; base_asset: string; quote_asset: string };
+  orderbook?: { bids: OrderbookLevel[]; asks: OrderbookLevel[] };
+  trades?: OrderbookResponse['trades'];
+  orders?: SpotOrder[];
+  balances?: Record<string, WalletAsset>;
+  fees?: { maker_bps?: number | null; taker_bps?: number | null };
+  orderbook_version?: { ts: number; id: number };
+  last_trade_id?: number;
+};
+
+type SpotStreamMessage =
+  | { type: 'snapshot' | 'update'; payload: SpotStreamPayload }
+  | { type: 'ping'; payload?: { ts?: number } }
+  | { type: 'error'; payload?: { message?: string } };
+
 const MARKET_PRIORITY = ['ELTX/USDT', 'WBTC/USDT', 'BNB/USDT', 'ETH/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB'];
+const STREAM_TRADE_LIMIT = 50;
+
+function normalizeStreamTrades(trades: OrderbookResponse['trades']): OrderbookResponse['trades'] {
+  return trades.slice(0, STREAM_TRADE_LIMIT);
+}
+
+function buildSpotWsUrl(base: string, market: string): string {
+  const url = new URL(`/spot/ws?market=${encodeURIComponent(market)}`, base);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.toString();
+}
 
 function sortMarkets(markets: SpotMarket[]): SpotMarket[] {
   const prioritize = (symbol: string) =>
@@ -178,6 +205,9 @@ export default function SpotTradePage() {
   const amountInputRef = useRef<HTMLInputElement | null>(null);
   const lastStatusesRef = useRef<Map<number, SpotOrder['status']>>(new Map());
   const idempotencyKeyRef = useRef<string | null>(null);
+  const streamRef = useRef<WebSocket | null>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const preventReconnectRef = useRef(false);
 
   useEffect(() => {
     if (user === null) router.replace('/login');
@@ -211,9 +241,29 @@ export default function SpotTradePage() {
       }
       setErrorBanner('');
       setOrderbook(res.data.orderbook);
-      setTrades(res.data.trades.slice(0, 20));
+      setTrades(normalizeStreamTrades(res.data.trades));
     },
     [t.common.genericError]
+  );
+
+  const updateOrdersState = useCallback(
+    (nextOrders: SpotOrder[]) => {
+      setOrders(nextOrders);
+      const statusMap = lastStatusesRef.current;
+      const seen = new Set<number>();
+      nextOrders.forEach((order) => {
+        seen.add(order.id);
+        const previous = statusMap.get(order.id);
+        if (previous && previous !== order.status && order.status === 'filled') {
+          toast({ message: t.spotTrade.notifications.filled, variant: 'success' });
+        }
+        statusMap.set(order.id, order.status);
+      });
+      Array.from(statusMap.keys()).forEach((id) => {
+        if (!seen.has(id)) statusMap.delete(id);
+      });
+    },
+    [t.spotTrade.notifications.filled, toast]
   );
 
   const loadOrders = useCallback(
@@ -226,22 +276,9 @@ export default function SpotTradePage() {
         return;
       }
       setErrorBanner('');
-      setOrders(res.data.orders);
-      const statusMap = lastStatusesRef.current;
-      const seen = new Set<number>();
-      res.data.orders.forEach((order) => {
-        seen.add(order.id);
-        const previous = statusMap.get(order.id);
-        if (previous && previous !== order.status && order.status === 'filled') {
-          toast({ message: t.spotTrade.notifications.filled, variant: 'success' });
-        }
-        statusMap.set(order.id, order.status);
-      });
-      Array.from(statusMap.keys()).forEach((id) => {
-        if (!seen.has(id)) statusMap.delete(id);
-      });
+      updateOrdersState(res.data.orders);
     },
-    [t.common.genericError, t.spotTrade.notifications.filled, toast]
+    [t.common.genericError, updateOrdersState]
   );
 
   const loadBalances = useCallback(async (options: { suppressError?: boolean } = {}) => {
@@ -260,6 +297,86 @@ export default function SpotTradePage() {
     });
     setBalances(map);
   }, [lastBalanceError, t.common.genericError]);
+
+  const applyStreamPayload = useCallback((payload: SpotStreamPayload) => {
+    if (payload.orderbook) setOrderbook(payload.orderbook);
+    if (payload.trades) setTrades(normalizeStreamTrades(payload.trades));
+    if (payload.orders) updateOrdersState(payload.orders);
+    if (payload.balances) setBalances(payload.balances);
+    if (payload.fees) {
+      setFees((prev) => {
+        const makerBpsRaw = payload.fees?.maker_bps ?? prev.maker;
+        const makerBps = Number.isFinite(Number(makerBpsRaw)) ? Number(makerBpsRaw) : prev.maker;
+        const takerBpsRaw = payload.fees?.taker_bps ?? payload.fees?.maker_bps ?? prev.taker ?? makerBps;
+        const takerBps = Number.isFinite(Number(takerBpsRaw)) ? Number(takerBpsRaw) : makerBps;
+        return { maker: makerBps, taker: takerBps };
+      });
+    }
+    setErrorBanner('');
+    setStreamConnected(true);
+  }, [updateOrdersState]);
+
+  const resetStream = useCallback(() => {
+    preventReconnectRef.current = true;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.close();
+      streamRef.current = null;
+    }
+    setStreamConnected(false);
+  }, []);
+
+  const connectStream = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    if (!selectedMarket) return;
+    const base = process.env.NEXT_PUBLIC_API_BASE;
+    if (!base) return;
+    preventReconnectRef.current = false;
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.close();
+      streamRef.current = null;
+    }
+    const url = buildSpotWsUrl(base, selectedMarket);
+    const socket = new WebSocket(url);
+    streamRef.current = socket;
+    setStreamConnected(false);
+
+    const handleCloseOrError = () => {
+      streamRef.current = null;
+      setStreamConnected(false);
+      if (preventReconnectRef.current) return;
+      if (reconnectTimerRef.current) return;
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        connectStream();
+      }, 2500);
+    };
+
+    socket.addEventListener('open', () => setStreamConnected(true));
+    socket.addEventListener('message', (event) => {
+      try {
+        const message: SpotStreamMessage = JSON.parse(event.data);
+        if (message.type === 'snapshot' || message.type === 'update') {
+          applyStreamPayload(message.payload || {});
+        } else if (message.type === 'ping') {
+          setStreamConnected(true);
+        } else if (message.type === 'error') {
+          setErrorBanner(message.payload?.message || t.common.genericError);
+        }
+      } catch (err) {
+        console.error('Failed to parse spot stream payload', err);
+      }
+    });
+    socket.addEventListener('close', handleCloseOrError);
+    socket.addEventListener('error', handleCloseOrError);
+  }, [applyStreamPayload, selectedMarket, t.common.genericError]);
 
   useEffect(() => {
     loadMarkets();
@@ -298,38 +415,10 @@ export default function SpotTradePage() {
   }, [selectedMarket, loadOrders, loadBalances, streamConnected]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!selectedMarket) return;
-    const base = process.env.NEXT_PUBLIC_API_BASE;
-    if (!base) return;
-    const url = `${base}/spot/stream?market=${encodeURIComponent(selectedMarket)}`;
-    const source = new EventSource(url, { withCredentials: true });
-    setStreamConnected(false);
-    source.addEventListener('update', (event) => {
-      try {
-        const payload = JSON.parse((event as MessageEvent).data);
-        if (payload.orderbook) setOrderbook(payload.orderbook);
-        if (payload.trades) setTrades(payload.trades);
-        if (payload.orders) setOrders(payload.orders);
-        if (payload.balances) setBalances(payload.balances);
-        if (payload.fees)
-          setFees({ maker: Number(payload.fees.maker_bps || 0), taker: Number(payload.fees.taker_bps || 0) });
-        setErrorBanner('');
-        setStreamConnected(true);
-      } catch (err) {
-        console.error('Failed to parse spot stream payload', err);
-      }
-    });
-    source.addEventListener('ping', () => setStreamConnected(true));
-    source.addEventListener('error', () => {
-      setStreamConnected(false);
-      source.close();
-    });
-    return () => {
-      setStreamConnected(false);
-      source.close();
-    };
-  }, [selectedMarket]);
+    resetStream();
+    if (selectedMarket) connectStream();
+    return () => resetStream();
+  }, [selectedMarket, connectStream, resetStream]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
