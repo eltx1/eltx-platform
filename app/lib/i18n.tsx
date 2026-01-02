@@ -147,8 +147,8 @@ export const dict = {
       },
       market: {
         kicker: 'Market',
-        title: 'Market mini board',
-        subtitle: 'Quick market glance tailored for your dashboard.',
+        title: 'Market',
+        subtitle: '',
         refresh: 'Refresh',
         tradeCta: 'Trade now',
         empty: 'No markets to display yet.',
@@ -1117,8 +1117,8 @@ export const dict = {
       },
       market: {
         kicker: 'السوق',
-        title: 'لوحة سوق مصغرة',
-        subtitle: 'نظرة سريعة على الأسعار داخل لوحة التحكم بتصميم متناسق.',
+        title: 'السوق',
+        subtitle: '',
         refresh: 'تحديث',
         tradeCta: 'تداول الآن',
         empty: 'مافيش أسواق متاحة للعرض دلوقتي.',
