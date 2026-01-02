@@ -3,7 +3,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { formatUnits, parseUnits } from 'ethers';
 import {
-  CreditCard,
   Coins,
   DollarSign,
   Download,
@@ -57,7 +56,6 @@ type Section =
   | 'notifications'
   | 'support'
   | 'faq'
-  | 'stripe'
   | 'p2p'
   | 'withdrawals';
 
@@ -91,13 +89,6 @@ interface UserRow {
 
 interface UserDetailResponse {
   user: UserRow;
-  last_stripe_purchase: {
-    id: number;
-    currency: string;
-    usd_amount: string;
-    completed_at: string | null;
-    created_at: string;
-  } | null;
   balances: Array<{ asset: string; balance: string; balance_wei: string; created_at: string }>;
   staking: Array<{ id: number; plan_name: string; amount: string; status: string; start_date: string; end_date: string }>;
   fiat: Array<{
@@ -112,36 +103,6 @@ interface UserDetailResponse {
   deposits: Array<{ id: number; asset: string; amount: string; status: string; created_at: string }>;
   transfers: Array<{ id: number; asset: string; amount: string; from_user_id: number; to_user_id: number; created_at: string }>;
   kyc?: AdminKycRequest | null;
-}
-
-interface StripeStatusResponse {
-  ok: boolean;
-  status: {
-    enabled: boolean;
-    reason?: string | null;
-    publishableKey?: string | null;
-    secretKey?: string | null;
-    webhookSecret?: string | null;
-    returnUrlBase?: string | null;
-    successUrl?: string | null;
-    cancelUrl?: string | null;
-    minPurchaseUsd?: number;
-    maxPurchaseUsd?: number | null;
-    sdkReady?: boolean;
-  };
-}
-
-interface StripePricingResponse {
-  ok: boolean;
-  pricing: {
-    asset: string;
-    price_eltx: string;
-    price_usdt?: string;
-    min_usd: string;
-    max_usd: string | null;
-    updated_at?: string | null;
-    assets?: Array<{ asset: string; price_asset: string | null; price_eltx?: string | null; decimals?: number | null; updated_at?: string | null }>;
-  };
 }
 
 type FeeSettings = {
@@ -357,7 +318,6 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
-  { id: 'stripe', label: 'Stripe Purchases', icon: CreditCard },
   { id: 'p2p', label: 'P2P Marketplace', icon: MessageCircle },
 ];
 
@@ -1961,12 +1921,6 @@ function OverviewPanel({ onError }: { onError: (message: string) => void }) {
           subtitle="Positions currently earning rewards"
           icon={Layers}
         />
-        <StatCard
-          title="Card purchases"
-          value={`$${summary.fiat_completed.usd}`}
-          subtitle={`${summary.fiat_completed.count.toLocaleString()} successful Stripe settlements`}
-          icon={CreditCard}
-        />
       </div>
       <button
         onClick={load}
@@ -2366,30 +2320,6 @@ function UsersPanel({ onNotify }: { onNotify: (message: string, variant?: 'succe
               <div className="rounded-xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30">
                 <p className="text-[11px] uppercase tracking-wide text-white/50">Last login / آخر تسجيل دخول</p>
                 <p className="mt-1 text-sm font-semibold text-white">{formatDateTime(details.user.last_login_at)}</p>
-              </div>
-              <div className="md:col-span-2 lg:col-span-3 rounded-xl border border-white/10 bg-white/5 p-4 shadow-inner shadow-black/30">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-[11px] uppercase tracking-wide text-white/50">Last Stripe purchase / آخر عملية Stripe ناجحة</p>
-                  {details.last_stripe_purchase?.id ? (
-                    <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-200">Succeeded</span>
-                  ) : null}
-                </div>
-                {details.last_stripe_purchase ? (
-                  <div className="mt-1 space-y-1 text-sm text-white">
-                    <div className="flex items-center gap-2">
-                      <DollarSign className="h-4 w-4 text-emerald-300" />
-                      <span className="font-semibold">
-                        {formatAmountWithCurrency(details.last_stripe_purchase.usd_amount, details.last_stripe_purchase.currency)}
-                      </span>
-                    </div>
-                    <div className="text-white/70">
-                      {formatDateTime(details.last_stripe_purchase.completed_at || details.last_stripe_purchase.created_at)}
-                    </div>
-                    <div className="text-xs text-white/50">Purchase ID: {details.last_stripe_purchase.id}</div>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-sm text-white/60">No successful Stripe purchases recorded yet.</p>
-                )}
               </div>
             </div>
 
@@ -4439,293 +4369,6 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   );
 }
 
-function StripePanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
-  const [purchases, setPurchases] = useState<any[]>([]);
-  const [loadingPurchases, setLoadingPurchases] = useState(true);
-  const [status, setStatus] = useState<StripeStatusResponse['status'] | null>(null);
-  const [statusLoading, setStatusLoading] = useState(true);
-  const [pricing, setPricing] = useState<StripePricingResponse['pricing'] | null>(null);
-  const [pricingLoading, setPricingLoading] = useState(true);
-  const [pricingForm, setPricingForm] = useState({ price_eltx: '', price_usdt: '', min_usd: '', max_usd: '' });
-  const [savingPricing, setSavingPricing] = useState(false);
-
-  const loadPurchases = useCallback(async () => {
-    setLoadingPurchases(true);
-    const res = await apiFetch<{ purchases: any[] }>('/admin/fiat/purchases');
-    if (res.ok) setPurchases(res.data.purchases);
-    else onNotify(res.error || 'Failed to load purchases', 'error');
-    setLoadingPurchases(false);
-  }, [onNotify]);
-
-  const loadPricing = useCallback(async () => {
-    setPricingLoading(true);
-    const res = await apiFetch<StripePricingResponse>('/admin/stripe/pricing');
-    if (res.ok) {
-      setPricing(res.data.pricing);
-      setPricingForm({
-        price_eltx: res.data.pricing.price_eltx,
-        price_usdt: res.data.pricing.price_usdt || res.data.pricing.price_eltx,
-        min_usd: res.data.pricing.min_usd,
-        max_usd: res.data.pricing.max_usd || '',
-      });
-    } else {
-      setPricing(null);
-      onNotify(res.error || 'Failed to load Stripe pricing', 'error');
-    }
-    setPricingLoading(false);
-  }, [onNotify]);
-
-  const loadStatus = useCallback(async () => {
-    setStatusLoading(true);
-    const res = await apiFetch<StripeStatusResponse>('/admin/stripe/status');
-    if (res.ok) setStatus(res.data.status);
-    else onNotify(res.error || 'Failed to load Stripe status', 'error');
-    setStatusLoading(false);
-  }, [onNotify]);
-
-  useEffect(() => {
-    loadPurchases();
-    loadStatus();
-    loadPricing();
-  }, [loadPurchases, loadStatus, loadPricing]);
-
-  const refreshAll = useCallback(() => {
-    loadStatus();
-    loadPurchases();
-    loadPricing();
-  }, [loadPurchases, loadStatus, loadPricing]);
-
-  const handlePricingChange = (field: 'price_eltx' | 'price_usdt' | 'min_usd' | 'max_usd', value: string) => {
-    setPricingForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const savePricing = async () => {
-    setSavingPricing(true);
-    const payload: Record<string, unknown> = {};
-
-    if (pricingForm.price_eltx.trim()) payload.price_eltx = pricingForm.price_eltx.trim();
-    if (pricingForm.price_usdt.trim()) payload.price_usdt = pricingForm.price_usdt.trim();
-    if (pricingForm.min_usd.trim()) payload.min_usd = pricingForm.min_usd.trim();
-    payload.max_usd = pricingForm.max_usd.trim() ? pricingForm.max_usd.trim() : null;
-
-    const res = await apiFetch<StripePricingResponse>('/admin/stripe/pricing', {
-      method: 'PATCH',
-      body: JSON.stringify(payload),
-    });
-    setSavingPricing(false);
-    if (res.ok) {
-      setPricing(res.data.pricing);
-      setPricingForm({
-        price_eltx: res.data.pricing.price_eltx,
-        price_usdt: res.data.pricing.price_usdt || res.data.pricing.price_eltx,
-        min_usd: res.data.pricing.min_usd,
-        max_usd: res.data.pricing.max_usd || '',
-      });
-      onNotify('Stripe price updated');
-    } else {
-      onNotify(res.error || 'Failed to update pricing', 'error');
-    }
-  };
-
-  const envRows = [
-    { label: 'STRIPE_PUBLISHABLE_KEY', value: status?.publishableKey || 'Not set' },
-    { label: 'STRIPE_SECRET_KEY', value: status?.secretKey || 'Not set' },
-    { label: 'STRIPE_WEBHOOK_SECRET', value: status?.webhookSecret || 'Not set' },
-    { label: 'RETURN URL BASE', value: status?.returnUrlBase || 'Not set' },
-    { label: 'SUCCESS URL', value: status?.successUrl || 'Not set' },
-    { label: 'CANCEL URL', value: status?.cancelUrl || 'Not set' },
-    {
-      label: 'LIMITS (USD)',
-      value: `${status?.minPurchaseUsd ?? '—'} - ${status?.maxPurchaseUsd ?? '∞'}`,
-    },
-  ];
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h3 className="text-lg font-semibold">Stripe conversions</h3>
-        <button
-          onClick={refreshAll}
-          className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
-        >
-          <RefreshCw className="h-3 w-3" /> Refresh
-        </button>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-white/5">
-        <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">
-          Environment status
-        </div>
-        {statusLoading ? (
-          <div className="flex h-40 items-center justify-center">
-            <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
-          </div>
-        ) : status ? (
-          <div className="space-y-4 p-4 text-sm">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 text-base font-semibold">
-                <span className={`h-2 w-2 rounded-full ${status.enabled ? 'bg-green-400' : 'bg-red-400'}`}></span>
-                {status.enabled ? 'Checkout enabled' : 'Checkout disabled'}
-              </div>
-              <div className="text-xs text-white/60">
-                {status.sdkReady ? 'Stripe SDK initialized' : 'Stripe SDK not initialized'}
-              </div>
-              {!status.enabled && status.reason && (
-                <div className="text-xs text-red-300">{status.reason}</div>
-              )}
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {envRows.map((row) => (
-                <div key={row.label} className="rounded-xl border border-white/10 bg-black/40 p-3">
-                  <div className="text-[11px] uppercase tracking-wide text-white/50">{row.label}</div>
-                  <div className="mt-1 font-mono text-xs text-white/80 break-all">{row.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="p-4 text-sm text-white/70">Unable to read Stripe status.</div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-white/5">
-        <div className="border-b border-white/10 px-4 py-3 text-sm font-semibold uppercase text-white/60">
-          Card pricing (Stripe)
-        </div>
-        {pricingLoading ? (
-          <div className="flex h-56 items-center justify-center">
-            <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
-          </div>
-        ) : pricing ? (
-          <div className="space-y-4 p-4 text-sm text-white/80">
-            <div className="grid gap-4 md:grid-cols-4">
-              <label className="space-y-2">
-                <span className="text-[11px] uppercase tracking-wide text-white/50">ELTX per USD</span>
-                <input
-                  type="text"
-                  value={pricingForm.price_eltx}
-                  onChange={(e) => handlePricingChange('price_eltx', e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
-                  placeholder="0.00"
-                  disabled={savingPricing}
-                />
-                <span className="block text-[11px] text-white/50">Current: {pricing.price_eltx}</span>
-              </label>
-              <label className="space-y-2">
-                <span className="text-[11px] uppercase tracking-wide text-white/50">USDT per USD</span>
-                <input
-                  type="text"
-                  value={pricingForm.price_usdt}
-                  onChange={(e) => handlePricingChange('price_usdt', e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
-                  placeholder="1.00"
-                  disabled={savingPricing}
-                />
-                <span className="block text-[11px] text-white/50">
-                  Current: {pricing.price_usdt || pricing.price_eltx}
-                </span>
-              </label>
-              <label className="space-y-2">
-                <span className="text-[11px] uppercase tracking-wide text-white/50">Minimum USD</span>
-                <input
-                  type="text"
-                  value={pricingForm.min_usd}
-                  onChange={(e) => handlePricingChange('min_usd', e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
-                  placeholder="10.00"
-                  disabled={savingPricing}
-                />
-                <span className="block text-[11px] text-white/50">Current: {pricing.min_usd}</span>
-              </label>
-              <label className="space-y-2">
-                <span className="text-[11px] uppercase tracking-wide text-white/50">Maximum USD (blank = unlimited)</span>
-                <input
-                  type="text"
-                  value={pricingForm.max_usd}
-                  onChange={(e) => handlePricingChange('max_usd', e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm focus:border-indigo-400 focus:outline-none"
-                  placeholder="1000.00"
-                  disabled={savingPricing}
-                />
-                <span className="block text-[11px] text-white/50">Current: {pricing.max_usd ?? '∞'}</span>
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-white/50">
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span>Configured assets:</span>
-                  {pricing.assets?.length ? (
-                    pricing.assets.map((row) => (
-                      <span
-                        key={row.asset}
-                        className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/80"
-                      >
-                        {row.asset} @ {row.price_asset}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="rounded-full border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-semibold text-white/60">
-                      ELTX
-                    </span>
-                  )}
-                </div>
-                {pricing.updated_at && <div>Updated: {new Date(pricing.updated_at).toLocaleString()}</div>}
-              </div>
-              <button
-                onClick={savePricing}
-                disabled={savingPricing}
-                className="inline-flex items-center gap-2 rounded-full bg-indigo-500 px-4 py-2 text-xs font-semibold text-white shadow hover:bg-indigo-400 disabled:cursor-not-allowed disabled:bg-white/10"
-              >
-                {savingPricing && <Loader2 className="h-4 w-4 animate-spin" />}
-                Save pricing
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="p-4 text-sm text-white/70">Unable to load Stripe pricing.</div>
-        )}
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-white/5">
-        {loadingPurchases ? (
-          <div className="flex h-60 items-center justify-center">
-            <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-white/10 text-sm">
-              <thead className="bg-white/5">
-                <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">User</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">USD</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Asset</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/10">
-                {purchases.map((row) => (
-                  <tr key={row.id}>
-                    <td className="px-3 py-2">#{row.user_id}</td>
-                    <td className="px-3 py-2">${row.usd_amount}</td>
-                    <td className="px-3 py-2">
-                      {row.asset_amount || row.eltx_amount} {row.asset || 'ELTX'}
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className="rounded-full bg-white/10 px-2 py-1 text-xs uppercase text-white/70">{row.status}</span>
-                    </td>
-                    <td className="px-3 py-2 text-xs text-white/60">{new Date(row.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 export default function AdminApp() {
   const toast = useToast();
   const [admin, setAdmin] = useState<Admin | null | undefined>(undefined);
@@ -4827,7 +4470,6 @@ export default function AdminApp() {
           {active === 'support' && <SupportPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
-          {active === 'stripe' && <StripePanel onNotify={notify} />}
           {active === 'p2p' && <P2PPanel onNotify={notify} />}
         </div>
       </main>
