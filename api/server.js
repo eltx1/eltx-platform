@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require('helmet');
 const crypto = require('crypto');
 const fs = require('fs');
+const http = require('http');
 const path = require('path');
 const { z } = require('zod');
 const { ethers } = require('ethers');
@@ -15,6 +16,8 @@ const Decimal = require('decimal.js');
 const Stripe = require('stripe');
 const OpenAI = require('openai');
 const nodemailer = require('nodemailer');
+const WebSocket = require('ws');
+const { WebSocketServer } = WebSocket;
 const { logMasterFingerprint, getMasterMnemonic } = require('../src/utils/hdWallet');
 const { provisionUserAddress, getUserBalance } = require('./src/services/wallet');
 const {
@@ -481,6 +484,22 @@ const adminSessionCookie = {
   path: '/',
   maxAge: ADMIN_SESSION_TTL_SECONDS * 1000,
 };
+
+function parseCookies(header = '') {
+  return header.split(';').reduce((acc, pair) => {
+    const [rawKey, ...rest] = pair.split('=');
+    if (!rawKey || !rest.length) return acc;
+    const key = rawKey.trim();
+    if (!key) return acc;
+    const value = rest.join('=').trim();
+    try {
+      acc[key] = decodeURIComponent(value);
+    } catch {
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
+}
 
 const rateLimitJsonHandler = (req, res) =>
   res.status(429).json({ ok: false, error: { code: 'RATE_LIMITED', message: 'Too many requests, slow down' } });
@@ -7948,6 +7967,129 @@ app.get('/spot/changes', spotLimiter, async (req, res, next) => {
   }
 });
 
+async function handleSpotWebsocketConnection(socket, req) {
+  let closed = false;
+  let updating = false;
+  let lastOrderbookVersion = { ts: 0, id: 0 };
+  let lastTradeId = 0;
+  let heartbeatTimer;
+  let deltaTimer;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (deltaTimer) clearInterval(deltaTimer);
+  };
+
+  const send = (type, payload) => {
+    if (closed || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(JSON.stringify({ type, payload }));
+  };
+
+  const sendError = (message, code = 1011) => {
+    send('error', { message });
+    try {
+      socket.close(code, message);
+    } catch {
+      // ignore
+    }
+    cleanup();
+  };
+
+  try {
+    const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+    const { market } = SpotOrderbookSchema.parse({ market: url.searchParams.get('market') });
+    req.cookies = { ...(req.cookies || {}), ...parseCookies(req.headers.cookie || '') };
+    const userId = await requireUser(req);
+    const marketRow = await getSpotMarket(pool, market);
+    if (!marketRow || !marketRow.active) {
+      return sendError('Market not found', 4404);
+    }
+
+    const pushSnapshot = async () => {
+      const [snapshot, orders, balances, fees] = await Promise.all([
+        readSpotOrderbookSnapshot(pool, marketRow),
+        readSpotOrdersForUser(pool, userId, marketRow),
+        readUserBalancesForAssets(pool, userId, [marketRow.base_asset, marketRow.quote_asset]),
+        readSpotFeeBps(pool),
+      ]);
+      lastOrderbookVersion = snapshot.orderbookVersion;
+      lastTradeId = snapshot.lastTradeId;
+      send('snapshot', {
+        market: {
+          symbol: marketRow.symbol,
+          base_asset: marketRow.base_asset,
+          quote_asset: marketRow.quote_asset,
+        },
+        orderbook_version: lastOrderbookVersion,
+        last_trade_id: lastTradeId,
+        orderbook: snapshot.orderbook,
+        trades: snapshot.trades,
+        orders,
+        balances,
+        fees: { maker_bps: fees.maker, taker_bps: fees.taker },
+      });
+    };
+
+    const pushUpdate = async () => {
+      if (closed || updating) return;
+      updating = true;
+      try {
+        const [orderbookDelta, tradeDelta] = await Promise.all([
+          readSpotOrderbookDeltas(pool, marketRow, lastOrderbookVersion),
+          readSpotTradeDeltas(pool, marketRow, lastTradeId),
+        ]);
+
+        const hasChange = orderbookDelta.deltas.length > 0 || tradeDelta.trades.length > 0;
+        if (!hasChange) return;
+
+        const [orders, balances, snapshot, fees] = await Promise.all([
+          readSpotOrdersForUser(pool, userId, marketRow),
+          readUserBalancesForAssets(pool, userId, [marketRow.base_asset, marketRow.quote_asset]),
+          readSpotOrderbookSnapshot(pool, marketRow),
+          readSpotFeeBps(pool),
+        ]);
+        lastOrderbookVersion = snapshot.orderbookVersion;
+        lastTradeId = snapshot.lastTradeId;
+
+        send('update', {
+          orderbook_version: lastOrderbookVersion,
+          last_trade_id: lastTradeId,
+          orderbook: snapshot.orderbook,
+          trades: snapshot.trades,
+          orders,
+          balances,
+          fees: { maker_bps: fees.maker, taker_bps: fees.taker },
+        });
+      } catch (err) {
+        send('error', { message: err?.message || 'Stream error' });
+      } finally {
+        updating = false;
+      }
+    };
+
+    const heartbeatMs = Number(
+      (await getPlatformSettingValue('spot_stream_heartbeat_ms', '12000').catch(() => '12000')) || '12000'
+    );
+    const deltaIntervalMs = Number(
+      (await getPlatformSettingValue('spot_stream_delta_interval_ms', '1200').catch(() => '1200')) || '1200'
+    );
+
+    socket.on('close', cleanup);
+    socket.on('error', cleanup);
+
+    await pushSnapshot();
+    heartbeatTimer = setInterval(() => send('ping', { ts: Date.now() }), heartbeatMs);
+    deltaTimer = setInterval(() => {
+      pushUpdate().catch((err) => send('error', { message: err?.message || 'Stream error' }));
+    }, deltaIntervalMs);
+  } catch (err) {
+    sendError(err?.message || 'Stream error');
+    cleanup();
+  }
+}
+
 app.get('/spot/stream', spotLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
@@ -9408,7 +9550,37 @@ app.use((err, req, res, next) => {
   res.status(status).json(body);
 });
 
+const spotWsServer = new WebSocketServer({ noServer: true });
+spotWsServer.on('connection', (socket, req) => {
+  handleSpotWebsocketConnection(socket, req).catch((err) => {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'error', payload: { message: err?.message || 'Stream error' } }));
+    }
+    try {
+      socket.close(1011, 'STREAM_ERROR');
+    } catch {
+      // ignore
+    }
+  });
+});
+
+const server = http.createServer(app);
+server.on('upgrade', (req, socket, head) => {
+  try {
+    const { pathname } = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+    if (pathname === '/spot/ws') {
+      spotWsServer.handleUpgrade(req, socket, head, (ws) => {
+        spotWsServer.emit('connection', ws, req);
+      });
+    } else {
+      socket.destroy();
+    }
+  } catch (err) {
+    socket.destroy();
+  }
+});
+
 const port = process.env.PORT || 4000;
-app.listen(port, () => {
+server.listen(port, () => {
   console.log(`API running on port ${port}`);
 });
