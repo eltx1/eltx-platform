@@ -26,6 +26,7 @@ const FALLBACK_LOGOS: Record<string, string> = {
   ETH: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png?1595348880',
   BNB: 'https://assets.coingecko.com/coins/images/825/large/binance-coin-logo.png?1547034615',
   SOL: 'https://assets.coingecko.com/coins/images/4128/large/solana.png?1640133422',
+  ELTX: '/assets/img/logo.jpeg',
 };
 
 function formatUsdCompact(value: number | null) {
