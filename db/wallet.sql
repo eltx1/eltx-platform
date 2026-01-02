@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS wallet_addresses (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 ALTER TABLE wallet_addresses DROP INDEX IF EXISTS uniq_user_chain;
+ALTER TABLE wallet_addresses DROP INDEX IF EXISTS uniq_wallet_index;
 ALTER TABLE wallet_addresses DROP INDEX IF EXISTS uniq_addr;
 ALTER TABLE wallet_addresses DROP INDEX IF EXISTS idx_user;
 ALTER TABLE wallet_addresses

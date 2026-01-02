@@ -373,7 +373,8 @@ async function ensureWalletSchema() {
           try {
             await originalConnQuery(sql);
           } catch (err) {
-            if (err && err.code === 'ER_CANT_DROP_FIELD_OR_KEY') {
+            const code = err && err.code;
+            if (code === 'ER_CANT_DROP_FIELD_OR_KEY' || code === 'ER_DUP_KEYNAME') {
               console.warn('schema adjust skip', err.sqlMessage || err.message || err);
               continue;
             }
