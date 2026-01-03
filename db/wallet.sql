@@ -367,17 +367,17 @@ ALTER TABLE staking_accruals
   ADD UNIQUE KEY IF NOT EXISTS uniq_accrual (position_id, accrual_date);
 
 INSERT INTO staking_plans (id, name, duration_days, apr_bps, stake_asset, stake_decimals, is_active)
-VALUES
-  (1, '30d', 30, 600, 'ELTX', 18, 1),
-  (2, '6m', 180, 1000, 'ELTX', 18, 1),
-  (3, '1y', 365, 1600, 'ELTX', 18, 1)
-ON DUPLICATE KEY UPDATE
-  name=VALUES(name),
-  duration_days=VALUES(duration_days),
-  apr_bps=VALUES(apr_bps),
-  stake_asset=VALUES(stake_asset),
-  stake_decimals=VALUES(stake_decimals),
-  is_active=VALUES(is_active);
+SELECT *
+FROM (
+  SELECT 1 AS id, '30d' AS name, 30 AS duration_days, 600 AS apr_bps, 'ELTX' AS stake_asset, 18 AS stake_decimals, 1 AS is_active
+  UNION ALL
+  SELECT 2 AS id, '6m' AS name, 180 AS duration_days, 1000 AS apr_bps, 'ELTX' AS stake_asset, 18 AS stake_decimals, 1 AS is_active
+  UNION ALL
+  SELECT 3 AS id, '1y' AS name, 365 AS duration_days, 1600 AS apr_bps, 'ELTX' AS stake_asset, 18 AS stake_decimals, 1 AS is_active
+) AS defaults
+WHERE NOT EXISTS (
+  SELECT 1 FROM staking_plans sp WHERE sp.id = defaults.id
+);
 
 -- stored swap quotes
 CREATE TABLE IF NOT EXISTS trade_quotes (
