@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ArrowDown, ArrowUp, ArrowUpRight, RefreshCw, Sparkles } from 'lucide-react';
 import { apiFetch } from '../../app/lib/api';
+import { PLATFORM_LOGO_URL } from '../../app/lib/branding';
 import { dict, useLang } from '../../app/lib/i18n';
 
 type DashboardMarketEntry = {
@@ -26,7 +27,7 @@ const FALLBACK_LOGOS: Record<string, string> = {
   ETH: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png?1595348880',
   BNB: 'https://assets.coingecko.com/coins/images/825/large/binance-coin-logo.png?1547034615',
   SOL: 'https://assets.coingecko.com/coins/images/4128/large/solana.png?1640133422',
-  ELTX: '/assets/img/logo.jpeg',
+  ELTX: PLATFORM_LOGO_URL,
 };
 
 function formatUsdCompact(value: number | null) {
@@ -70,7 +71,8 @@ function MarketSkeleton({ symbol }: { symbol: string }) {
 }
 
 function TokenAvatar({ symbol, label, logoUrl }: { symbol: string; label: string; logoUrl?: string | null }) {
-  const src = logoUrl || FALLBACK_LOGOS[symbol.toUpperCase()];
+  const normalizedSymbol = symbol.toUpperCase();
+  const src = normalizedSymbol === 'ELTX' ? PLATFORM_LOGO_URL : logoUrl || FALLBACK_LOGOS[normalizedSymbol];
   return (
     <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/10 text-xs font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 sm:h-11 sm:w-11">
       {src ? (

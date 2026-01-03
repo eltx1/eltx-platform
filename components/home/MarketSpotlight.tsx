@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { dict, useLang } from '../../app/lib/i18n';
 import type { HomeMarketEntry } from '../../app/lib/home-data';
+import { PLATFORM_LOGO_URL } from '../../app/lib/branding';
 
 function formatUsd(value: number | null) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
@@ -32,7 +33,7 @@ const COIN_BRANDING: Record<
   ELTX: {
     gradient: 'from-purple-500 via-fuchsia-500 to-cyan-400',
     ring: 'shadow-purple-500/50',
-    fallbackImage: '/assets/img/logo.jpeg',
+    fallbackImage: PLATFORM_LOGO_URL,
   },
   BTC: {
     gradient: 'from-amber-500 via-orange-500 to-yellow-400',
