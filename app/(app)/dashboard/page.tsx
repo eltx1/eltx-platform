@@ -149,8 +149,66 @@ export default function DashboardPage() {
           {t.common.deposit}
         </a>
       </div>
-      <div className="pt-4 border-t border-white/5 sm:pt-5">
-        <DashboardMarketBoard />
+      <div className="space-y-5 pt-1 sm:space-y-6">
+        <div className="pt-4 border-t border-white/5 sm:pt-5">
+          <DashboardMarketBoard />
+        </div>
+
+        <div className="pt-5 border-t border-white/5">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Payments</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3.5">
+            <SectionCard
+              title={t.dashboard.cards.wallet.title}
+              href="/wallet"
+              icon={Wallet}
+            />
+            <SectionCard
+              title={t.dashboard.cards.transactions.title}
+              href="/transactions"
+              icon={ReceiptText}
+            />
+            <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} />
+          </div>
+        </div>
+
+        <div className="pt-5 border-t border-white/5">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Trade</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3.5">
+            <SectionCard title="ELTX Swap" href="/trade" icon={ArrowLeftRight} />
+            <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
+            <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} />
+          </div>
+        </div>
+
+        <div className="pt-5 border-t border-white/5">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Earn</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3.5">
+            <SectionCard title="Staking" href="/staking" icon={Coins} />
+            <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} />
+          </div>
+        </div>
+
+        <div className="pt-5 border-t border-white/5">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">{t.dashboard.ai.kicker}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3.5">
+            <SectionCard
+              title={t.dashboard.cards.aiAgent.title}
+              href="/ai"
+              icon={Sparkles}
+              badge={t.dashboard.ai.kicker}
+            />
+          </div>
+        </div>
+
+        <div className="pt-5 border-t border-white/5">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Profile</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 sm:gap-3.5">
+            <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
+            <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
+            <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} />
+            <SectionCard title={t.dashboard.cards.kyc.title} href="/kyc" icon={ShieldCheck} />
+          </div>
+        </div>
       </div>
     </div>
   );
