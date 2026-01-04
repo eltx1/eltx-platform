@@ -27,17 +27,26 @@ const FALLBACK_LOGOS: Record<string, string> = {
   ETH: 'https://assets.coingecko.com/coins/images/279/large/ethereum.png?1595348880',
   BNB: 'https://assets.coingecko.com/coins/images/825/large/binance-coin-logo.png?1547034615',
   SOL: 'https://assets.coingecko.com/coins/images/4128/large/solana.png?1640133422',
+  PEPE: 'https://assets.coingecko.com/coins/images/29850/large/pepe-token.jpeg?1682922725',
   ELTX: PLATFORM_LOGO_URL,
 };
 
-function formatUsdCompact(value: number | null) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
-  if (value >= 1000) return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-  if (value >= 1) return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  if (value >= 0.01) return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
-  if (value > 0.0001) return `$${value.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })}`;
-  if (value > 0) return '<$0.0001';
-  return '$0.00';
+const DEMO_MARKETS: DashboardMarketEntry[] = [
+  { symbol: 'BNB', label: 'BNB', priceUsd: 899.7, change24h: 2.71, source: 'coingecko', updatedAt: new Date().toISOString() },
+  { symbol: 'BTC', label: 'Bitcoin', priceUsd: 91316.95, change24h: 1.37, source: 'coingecko', updatedAt: new Date().toISOString() },
+  { symbol: 'ETH', label: 'Ethereum', priceUsd: 3136.99, change24h: 0.96, source: 'coingecko', updatedAt: new Date().toISOString() },
+  { symbol: 'SOL', label: 'Solana', priceUsd: 134.8, change24h: 2.26, source: 'coingecko', updatedAt: new Date().toISOString() },
+  { symbol: 'PEPE', label: 'PEPE', priceUsd: 0.00000704, change24h: 15.41, source: 'coingecko', updatedAt: new Date().toISOString() },
+];
+
+function formatUsdLines(value: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return { primary: '—', secondary: '—' };
+  const primary =
+    value >= 1000
+      ? value.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })
+      : value.toLocaleString('en-US', { maximumFractionDigits: value >= 1 ? 2 : 6, minimumFractionDigits: value >= 1 ? 2 : 2 });
+  const secondary = `$${value.toLocaleString('en-US', { maximumFractionDigits: value >= 1 ? 2 : 8, minimumFractionDigits: value >= 1 ? 2 : 4 })}`;
+  return { primary, secondary };
 }
 
 function formatChange(value: number | null | undefined) {
@@ -63,20 +72,21 @@ function formatUpdatedLabel(value: string | null, t: (typeof dict)[keyof typeof 
 
 function MarketSkeleton({ symbol }: { symbol: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 shadow-inner shadow-black/30 sm:p-4">
+    <div className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-white/[0.04] via-white/[0.02] to-transparent px-3 py-3 shadow-inner shadow-black/25 sm:px-4">
       <div className="flex items-center gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/10 text-xs font-semibold uppercase text-white/60 sm:h-12 sm:w-12">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xs font-semibold uppercase text-white/60 ring-1 ring-inset ring-white/15 sm:h-11 sm:w-11">
           {symbol}
         </div>
-        <div className="flex-1 space-y-2">
+        <div className="space-y-2">
           <div className="h-3 w-24 rounded bg-white/10 sm:w-28" />
           <div className="h-3 w-16 rounded bg-white/10 sm:w-20" />
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <div className="h-4 w-24 rounded bg-white/10 sm:w-28" />
-        <div className="h-4 w-16 rounded bg-white/10 sm:w-18" />
+      <div className="space-y-2 text-right">
+        <div className="h-4 w-24 rounded bg-white/10 sm:ml-auto sm:w-28" />
+        <div className="h-3 w-20 rounded bg-white/5 sm:ml-auto sm:w-24" />
       </div>
+      <div className="ml-auto h-8 w-20 rounded-full bg-white/10 sm:w-24" />
     </div>
   );
 }
@@ -85,7 +95,7 @@ function TokenAvatar({ symbol, label, logoUrl }: { symbol: string; label: string
   const normalizedSymbol = symbol.toUpperCase();
   const src = normalizedSymbol === 'ELTX' ? PLATFORM_LOGO_URL : logoUrl || FALLBACK_LOGOS[normalizedSymbol];
   return (
-    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-white/10 text-xs font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 sm:h-11 sm:w-11">
+    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-white/10 via-white/5 to-transparent text-xs font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 shadow-md shadow-black/30 sm:h-11 sm:w-11">
       {src ? (
         <img src={src} alt={`${label} logo`} className="h-full w-full object-cover" loading="lazy" />
       ) : (
@@ -112,7 +122,9 @@ export default function DashboardMarketBoard() {
       return;
     }
     setError('');
-    setMarkets(res.data.markets || []);
+    const incoming = res.data.markets || [];
+    const shouldUseDemo = process.env.NEXT_PUBLIC_DEMO_MODE === '1' && (!incoming.length || incoming.every((m) => m.priceUsd === null));
+    setMarkets(shouldUseDemo ? DEMO_MARKETS : incoming);
     setLoading(false);
   }, [t.common.genericError]);
 
@@ -120,10 +132,18 @@ export default function DashboardMarketBoard() {
     loadMarkets();
   }, [loadMarkets]);
 
+  const latestUpdateLabel = useMemo(() => {
+    const latest = markets.reduce((acc, market) => {
+      const ts = market.updatedAt ? Date.parse(market.updatedAt) : 0;
+      return Number.isFinite(ts) ? Math.max(acc, ts) : acc;
+    }, 0);
+    return formatUpdatedLabel(latest ? new Date(latest).toISOString() : null, t);
+  }, [markets, t]);
+
   const content = useMemo(() => {
     if (loading) {
       return (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="space-y-2">
           {['EL', 'BT', 'ET', 'BN', 'SO'].map((symbol) => (
             <MarketSkeleton key={symbol} symbol={symbol} />
           ))}
@@ -136,7 +156,18 @@ export default function DashboardMarketBoard() {
     }
 
     return (
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#0a0f18]/70 shadow-2xl shadow-black/40 ring-1 ring-white/5">
+        <div className="flex flex-wrap items-center gap-3 bg-white/[0.03] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70 sm:px-6">
+          <span className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-amber-300" />
+            {t.home.market.layout.pair}
+          </span>
+          <div className="ml-auto grid flex-1 grid-cols-[1fr_1fr_auto] items-center gap-3 text-right text-[10px] sm:flex-none sm:text-[11px]">
+            <span className="text-center sm:text-right">{t.home.market.layout.price}</span>
+            <span className="text-center sm:text-right">{t.home.market.layout.change}</span>
+            <span className="hidden sm:block text-right">{t.home.market.layout.source}</span>
+          </div>
+        </div>
         {markets.map((marketRaw) => {
           const market = {
             ...marketRaw,
@@ -144,71 +175,53 @@ export default function DashboardMarketBoard() {
           };
           const change = formatChange(market.change24h ?? null);
           const sourceLabel = t.home.market.sourceLabel[market.source] ?? t.home.market.sourceLabel.unknown;
-          const updatedLabel = formatUpdatedLabel(market.updatedAt, t);
+          const priceLines = formatUsdLines(market.priceUsd);
           return (
             <div
               key={market.symbol}
-              className="group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] via-white/[0.02] to-transparent p-3 shadow-lg shadow-black/25 ring-1 ring-white/5 transition hover:-translate-y-1 hover:border-white/20 hover:ring-white/15 sm:p-4"
+              className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-3 border-b border-white/5 bg-gradient-to-r from-white/[0.01] via-white/[0.02] to-transparent px-4 py-3 transition hover:bg-white/[0.04] last:border-b-0 sm:px-6"
             >
-              <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                <div className="absolute -left-12 -top-16 h-24 w-24 rounded-full bg-amber-400/10 blur-3xl" />
-                <div className="absolute -right-14 -bottom-16 h-28 w-28 rounded-full bg-emerald-400/10 blur-3xl" />
+              <div className="flex items-center gap-3 sm:gap-4">
+                <TokenAvatar symbol={market.symbol} label={market.label} logoUrl={market.logoUrl} />
+                <div className="space-y-0.5">
+                  <p className="text-sm font-semibold leading-tight text-white sm:text-base">{market.label}</p>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60">
+                    <span className="font-semibold uppercase tracking-[0.14em]">{market.symbol}</span>
+                    <span className="h-1 w-1 rounded-full bg-white/20" />
+                    <span className="rounded-full bg-white/5 px-2 py-1 ring-1 ring-inset ring-white/10">{sourceLabel}</span>
+                  </div>
+                </div>
               </div>
-              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/0 to-white/5 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
-              <div className="relative flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3 sm:gap-4">
-                    <TokenAvatar symbol={market.symbol} label={market.label} logoUrl={market.logoUrl} />
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold leading-tight text-white sm:text-base">{market.label}</p>
-                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60">
-                        <span className="rounded-full bg-white/5 px-2 py-1 uppercase tracking-[0.18em] ring-1 ring-inset ring-white/10">
-                          {market.symbol}
-                        </span>
-                        <span className="rounded-full bg-white/5 px-2 py-1 ring-1 ring-inset ring-white/10">{sourceLabel}</span>
-                      </div>
-                    </div>
-                  </div>
-                  {change ? (
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-inner shadow-black/30 ring-1 ring-inset ${{
-                        up: 'bg-emerald-500/15 text-emerald-100 ring-emerald-500/30',
-                        down: 'bg-rose-500/15 text-rose-100 ring-rose-500/30',
-                        flat: 'bg-white/10 text-white/80 ring-white/15',
-                      }[change.direction]}`}
-                    >
-                      {change.direction === 'up' ? <ArrowUp className="h-3.5 w-3.5" /> : change.direction === 'down' ? <ArrowDown className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
-                      <span>{change.label}</span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white/80 ring-1 ring-inset ring-white/10">
+              <div className="text-right">
+                <p className="text-lg font-semibold text-white sm:text-xl">{priceLines.primary}</p>
+                <p className="text-[11px] text-white/50">{priceLines.secondary}</p>
+              </div>
+              <div className="ml-auto flex items-center justify-end">
+                {change ? (
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-semibold shadow-md shadow-black/30 ring-1 ring-inset ${
+                      change.direction === 'up'
+                        ? 'bg-emerald-500 text-emerald-50 ring-emerald-400/80'
+                        : change.direction === 'down'
+                          ? 'bg-rose-500 text-rose-50 ring-rose-300/70'
+                          : 'bg-white/10 text-white/80 ring-white/15'
+                    }`}
+                  >
+                    {change.direction === 'up' ? (
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    ) : change.direction === 'down' ? (
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    ) : (
                       <Sparkles className="h-3.5 w-3.5" />
-                      {t.home.market.fresh}
-                    </span>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                  <div className="space-y-1">
-                    <p className="text-2xl font-semibold leading-tight text-white sm:text-3xl">
-                      {formatUsdCompact(market.priceUsd)}
-                    </p>
-                    <p className="text-[11px] text-white/70">{updatedLabel}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="hidden rounded-full bg-white/5 px-3 py-2 text-[11px] font-semibold text-white/80 ring-1 ring-inset ring-white/10 sm:inline-flex sm:items-center sm:gap-2">
-                      <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.25)]" />
-                      {t.dashboard.market.kicker}
-                    </div>
-                    <Link
-                      href="/trade/spot"
-                      className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-2 text-[11px] font-semibold text-white shadow-sm shadow-black/20 ring-1 ring-inset ring-white/15 transition hover:-translate-y-[1px] hover:bg-white/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
-                    >
-                      {t.dashboard.market.tradeCta}
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Link>
-                  </div>
-                </div>
+                    )}
+                    <span>{change.label}</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white/80 ring-1 ring-inset ring-white/15">
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {t.home.market.fresh}
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -244,6 +257,16 @@ export default function DashboardMarketBoard() {
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         </div>
+      </div>
+      <div className="flex items-center justify-between rounded-2xl border border-white/5 bg-white/[0.02] px-3 py-2 text-[11px] text-white/70 ring-1 ring-inset ring-white/10 sm:px-4">
+        <span className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(16,185,129,0.25)]" />
+          {t.home.market.stats.live}
+        </span>
+        <span className="flex items-center gap-2 text-white/60">
+          <Sparkles className="h-4 w-4" />
+          {latestUpdateLabel}
+        </span>
       </div>
       {error && !loading && <p className="text-sm text-rose-200/90">{error}</p>}
       {content}
