@@ -1616,23 +1616,21 @@ async function readReferralSettings(conn = pool) {
   return { reward_eltx: trimDecimal(reward), fee_share_bps: Number(share) };
 }
 
+/**
+ * Applies referral fee sharing for spot fees.
+ * @param {import('mysql2/promise').PoolConnection | import('mysql2/promise').Pool} conn
+ * @param {{
+ *   feeType: string;
+ *   feeReference: string;
+ *   payerUserId: number;
+ *   asset: string;
+ *   feeWei: bigint;
+ *   settings?: { fee_share_bps?: number };
+ * }} params
+ */
 async function applyReferralFeeShare(
   conn,
-  {
-    feeType,
-    feeReference,
-    payerUserId,
-    asset,
-    feeWei,
-    settings,
-  }: {
-    feeType: string;
-    feeReference: string;
-    payerUserId: number;
-    asset: string;
-    feeWei: bigint;
-    settings?: { fee_share_bps?: number };
-  }
+  { feeType, feeReference, payerUserId, asset, feeWei, settings }
 ) {
   if (feeType !== 'spot') return;
   const shareBps = clampBps(BigInt(settings?.fee_share_bps ?? 0));
