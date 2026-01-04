@@ -463,6 +463,7 @@ export const dict = {
         amount: 'Amount',
         total: 'Total',
       },
+      tabs: { open: 'Open Orders', holdings: 'Holdings', grid: 'Spot Grid' },
       chart: {
         title: 'Price chart',
         empty: 'No trades yet. Place the first trade to start the chart.',
@@ -1461,6 +1462,7 @@ export const dict = {
         amount: 'الكمية',
         total: 'الإجمالي',
       },
+      tabs: { open: 'الأوامر المفتوحة', holdings: 'الأرصدة', grid: 'شبكة الاسبوت' },
       chart: {
         title: 'الرسم البياني للسعر',
         empty: 'لا توجد صفقات بعد. نفّذ أول صفقة لبدء الرسم.',

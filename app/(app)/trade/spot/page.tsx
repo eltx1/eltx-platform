@@ -197,6 +197,7 @@ function SpotTradePageContent() {
   const [formSide, setFormSide] = useState<'buy' | 'sell'>('buy');
   const [formType, setFormType] = useState<'limit' | 'market'>('limit');
   const [amount, setAmount] = useState('');
+  const [sliderValue, setSliderValue] = useState(0);
   const [price, setPrice] = useState('');
   const [mobileDepthView, setMobileDepthView] = useState<'orderbook' | 'trades'>('orderbook');
   const [errorBanner, setErrorBanner] = useState('');
@@ -726,9 +727,15 @@ function SpotTradePageContent() {
 
   const recentTrades = useMemo(() => trades.slice(0, 20), [trades]);
 
+  const onAmountChange = (value: string) => {
+    setAmount(value);
+    setSliderValue(0);
+  };
+
   const handleQuickFill = (ratio: number) => {
     if (!selectedMarketMeta) return;
     if (ratio <= 0) return;
+    setSliderValue(Math.round(ratio * 100));
     if (formSide === 'sell') {
       if (availableBase.lte(0)) return;
       const value = availableBase.mul(ratio);
@@ -750,10 +757,23 @@ function SpotTradePageContent() {
     amountInputRef.current?.focus();
   };
 
+  const handleSliderFill = (value: number) => {
+    const clamped = Math.min(100, Math.max(0, value));
+    setSliderValue(clamped);
+    handleQuickFill(clamped / 100);
+  };
+
   const handleLevelClick = (value: string) => {
     if (formType !== 'limit') return;
     setPrice(value);
     amountInputRef.current?.focus();
+  };
+
+  const handleBestPrice = () => {
+    if (formType !== 'limit') return;
+    const reference = formSide === 'buy' ? bestAskDecimal || displayPrice : bestBidDecimal || displayPrice;
+    if (!reference) return;
+    setPrice(formatWithPrecision(reference, pricePrecision));
   };
 
   const handlePlaceOrder = async () => {
@@ -787,6 +807,7 @@ function SpotTradePageContent() {
     else if (res.data.order.status === 'cancelled')
       toast({ message: t.spotTrade.notifications.cancelledNoLiquidity, variant: 'error' });
     setAmount('');
+    setSliderValue(0);
     if (formType === 'limit') setPrice('');
     setErrorBanner('');
     await Promise.all([
@@ -867,7 +888,365 @@ function SpotTradePageContent() {
             enabled={!!selectedMarket}
           />
 
-          <div className="grid gap-6 2xl:grid-cols-[400px,1fr] xl:grid-cols-[360px,1fr]">
+          <div className="md:hidden space-y-6">
+            <div className="rounded-2xl bg-[#0b1320]/80 border border-white/10 p-3 shadow-xl shadow-black/30">
+              <div className="grid grid-cols-[1.1fr,1fr] gap-3 items-start">
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-wide opacity-70">
+                    <span>
+                      {t.spotTrade.orderbook.price} ({quoteSymbol})
+                    </span>
+                    <span>
+                      {t.spotTrade.orderbook.amount} ({baseSymbol})
+                    </span>
+                  </div>
+                  <div className="rounded-xl bg-black/40 border border-white/5 p-2 space-y-1 max-h-[460px] overflow-hidden">
+                    {loadingBook ? (
+                      <div className="opacity-70 text-xs px-1 py-2">{t.trade.loading}</div>
+                    ) : (
+                      <>
+                        {asksDisplay.slice(0, 8).map((level, idx) => (
+                          <button
+                            key={level.key}
+                            type="button"
+                            onClick={() => handleLevelClick(level.rawPrice)}
+                            className={`w-full grid grid-cols-[1fr,0.9fr] gap-2 rounded px-2 py-1 text-left transition ${
+                              idx === 0 ? 'bg-red-500/10' : 'hover:bg-red-500/10'
+                            }`}
+                          >
+                            <span className="truncate font-mono tabular-nums text-red-300">{level.price}</span>
+                            <span className="truncate text-right font-mono tabular-nums text-white/80">{level.amount}</span>
+                          </button>
+                        ))}
+
+                        <div className="my-1 rounded-lg border border-white/10 bg-gradient-to-r from-white/5 to-white/10 px-2 py-3 space-y-1">
+                          <div className="flex items-center justify-between text-[11px] opacity-70">
+                            <span>{selectedMarket}</span>
+                            {spreadInfo && (
+                              <span>
+                                {t.spotTrade.orderbook.spread}: {spreadInfo.value} {quoteSymbol}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-end justify-between">
+                            <div className="text-xl font-semibold text-green-400">
+                              {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'}
+                            </div>
+                            <div className="text-[11px] text-white/70">≈ {displayPriceLabel}</div>
+                          </div>
+                        </div>
+
+                        {bidsDisplay.slice(0, 8).map((level, idx) => (
+                          <button
+                            key={level.key}
+                            type="button"
+                            onClick={() => handleLevelClick(level.rawPrice)}
+                            className={`w-full grid grid-cols-[1fr,0.9fr] gap-2 rounded px-2 py-1 text-left transition ${
+                              idx === 0 ? 'bg-green-500/10' : 'hover:bg-green-500/10'
+                            }`}
+                          >
+                            <span className="truncate font-mono tabular-nums text-green-300">{level.price}</span>
+                            <span className="truncate text-right font-mono tabular-nums text-white/80">{level.amount}</span>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl bg-black/40 border border-white/10 p-2 space-y-2 text-[11px]">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold">{t.spotTrade.trades.title}</span>
+                      <span className="opacity-70">{t.spotTrade.chart.updated}</span>
+                    </div>
+                    <div className="space-y-1 max-h-28 overflow-y-auto">
+                      {recentTrades.length === 0 ? (
+                        <div className="opacity-70">{t.spotTrade.trades.empty}</div>
+                      ) : (
+                        recentTrades.slice(0, 8).map((trade) => (
+                          <div
+                            key={trade.id}
+                            className="grid grid-cols-[1fr,0.8fr,0.7fr] gap-2 text-xs rounded px-1 py-0.5 bg-white/5"
+                          >
+                            <span className="opacity-70">{new Date(trade.created_at).toLocaleTimeString()}</span>
+                            <span className={`${trade.taker_side === 'buy' ? 'text-green-300' : 'text-red-300'} font-mono tabular-nums`}>
+                              {formatWithPrecision(safeDecimal(trade.price), pricePrecision)}
+                            </span>
+                            <span className="font-mono tabular-nums text-right">
+                              {formatWithPrecision(safeDecimal(trade.base_amount), amountPrecision)}
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-xl bg-black/50 border border-white/10 p-3 shadow-inner shadow-black/30">
+                  <div className="flex items-center gap-2 text-sm">
+                    <button
+                      className={`flex-1 py-2 rounded-lg font-semibold transition ${
+                        formSide === 'buy' ? 'bg-green-600 text-white' : 'bg-white/10'
+                      }`}
+                      onClick={() => setFormSide('buy')}
+                    >
+                      {t.spotTrade.buy}
+                    </button>
+                    <button
+                      className={`flex-1 py-2 rounded-lg font-semibold transition ${
+                        formSide === 'sell' ? 'bg-red-600 text-white' : 'bg-white/10'
+                      }`}
+                      onClick={() => setFormSide('sell')}
+                    >
+                      {t.spotTrade.sell}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="opacity-70">{t.spotTrade.type}</span>
+                      <select
+                        value={formType}
+                        onChange={(e) => setFormType(e.target.value as 'limit' | 'market')}
+                        className="rounded-lg bg-black/40 border border-white/15 px-2 py-1 text-sm"
+                      >
+                        <option value="limit">{t.spotTrade.limit}</option>
+                        <option value="market" disabled={!marketAllowsMarketOrders}>
+                          {t.spotTrade.marketOrder}
+                        </option>
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleBestPrice}
+                      className="rounded-lg border border-white/20 px-3 py-1 font-semibold text-white/80 bg-white/5"
+                    >
+                      BBO
+                    </button>
+                  </div>
+
+                  {formType === 'limit' && (
+                    <div className="space-y-1">
+                      <label className="block text-[11px] opacity-70">
+                        {t.spotTrade.price} ({quoteSymbol})
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          min="0"
+                          value={price}
+                          onChange={(e) => setPrice(e.target.value)}
+                          className="flex-1 p-3 rounded-lg bg-black/30 border border-white/15 text-sm"
+                          placeholder="0.00"
+                        />
+                        <div className="flex flex-col gap-1 text-[11px]">
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1"
+                            onClick={() => handleLevelClick(formatWithPrecision((priceDecimal || ZERO).plus(1), pricePrecision))}
+                          >
+                            +
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded bg-white/10 px-2 py-1"
+                            onClick={() => {
+                              const next = priceDecimal ? priceDecimal.minus(1) : ZERO;
+                              handleLevelClick(next.gt(0) ? formatWithPrecision(next, pricePrecision) : '0');
+                            }}
+                          >
+                            -
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <label className="block text-[11px] opacity-70">
+                      {t.spotTrade.amount} ({baseSymbol})
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={amountInputRef}
+                        type="number"
+                        min="0"
+                        value={amount}
+                        onChange={(e) => onAmountChange(e.target.value)}
+                        className="flex-1 p-3 rounded-lg bg-black/30 border border-white/15 text-sm"
+                        placeholder="0.00"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleQuickFill(1)}
+                        className="rounded-lg bg-white/10 px-3 py-2 text-xs font-semibold"
+                      >
+                        100%
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={sliderValue}
+                      onChange={(e) => handleSliderFill(Number(e.target.value))}
+                      className="w-full accent-green-500"
+                    />
+                    <div className="flex justify-between text-[11px] opacity-70">
+                      <span>0%</span>
+                      <span>25%</span>
+                      <span>50%</span>
+                      <span>75%</span>
+                      <span>100%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs">
+                    <label className="flex items-center gap-1 opacity-70">
+                      <input type="checkbox" disabled className="accent-green-500" />
+                      TP/SL
+                    </label>
+                    <label className="flex items-center gap-1 opacity-70">
+                      <input type="checkbox" disabled className="accent-green-500" />
+                      Iceberg
+                    </label>
+                  </div>
+
+                  <div className="rounded-xl bg-white/5 border border-white/10 p-3 space-y-2 text-xs">
+                    {formType === 'limit' && totalForDisplay && (
+                      <div className="flex justify-between">
+                        <span className="opacity-70">{t.spotTrade.total}</span>
+                        <span>
+                          {formatWithPrecision(totalForDisplay, quoteDecimals)} {quoteSymbol}
+                        </span>
+                      </div>
+                    )}
+                    {formType === 'market' && marketEstimation && marketEstimation.hasLiquidity && marketEstimation.average && (
+                      <div className="flex justify-between">
+                        <span className="opacity-70">{t.spotTrade.form.estimatedPrice}</span>
+                        <span>
+                          {formatWithPrecision(marketEstimation.average, pricePrecision)} {quoteSymbol}
+                        </span>
+                      </div>
+                    )}
+                    {formType === 'market' && totalForDisplay && (
+                      <div className="flex justify-between">
+                        <span className="opacity-70">{t.spotTrade.form.estimated}</span>
+                        <span>
+                          {formatWithPrecision(totalForDisplay, quoteDecimals)} {quoteSymbol}
+                        </span>
+                      </div>
+                    )}
+                    {estimatedFeeValue && estimatedFeeValue.gt(0) && (
+                      <div className="flex justify-between">
+                        <span className="opacity-70">{t.spotTrade.form.fee}</span>
+                        <span>
+                          {feeRateLabel} • {formatWithPrecision(estimatedFeeValue, quoteDecimals)} {quoteSymbol}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <span className="opacity-70">{t.spotTrade.balanceLabels.quote}</span>
+                      <span className="font-semibold">
+                        {formatWithPrecision(availableQuote, quoteDecimals)} {quoteSymbol}
+                      </span>
+                    </div>
+                  </div>
+
+                  {validation.message && (
+                    <div className="text-[11px] text-red-400 bg-red-500/10 border border-red-500/40 rounded p-2">
+                      {validation.message}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handlePlaceOrder}
+                    disabled={placing || !validation.valid || !selectedMarket}
+                    className={`w-full py-3 rounded-lg font-semibold transition text-white disabled:opacity-50 ${
+                      formSide === 'buy' ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'
+                    }`}
+                  >
+                    {placing ? t.spotTrade.placing : t.spotTrade.placeOrder}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl bg-white/5 border border-white/10 p-4 shadow-lg shadow-black/20 space-y-4">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <span className="px-2 py-1 rounded-full bg-white/10 border border-white/15">
+                  {t.spotTrade.tabs.open} ({orders.length})
+                </span>
+                <span className="px-2 py-1 rounded-full bg-black/20 border border-white/10 text-white/50">
+                  {t.spotTrade.tabs.holdings}
+                </span>
+                <span className="px-2 py-1 rounded-full bg-black/20 border border-white/10 text-white/50">
+                  {t.spotTrade.tabs.grid}
+                </span>
+              </div>
+              {orders.length === 0 ? (
+                <div className="text-xs opacity-70">{t.spotTrade.orders.empty}</div>
+              ) : (
+                <div className="space-y-2 text-xs">
+                  {orders.map((order) => (
+                    <div key={order.id} className="p-3 rounded-xl bg-white/10 border border-white/10 flex flex-col gap-2">
+                      <div className="flex justify-between font-semibold">
+                        <span>{order.market}</span>
+                        <span className={order.side === 'buy' ? 'text-green-300' : 'text-red-300'}>{order.side.toUpperCase()}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 opacity-80">
+                        <div>
+                          <div className="text-[11px]">{t.spotTrade.type}</div>
+                          <div className="font-semibold uppercase">{order.type}</div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[11px]">{t.spotTrade.orders.status[order.status]}</div>
+                          {order.price && (
+                            <div className="font-mono tabular-nums">
+                              {formatWithPrecision(safeDecimal(order.price), pricePrecision)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>{t.trade.amount}</span>
+                        <span>
+                          <span className="font-mono tabular-nums">
+                            {formatWithPrecision(safeDecimal(order.remaining_base_amount), amountPrecision)}
+                          </span>
+                          /
+                          <span className="font-mono tabular-nums">
+                            {formatWithPrecision(safeDecimal(order.base_amount), amountPrecision)}
+                          </span>
+                        </span>
+                      </div>
+                      {order.status === 'open' && (
+                        <button
+                          className="mt-1 py-1.5 px-2 rounded-lg bg-red-500 text-white text-xs"
+                          onClick={() => handleCancel(order.id)}
+                        >
+                          {t.spotTrade.cancel}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="rounded-xl bg-black/40 border border-white/10 p-3 text-center space-y-2">
+                <div className="text-sm font-semibold">{t.spotTrade.balanceLabels.quote}</div>
+                <div className="text-lg font-semibold">
+                  {formatWithPrecision(availableQuote, quoteDecimals)} {quoteSymbol || ''}
+                </div>
+                <div className="text-xs opacity-70">
+                  {t.spotTrade.form
+                    .payAtMost.replace('{value}', `${formatWithPrecision(availableQuote, quoteDecimals)} ${quoteSymbol || ''}`)
+                    .replace('{slippage}', slippagePercentLabel)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="hidden md:grid gap-6 2xl:grid-cols-[400px,1fr] xl:grid-cols-[360px,1fr]">
             <div className="space-y-4 bg-white/5 rounded-2xl p-4 shadow-lg shadow-black/10">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex-1 space-y-2">
@@ -1016,7 +1395,7 @@ function SpotTradePageContent() {
                   type="number"
                   min="0"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => onAmountChange(e.target.value)}
                   className="w-full p-3 rounded-lg bg-black/25 border border-white/15 text-sm"
                   placeholder="0.00"
                 />
