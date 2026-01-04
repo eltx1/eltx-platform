@@ -453,6 +453,7 @@ export const dict = {
         receiveAtLeast: 'You’ll receive at least {value} (slippage {slippage}%)',
         makerTaker: '{maker}% maker / {taker}% taker',
         quickFill: 'Quick fill',
+        advanced: 'Advanced options',
       },
       orderbook: {
         title: 'Order book',
@@ -1452,6 +1453,7 @@ export const dict = {
         receiveAtLeast: 'ستستلم بحد أدنى {value} (انزلاق {slippage}٪)',
         makerTaker: '{maker}% صانع / {taker}% آخذ',
         quickFill: 'تعبئة سريعة',
+        advanced: 'خيارات متقدمة',
       },
       orderbook: {
         title: 'دفتر الأوامر',
