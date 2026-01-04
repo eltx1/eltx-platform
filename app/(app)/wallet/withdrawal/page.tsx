@@ -41,6 +41,18 @@ type Asset = {
 
 const WITHDRAWABLE_ASSETS = ['ELTX', 'USDT'] as const;
 const WITHDRAWAL_DEFAULT_DECIMALS: Record<string, number> = { ELTX: 18, USDT: 18 };
+type WithdrawalLimits = Record<
+  (typeof WITHDRAWABLE_ASSETS)[number],
+  { min: string | null; max: string | null }
+>;
+
+const defaultWithdrawalLimits = WITHDRAWABLE_ASSETS.reduce(
+  (acc, asset) => ({
+    ...acc,
+    [asset]: { min: null, max: null },
+  }),
+  {} as WithdrawalLimits
+);
 
 export default function WithdrawalPage() {
   const { user } = useAuth();
@@ -57,6 +69,7 @@ export default function WithdrawalPage() {
   const [balance, setBalance] = useState('0');
   const [decimals, setDecimals] = useState(18);
   const [withdrawalFeeBps, setWithdrawalFeeBps] = useState(0);
+  const [limits, setLimits] = useState<WithdrawalLimits>(defaultWithdrawalLimits);
   const [amount, setAmount] = useState('');
   const [chain, setChain] = useState('Ethereum');
   const [address, setAddress] = useState('');
@@ -112,7 +125,7 @@ export default function WithdrawalPage() {
     setLoading(true);
     const [assetsRes, requestsRes] = await Promise.all([
       apiFetch<{ assets: Asset[] }>('/wallet/assets'),
-      apiFetch<{ requests: WithdrawalRequest[]; fee_bps?: number }>('/wallet/withdrawals'),
+      apiFetch<{ requests: WithdrawalRequest[]; fee_bps?: number; limits?: WithdrawalLimits }>('/wallet/withdrawals'),
     ]);
 
     if (assetsRes.ok) {
@@ -137,6 +150,7 @@ export default function WithdrawalPage() {
     }
     if (requestsRes.ok) {
       setRequests(requestsRes.data.requests || []);
+      if (requestsRes.data.limits) setLimits({ ...defaultWithdrawalLimits, ...requestsRes.data.limits });
       if (typeof requestsRes.data.fee_bps === 'number') setWithdrawalFeeBps(requestsRes.data.fee_bps);
     } else {
       toast({ message: requestsRes.error || t.common.genericError, variant: 'error' });
@@ -161,6 +175,24 @@ export default function WithdrawalPage() {
   const handleSubmit = async () => {
     if (!amountIsPositive || !amountWei) {
       toast({ message: t.wallet.withdrawalPage.form.invalidAmount, variant: 'error' });
+      return;
+    }
+    if (belowMin && limitMinDisplay) {
+      toast({
+        message: t.wallet.withdrawalPage.form.belowMin
+          .replace('{amount}', limitMinDisplay)
+          .replace('{asset}', selectedAsset),
+        variant: 'error',
+      });
+      return;
+    }
+    if (aboveMax && limitMaxDisplay) {
+      toast({
+        message: t.wallet.withdrawalPage.form.aboveMax
+          .replace('{amount}', limitMaxDisplay)
+          .replace('{asset}', selectedAsset),
+        variant: 'error',
+      });
       return;
     }
     if (exceedsBalance) {
@@ -202,6 +234,23 @@ export default function WithdrawalPage() {
       return null;
     }
   }, [amount, decimals]);
+  const limit = limits[selectedAsset] || defaultWithdrawalLimits[selectedAsset];
+  const limitMinWei = useMemo(() => {
+    if (!limit?.min) return null;
+    try {
+      return parseUnits(limit.min, decimals);
+    } catch {
+      return null;
+    }
+  }, [decimals, limit?.min]);
+  const limitMaxWei = useMemo(() => {
+    if (!limit?.max) return null;
+    try {
+      return parseUnits(limit.max, decimals);
+    } catch {
+      return null;
+    }
+  }, [decimals, limit?.max]);
   const feeWei = useMemo(() => {
     if (amountWei === null) return null;
     try {
@@ -214,14 +263,18 @@ export default function WithdrawalPage() {
     if (amountWei === null || feeWei === null) return null;
     return amountWei - feeWei;
   }, [amountWei, feeWei]);
+  const belowMin = limitMinWei !== null && amountWei !== null && amountWei < limitMinWei;
+  const aboveMax = limitMaxWei !== null && amountWei !== null && amountWei > limitMaxWei;
   const exceedsBalance = amountWei !== null && amountWei > balanceWei;
   const netIsPositive = netAmountWei !== null && netAmountWei > 0n;
-  const amountIsPositive = amountWei !== null && amountWei > 0n && netIsPositive;
+  const amountIsPositive = amountWei !== null && amountWei > 0n && netIsPositive && !belowMin && !aboveMax;
   const formattedBalance = formatWei(balance, decimals);
   const feeFormatted = feeWei !== null && feeWei >= 0n ? formatWei(feeWei.toString(), decimals) : '0';
   const netFormatted = netAmountWei !== null && netAmountWei > 0n ? formatWei(netAmountWei.toString(), decimals) : '0';
   const feePercentLabel = formatPercentFromBps(withdrawalFeeBps) || '0%';
   const canSubmit = !submitting && !!chain && !!address && amountIsPositive && !exceedsBalance;
+  const limitMinDisplay = limitMinWei ? formatWei(limitMinWei.toString(), decimals) : null;
+  const limitMaxDisplay = limitMaxWei ? formatWei(limitMaxWei.toString(), decimals) : null;
 
   return (
     <div className="p-4 space-y-6">
@@ -298,6 +351,22 @@ export default function WithdrawalPage() {
               </li>
             ))}
           </ul>
+          <div className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-white/80 shadow-inner shadow-black/20">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold">{t.wallet.withdrawalPage.form.limitsLabel}</span>
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white/70">{selectedAsset}</span>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-white/70 sm:grid-cols-2">
+              <div>
+                <div className="font-semibold text-white/80">{t.wallet.withdrawalPage.form.minLabel}</div>
+                <div>{limitMinDisplay ? `${limitMinDisplay} ${selectedAsset}` : t.wallet.withdrawalPage.form.noMin}</div>
+              </div>
+              <div>
+                <div className="font-semibold text-white/80">{t.wallet.withdrawalPage.form.maxLabel}</div>
+                <div>{limitMaxDisplay ? `${limitMaxDisplay} ${selectedAsset}` : t.wallet.withdrawalPage.form.noMax}</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -320,6 +389,20 @@ export default function WithdrawalPage() {
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-cyan-300 focus:outline-none"
               placeholder={t.wallet.withdrawalPage.form.amount}
             />
+            {belowMin && limitMinDisplay && (
+              <p className="text-xs font-semibold text-amber-200">
+                {t.wallet.withdrawalPage.form.belowMin
+                  .replace('{amount}', limitMinDisplay)
+                  .replace('{asset}', selectedAsset)}
+              </p>
+            )}
+            {aboveMax && limitMaxDisplay && (
+              <p className="text-xs font-semibold text-amber-200">
+                {t.wallet.withdrawalPage.form.aboveMax
+                  .replace('{amount}', limitMaxDisplay)
+                  .replace('{asset}', selectedAsset)}
+              </p>
+            )}
             {exceedsBalance && (
               <p className="text-xs font-semibold text-amber-200">{t.wallet.withdrawalPage.form.exceedsBalance}</p>
             )}
@@ -388,6 +471,14 @@ export default function WithdrawalPage() {
             </div>
             <div>
               {t.wallet.withdrawalPage.netLabel}: {netFormatted} {selectedAsset}
+            </div>
+            <div>
+              {t.wallet.withdrawalPage.form.minLabel}:{' '}
+              {limitMinDisplay ? `${limitMinDisplay} ${selectedAsset}` : t.wallet.withdrawalPage.form.noMin}
+            </div>
+            <div>
+              {t.wallet.withdrawalPage.form.maxLabel}:{' '}
+              {limitMaxDisplay ? `${limitMaxDisplay} ${selectedAsset}` : t.wallet.withdrawalPage.form.noMax}
             </div>
           </div>
           <div className="flex flex-wrap gap-3">
