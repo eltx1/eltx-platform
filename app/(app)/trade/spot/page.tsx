@@ -1,9 +1,9 @@
 'use client';
 export const dynamic = 'force-dynamic';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Decimal from 'decimal.js';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../../lib/auth';
 import { apiFetch } from '../../../lib/api';
 import { dict, useLang } from '../../../lib/i18n';
@@ -174,9 +174,10 @@ function computeMarketFill(levels: OrderbookLevel[], desired: Decimal): MarketFi
   return { filled, totalQuote, average, hasLiquidity: remaining.lte(0) };
 }
 
-export default function SpotTradePage() {
+function SpotTradePageContent() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
@@ -382,13 +383,22 @@ export default function SpotTradePage() {
     loadMarkets();
   }, [loadMarkets]);
 
+  const preferredMarket = useMemo(() => {
+    const fromUrl = searchParams?.get('market');
+    return fromUrl ? fromUrl.toUpperCase() : '';
+  }, [searchParams]);
+
   useEffect(() => {
     if (!markets.length) return;
     setSelectedMarket((prev) => {
       if (prev && markets.some((m) => m.symbol === prev)) return prev;
+      if (preferredMarket) {
+        const match = markets.find((m) => m.symbol.toUpperCase() === preferredMarket);
+        if (match) return match.symbol;
+      }
       return markets[0].symbol;
     });
-  }, [markets]);
+  }, [markets, preferredMarket]);
 
   useEffect(() => {
     if (!selectedMarket) return;
@@ -1386,5 +1396,13 @@ export default function SpotTradePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SpotTradePage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-white/70">Loading spot markets…</div>}>
+      <SpotTradePageContent />
+    </Suspense>
   );
 }

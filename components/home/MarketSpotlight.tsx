@@ -7,6 +7,7 @@ import Image from 'next/image';
 import { dict, useLang } from '../../app/lib/i18n';
 import type { HomeMarketEntry } from '../../app/lib/home-data';
 import { PLATFORM_LOGO_URL } from '../../app/lib/branding';
+import { resolveSpotMarketSymbol } from '../trade/utils';
 
 function formatUsd(value: number | null) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
@@ -74,7 +75,7 @@ function CoinAvatar({ symbol, logoUrl }: { symbol: string; logoUrl?: string | nu
 
   return (
     <div
-      className={`relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br md:h-11 md:w-11 ${branding.gradient} shadow-lg ${branding.ring}`}
+      className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br md:h-11 md:w-11 ${branding.gradient} shadow-lg ${branding.ring}`}
     >
       <div className="absolute inset-0 opacity-70" />
       {displayImage ? (
@@ -132,12 +133,12 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
   const greenMoves = useMemo(() => markets.filter((m) => (m.change24h ?? 0) > 0).length, [markets]);
 
   return (
-    <section className="relative overflow-hidden bg-[#040508] py-10 px-3 text-white md:py-14 md:px-6">
+    <section className="relative overflow-hidden bg-[#040508] py-6 px-3 text-white sm:py-7 md:py-10 md:px-6">
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(122,69,255,0.22),transparent_35%),_radial-gradient(circle_at_80%_10%,rgba(0,204,255,0.18),transparent_38%)]" />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-purple-500 via-fuchsia-500 to-cyan-400 opacity-60" />
-      <div className="relative mx-auto max-w-6xl space-y-8 md:space-y-10">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="space-y-3 md:space-y-4">
+      <div className="relative mx-auto max-w-6xl space-y-6 sm:space-y-7 md:space-y-8">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-2.5 md:space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-purple-50 md:gap-2 md:text-[11px]">
                 <Sparkles className="h-3 w-3 md:h-3.5 md:w-3.5" />
@@ -168,7 +169,7 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
             </div>
           </div>
           <div className="flex items-center gap-2 self-start rounded-2xl bg-white/5 p-2 ring-1 ring-inset ring-white/10">
-            <div className="flex flex-col items-start gap-1 rounded-xl bg-white/5 px-4 py-3 text-left">
+            <div className="flex flex-col items-start gap-1 rounded-xl bg-white/5 px-3.5 py-2.5 text-left">
               <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">{t.home.market.layout.overviewLabel}</p>
               <p className="text-xl font-semibold text-white">
                 {markets.length} {t.home.market.layout.assets}
@@ -178,7 +179,7 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
             <Link
               href={appLink}
               target="_blank"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 via-fuchsia-600 to-cyan-400 px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-purple-900/40 transition hover:scale-[1.02] md:px-5"
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 via-fuchsia-600 to-cyan-400 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-purple-900/40 transition hover:scale-[1.02] md:px-5"
             >
               <Download className="h-4 w-4" />
               <span>{t.home.market.cta}</span>
@@ -188,7 +189,7 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
 
         <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-2xl shadow-black/40 ring-1 ring-inset ring-white/5">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_30%,rgba(122,69,255,0.12),transparent_30%),_radial-gradient(circle_at_85%_10%,rgba(59,130,246,0.12),transparent_32%),_linear-gradient(120deg,rgba(255,255,255,0.02),transparent)]" />
-          <div className="relative border-b border-white/5 px-4 py-3 text-[11px] uppercase tracking-[0.26em] text-white/60 md:px-6 md:text-xs">
+          <div className="relative border-b border-white/5 px-3.5 py-2.5 text-[11px] uppercase tracking-[0.26em] text-white/60 md:px-6 md:text-xs">
             <div className="grid grid-cols-[2fr_1fr_1fr_auto] items-center gap-2 md:gap-4">
               <span>{t.home.market.layout.pair}</span>
               <span className="text-right md:text-center">{t.home.market.layout.price}</span>
@@ -198,9 +199,11 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
           </div>
           <div className="relative divide-y divide-white/5">
             {markets.map((item, index) => (
-              <div
+              <Link
                 key={item.symbol}
-                className="group relative grid grid-cols-1 items-center gap-3 px-4 py-3 transition hover:bg-white/[0.03] md:grid-cols-[2fr_1fr_1fr_auto] md:gap-4 md:px-6"
+                href={`/trade/spot?market=${encodeURIComponent(resolveSpotMarketSymbol(item.symbol))}`}
+                className="group relative grid grid-cols-1 items-center gap-2.5 px-3.5 py-2.5 transition hover:bg-white/[0.04] md:grid-cols-[2fr_1fr_1fr_auto] md:gap-4 md:px-6"
+                aria-label={`${item.label} spot market`}
               >
                 <div className="flex items-center gap-3">
                   <div className="relative">
@@ -226,7 +229,7 @@ export default function MarketSpotlight({ markets }: { markets: HomeMarketEntry[
                 <div className="hidden items-center justify-end text-xs text-white/60 md:flex">
                   {t.home.market.sourceLabel[item.source] ?? t.home.market.sourceLabel.unknown}
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

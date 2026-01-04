@@ -7,6 +7,7 @@ import { ArrowDown, ArrowUp, ArrowUpRight, RefreshCw, Sparkles } from 'lucide-re
 import { apiFetch } from '../../app/lib/api';
 import { PLATFORM_LOGO_URL } from '../../app/lib/branding';
 import { dict, useLang } from '../../app/lib/i18n';
+import { resolveSpotMarketSymbol } from '../trade/utils';
 
 type DashboardMarketEntry = {
   symbol: string;
@@ -72,9 +73,9 @@ function formatUpdatedLabel(value: string | null, t: (typeof dict)[keyof typeof 
 
 function MarketSkeleton({ symbol }: { symbol: string }) {
   return (
-    <div className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-3 rounded-2xl border border-white/10 bg-gradient-to-r from-white/[0.04] via-white/[0.02] to-transparent px-3 py-3 shadow-inner shadow-black/25 sm:px-4">
-      <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 text-xs font-semibold uppercase text-white/60 ring-1 ring-inset ring-white/15 sm:h-11 sm:w-11">
+    <div className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-2.5 rounded-2xl border border-white/10 bg-gradient-to-r from-white/[0.04] via-white/[0.02] to-transparent px-3 py-2.5 shadow-inner shadow-black/25 sm:px-4">
+      <div className="flex items-center gap-2.5">
+        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-xs font-semibold uppercase text-white/60 ring-1 ring-inset ring-white/15 sm:h-10 sm:w-10">
           {symbol}
         </div>
         <div className="space-y-2">
@@ -95,7 +96,7 @@ function TokenAvatar({ symbol, label, logoUrl }: { symbol: string; label: string
   const normalizedSymbol = symbol.toUpperCase();
   const src = normalizedSymbol === 'ELTX' ? PLATFORM_LOGO_URL : logoUrl || FALLBACK_LOGOS[normalizedSymbol];
   return (
-    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-white/10 via-white/5 to-transparent text-xs font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 shadow-md shadow-black/30 sm:h-11 sm:w-11">
+    <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-white/10 via-white/5 to-transparent text-xs font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 shadow-md shadow-black/30 sm:h-10 sm:w-10">
       {src ? (
         <img src={src} alt={`${label} logo`} className="h-full w-full object-cover" loading="lazy" />
       ) : (
@@ -157,7 +158,7 @@ export default function DashboardMarketBoard() {
 
     return (
       <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#0a0f18]/70 shadow-2xl shadow-black/40 ring-1 ring-white/5">
-        <div className="flex flex-wrap items-center gap-3 bg-white/[0.03] px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70 sm:px-6">
+        <div className="flex flex-wrap items-center gap-2.5 bg-white/[0.03] px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70 sm:px-5">
           <span className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-amber-300" />
             {t.home.market.layout.pair}
@@ -177,11 +178,13 @@ export default function DashboardMarketBoard() {
           const sourceLabel = t.home.market.sourceLabel[market.source] ?? t.home.market.sourceLabel.unknown;
           const priceLines = formatUsdLines(market.priceUsd);
           return (
-            <div
+            <Link
               key={market.symbol}
-              className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-3 border-b border-white/5 bg-gradient-to-r from-white/[0.01] via-white/[0.02] to-transparent px-4 py-3 transition hover:bg-white/[0.04] last:border-b-0 sm:px-6"
+              href={`/trade/spot?market=${encodeURIComponent(resolveSpotMarketSymbol(market.symbol))}`}
+              className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-2.5 border-b border-white/5 bg-gradient-to-r from-white/[0.01] via-white/[0.02] to-transparent px-3.5 py-2.5 transition hover:bg-white/[0.05] last:border-b-0 sm:px-5"
+              aria-label={`${market.label} spot market`}
             >
-              <div className="flex items-center gap-3 sm:gap-4">
+              <div className="flex items-center gap-2.5 sm:gap-3.5">
                 <TokenAvatar symbol={market.symbol} label={market.label} logoUrl={market.logoUrl} />
                 <div className="space-y-0.5">
                   <p className="text-sm font-semibold leading-tight text-white sm:text-base">{market.label}</p>
@@ -223,7 +226,7 @@ export default function DashboardMarketBoard() {
                   </span>
                 )}
               </div>
-            </div>
+            </Link>
           );
         })}
       </div>
@@ -231,9 +234,9 @@ export default function DashboardMarketBoard() {
   }, [loading, markets, t]);
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
+    <section className="space-y-3">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-0.5">
           <p className="text-[12px] font-semibold uppercase tracking-[0.32em] text-white/70 sm:text-[13px]">
             {t.dashboard.market.kicker}
           </p>
