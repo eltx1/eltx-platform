@@ -39,6 +39,18 @@ const WITHDRAWAL_CHAINS = ['Ethereum', 'BNB', 'Solana', 'Base'];
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 200;
 const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
 const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
+const ELTX_SYMBOL = 'ELTX';
+const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
+const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
+const WITHDRAWAL_LIMITS_SETTING = 'withdrawal_limits';
+const DEFAULT_WITHDRAWAL_LIMITS = WITHDRAWAL_ASSETS.reduce(
+  (acc, asset) => ({
+    ...acc,
+    [asset]: { min: null, max: null },
+  }),
+  {}
+);
+const DEFAULT_WITHDRAWAL_FEE_BPS = 1000;
 
 function normalizeSettingValue(value) {
   if (value === undefined || value === null) return null;
@@ -1047,18 +1059,6 @@ const ELTX_DECIMALS = (() => {
   const raw = Number(process.env.TOKEN_ELTX_DECIMALS);
   return normalizeDecimals(raw, DEFAULT_ELTX_DECIMALS);
 })();
-const ELTX_SYMBOL = 'ELTX';
-const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
-const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
-const WITHDRAWAL_LIMITS_SETTING = 'withdrawal_limits';
-const DEFAULT_WITHDRAWAL_LIMITS = WITHDRAWAL_ASSETS.reduce(
-  (acc, asset) => ({
-    ...acc,
-    [asset]: { min: null, max: null },
-  }),
-  {}
-);
-const DEFAULT_WITHDRAWAL_FEE_BPS = 1000;
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
 const DEFAULT_AI_DAILY_FREE = 10;
