@@ -731,6 +731,15 @@ const AdminFeeUpdateSchema = z
     spot_taker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     transfer_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     withdrawal_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    withdrawal_limits: z
+      .array(
+        z.object({
+          asset: z.enum(WITHDRAWAL_ASSETS),
+          min: z.union([z.string(), z.number()]).optional().nullable(),
+          max: z.union([z.string(), z.number()]).optional().nullable(),
+        })
+      )
+      .optional(),
   })
   .refine(
     (data) =>
@@ -739,7 +748,8 @@ const AdminFeeUpdateSchema = z
       data.spot_maker_fee_bps !== undefined ||
       data.spot_taker_fee_bps !== undefined ||
       data.transfer_fee_bps !== undefined ||
-      data.withdrawal_fee_bps !== undefined,
+      data.withdrawal_fee_bps !== undefined ||
+      data.withdrawal_limits !== undefined,
     {
       message: 'At least one fee field must be provided',
     }
@@ -933,6 +943,47 @@ function isZeroDecimal(value) {
   return ZERO_DECIMAL_REGEX.test(value.toString());
 }
 
+function normalizeWithdrawalLimitValue(raw, decimals) {
+  if (raw === undefined || raw === null) return null;
+  const value = typeof raw === 'number' ? raw.toString() : raw.toString().trim();
+  if (!value.length) return null;
+  const normalized = normalizePositiveDecimal(value, decimals);
+  if (normalized === null) return null;
+  return trimDecimal(normalized);
+}
+
+function validateWithdrawalLimitsShape(candidate, { strict = false } = {}) {
+  const shape = { ...DEFAULT_WITHDRAWAL_LIMITS };
+  const source = candidate && typeof candidate === 'object' ? candidate : {};
+  for (const asset of WITHDRAWAL_ASSETS) {
+    const entry = source[asset] || {};
+    const decimals = getSymbolDecimals(asset);
+    const min = normalizeWithdrawalLimitValue(entry.min, decimals);
+    const max = normalizeWithdrawalLimitValue(entry.max, decimals);
+    const normalized = { min, max };
+    if (min && max) {
+      const minWei = decimalToWeiString(min, decimals);
+      const maxWei = decimalToWeiString(max, decimals);
+      if (minWei && maxWei && BigInt(maxWei) < BigInt(minWei)) {
+        if (strict) throw { status: 400, code: 'BAD_INPUT', message: `Maximum for ${asset} cannot be below minimum` };
+        normalized.max = null;
+      }
+    }
+    shape[asset] = normalized;
+  }
+  return shape;
+}
+
+async function readWithdrawalLimits(conn = pool) {
+  const raw = await getPlatformSettingValue(WITHDRAWAL_LIMITS_SETTING, '', conn);
+  try {
+    const parsed = raw ? JSON.parse(raw) : {};
+    return validateWithdrawalLimitsShape(parsed);
+  } catch {
+    return { ...DEFAULT_WITHDRAWAL_LIMITS };
+  }
+}
+
 function toDateOnlyString(value) {
   if (!value) return null;
   try {
@@ -999,6 +1050,14 @@ const ELTX_DECIMALS = (() => {
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
+const WITHDRAWAL_LIMITS_SETTING = 'withdrawal_limits';
+const DEFAULT_WITHDRAWAL_LIMITS = WITHDRAWAL_ASSETS.reduce(
+  (acc, asset) => ({
+    ...acc,
+    [asset]: { min: null, max: null },
+  }),
+  {}
+);
 const DEFAULT_WITHDRAWAL_FEE_BPS = 1000;
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
 const AI_PRICE_SETTING = 'ai_message_price_eltx';
@@ -2400,6 +2459,7 @@ async function readPlatformFeeSettings(conn = pool) {
     spot_taker_fee_bps: Number(spotTakerFeeBps),
     transfer_fee_bps: Number(transferFeeBps),
     withdrawal_fee_bps: Number(withdrawalFeeBps),
+    withdrawal_limits: await readWithdrawalLimits(conn),
   };
 }
 
@@ -5468,6 +5528,16 @@ app.patch('/admin/fees', async (req, res, next) => {
       tasks.push(setPlatformSettingValue('transfer_fee_bps', updates.transfer_fee_bps.toString()));
     if (updates.withdrawal_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('withdrawal_fee_bps', updates.withdrawal_fee_bps.toString()));
+    if (updates.withdrawal_limits !== undefined) {
+      const limits = validateWithdrawalLimitsShape(
+        updates.withdrawal_limits.reduce((acc, curr) => {
+          acc[curr.asset] = { min: curr.min ?? null, max: curr.max ?? null };
+          return acc;
+        }, {}),
+        { strict: true }
+      );
+      tasks.push(setPlatformSettingValue(WITHDRAWAL_LIMITS_SETTING, JSON.stringify(limits)));
+    }
     await Promise.all(tasks);
     const [settings, balances] = await Promise.all([readPlatformFeeSettings(), readPlatformFeeBalances()]);
     res.json({ ok: true, settings, balances });
@@ -7458,6 +7528,7 @@ app.get('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     const userId = await requireUser(req);
     const feeVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString());
     const feeBps = Number(clampBps(BigInt(Number.parseInt(feeVal, 10) || 0)));
+    const limits = await readWithdrawalLimits();
     const [rows] = await pool.query(
       `SELECT id, user_id, asset, asset_decimals, amount_wei, fee_bps, fee_wei, net_amount_wei, chain, address, reason, status, reject_reason, handled_by_admin_id, handled_at, created_at, updated_at
          FROM wallet_withdrawals
@@ -7466,7 +7537,7 @@ app.get('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
         LIMIT 50`,
       [userId]
     );
-    res.json({ ok: true, requests: rows.map(formatWithdrawalRow), fee_bps: feeBps });
+    res.json({ ok: true, requests: rows.map(formatWithdrawalRow), fee_bps: feeBps, limits });
   } catch (err) {
     next(err);
   }
@@ -7492,32 +7563,29 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     if (netWei <= 0n)
       return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Amount must exceed withdrawal fee' });
 
+    const limits = await readWithdrawalLimits();
+    const assetLimits = limits[asset] || { min: null, max: null };
+    const minWei = assetLimits.min ? decimalToWeiString(assetLimits.min, decimals) : null;
+    if (minWei && amountWei < BigInt(minWei)) {
+      const formatted = trimDecimal(formatUnitsStr(minWei.toString(), decimals));
+      return next({
+        status: 400,
+        code: 'WITHDRAWAL_BELOW_MIN',
+        message: `Minimum withdrawal for ${asset} is ${formatted}`,
+      });
+    }
+    const maxWei = assetLimits.max ? decimalToWeiString(assetLimits.max, decimals) : null;
+    if (maxWei && amountWei > BigInt(maxWei)) {
+      const formatted = trimDecimal(formatUnitsStr(maxWei.toString(), decimals));
+      return next({
+        status: 400,
+        code: 'WITHDRAWAL_ABOVE_MAX',
+        message: `Maximum withdrawal for ${asset} is ${formatted}`,
+      });
+    }
+
     conn = await pool.getConnection();
     await conn.beginTransaction();
-
-    const [[lastPurchase]] = await conn.query(
-      "SELECT created_at FROM fiat_purchases WHERE user_id=? AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
-      [userId]
-    );
-    if (!lastPurchase) {
-      await conn.rollback();
-      return next({
-        status: 400,
-        code: 'WITHDRAWAL_NOT_ELIGIBLE',
-        message: 'A successful Stripe purchase is required before withdrawing.',
-      });
-    }
-    const lastPurchaseAt = new Date(lastPurchase.created_at);
-    const availableAt = new Date(lastPurchaseAt.getTime() + 24 * 60 * 60 * 1000);
-    if (Date.now() < availableAt.getTime()) {
-      await conn.rollback();
-      return next({
-        status: 400,
-        code: 'WITHDRAWAL_TOO_EARLY',
-        message: 'Withdrawals are available 24 hours after your last purchase.',
-        details: { available_at: availableAt.toISOString() },
-      });
-    }
 
     const [[pending]] = await conn.query(
       'SELECT id FROM wallet_withdrawals WHERE user_id=? AND status=? LIMIT 1',

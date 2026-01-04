@@ -31,6 +31,8 @@ import {
 import { apiFetch } from '../lib/api';
 import { useToast } from '../lib/toast';
 
+const WITHDRAWAL_ASSETS = ['ELTX', 'USDT'] as const;
+
 type AdminRole = 'superadmin' | 'manager';
 
 interface Admin {
@@ -112,6 +114,7 @@ type FeeSettings = {
   spot_taker_fee_bps: number;
   transfer_fee_bps: number;
   withdrawal_fee_bps: number;
+  withdrawal_limits: Record<string, { min: string | null; max: string | null }>;
 };
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
@@ -3533,6 +3536,29 @@ function StakingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   );
 }
 
+const buildDefaultWithdrawalLimits = () =>
+  WITHDRAWAL_ASSETS.reduce(
+    (acc, asset) => ({
+      ...acc,
+      [asset]: { min: null, max: null },
+    }),
+    {} as Record<(typeof WITHDRAWAL_ASSETS)[number], { min: string | null; max: string | null }>
+  );
+
+const normalizeWithdrawalLimits = (
+  limits?: Record<(typeof WITHDRAWAL_ASSETS)[number], { min: string | null; max: string | null }>
+) => {
+  const base = buildDefaultWithdrawalLimits();
+  for (const asset of WITHDRAWAL_ASSETS) {
+    const entry = limits?.[asset];
+    base[asset] = {
+      min: entry?.min ?? null,
+      max: entry?.max ?? null,
+    };
+  }
+  return base;
+};
+
 function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -3542,9 +3568,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     spot_taker_fee_bps: 0,
     transfer_fee_bps: 0,
     withdrawal_fee_bps: 0,
+    withdrawal_limits: buildDefaultWithdrawalLimits(),
   });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
   const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00', withdrawal: '10.00' });
+  const [withdrawalLimits, setWithdrawalLimits] = useState<Record<(typeof WITHDRAWAL_ASSETS)[number], { min: string | null; max: string | null }>>(
+    buildDefaultWithdrawalLimits()
+  );
   const [protection, setProtection] = useState<SpotProtectionSettings>({
     max_slippage_bps: 0,
     max_deviation_bps: 0,
@@ -3568,6 +3598,7 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
       transfer: (next.transfer_fee_bps / 100).toFixed(2),
       withdrawal: (withdrawalBps / 100).toFixed(2),
     });
+    setWithdrawalLimits(normalizeWithdrawalLimits(next.withdrawal_limits));
   }, []);
 
   const load = useCallback(async () => {
@@ -3578,9 +3609,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     ]);
 
     if (feeRes.ok) {
-      setSettings(feeRes.data.settings);
+      const normalized = {
+        ...feeRes.data.settings,
+        withdrawal_limits: normalizeWithdrawalLimits(feeRes.data.settings.withdrawal_limits),
+      };
+      setSettings(normalized);
       setBalances(Array.isArray(feeRes.data.balances) ? feeRes.data.balances : []);
-      syncFormWithSettings(feeRes.data.settings);
+      syncFormWithSettings(normalized);
     } else {
       onNotify(feeRes.error || 'Failed to load fee settings', 'error');
     }
@@ -3616,6 +3651,24 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     return Math.floor(num);
   };
 
+  const normalizeLimitInput = (value: string | null | undefined) => {
+    const normalized = (value ?? '').toString().trim();
+    return normalized.length ? normalized : null;
+  };
+
+  const normalizeLimitsForCompare = (
+    limits: Record<(typeof WITHDRAWAL_ASSETS)[number], { min: string | null; max: string | null }>
+  ) => {
+    const base = buildDefaultWithdrawalLimits();
+    for (const asset of WITHDRAWAL_ASSETS) {
+      base[asset] = {
+        min: normalizeLimitInput(limits[asset]?.min),
+        max: normalizeLimitInput(limits[asset]?.max),
+      };
+    }
+    return base;
+  };
+
   const groupedBalances = useMemo(() => {
     return balances.reduce(
       (acc, row) => {
@@ -3645,6 +3698,15 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     if (spotTakerBps !== settings.spot_taker_fee_bps) payload.spot_taker_fee_bps = spotTakerBps;
     if (transferBps !== settings.transfer_fee_bps) payload.transfer_fee_bps = transferBps;
     if (withdrawalBps !== settings.withdrawal_fee_bps) payload.withdrawal_fee_bps = withdrawalBps;
+    const normalizedLimits = normalizeLimitsForCompare(withdrawalLimits);
+    const currentLimits = normalizeLimitsForCompare(normalizeWithdrawalLimits(settings.withdrawal_limits));
+    if (JSON.stringify(normalizedLimits) !== JSON.stringify(currentLimits)) {
+      payload.withdrawal_limits = WITHDRAWAL_ASSETS.map((asset) => ({
+        asset,
+        min: normalizedLimits[asset].min,
+        max: normalizedLimits[asset].max,
+      }));
+    }
     if (!Object.keys(payload).length) {
       onNotify('No fee changes to save');
       return;
@@ -3658,9 +3720,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     setSaving(false);
 
     if (res.ok) {
-      setSettings(res.data.settings);
+      const normalized = {
+        ...res.data.settings,
+        withdrawal_limits: normalizeWithdrawalLimits(res.data.settings.withdrawal_limits),
+      };
+      setSettings(normalized);
       setBalances(Array.isArray(res.data.balances) ? res.data.balances : []);
-      syncFormWithSettings(res.data.settings);
+      syncFormWithSettings(normalized);
       onNotify('Fee settings updated', 'success');
     } else {
       onNotify(res.error || 'Failed to update fee settings', 'error');
@@ -3851,6 +3917,64 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                   onChange={(e) => setForm((prev) => ({ ...prev, withdrawal: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
                 />
+              </div>
+            </div>
+            <div className="mt-6 rounded-xl border border-white/10 bg-black/30 p-4 shadow-inner shadow-black/20">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h5 className="text-sm font-semibold text-white/80">Withdrawal limits</h5>
+                  <p className="text-xs text-white/60">Per-asset minimums and maximums enforced for user requests.</p>
+                </div>
+                <button
+                  onClick={() => setWithdrawalLimits(buildDefaultWithdrawalLimits())}
+                  className="rounded-full border border-white/15 px-3 py-1 text-[11px] text-white/70 transition hover:border-white/30 hover:text-white"
+                >
+                  Clear limits
+                </button>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                {WITHDRAWAL_ASSETS.map((asset) => (
+                  <div key={asset} className="rounded-lg border border-white/10 bg-white/5 p-3">
+                    <div className="flex items-center justify-between text-sm font-semibold text-white/80">
+                      <span>{asset}</span>
+                      <span className="text-[11px] text-white/60">
+                        {withdrawalLimits[asset]?.min || withdrawalLimits[asset]?.max
+                          ? 'Custom limits'
+                          : 'No limits set'}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-white/70">
+                      <label className="space-y-1">
+                        <span>Minimum</span>
+                        <input
+                          value={withdrawalLimits[asset]?.min ?? ''}
+                          onChange={(e) =>
+                            setWithdrawalLimits((prev) => ({
+                              ...prev,
+                              [asset]: { ...prev[asset], min: e.target.value || null },
+                            }))
+                          }
+                          placeholder="0 (none)"
+                          className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white focus:border-blue-500 focus:outline-none"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span>Maximum</span>
+                        <input
+                          value={withdrawalLimits[asset]?.max ?? ''}
+                          onChange={(e) =>
+                            setWithdrawalLimits((prev) => ({
+                              ...prev,
+                              [asset]: { ...prev[asset], max: e.target.value || null },
+                            }))
+                          }
+                          placeholder="∞ (none)"
+                          className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white focus:border-blue-500 focus:outline-none"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
