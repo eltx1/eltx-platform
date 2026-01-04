@@ -120,7 +120,7 @@ type AiSettings = { daily_free_messages: number; message_price_eltx: string };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
-type ReferralSettings = { reward_eltx: string };
+type ReferralSettings = { reward_eltx: string; fee_share_bps: number };
 type ReferralSettingsResponse = { settings: ReferralSettings };
 
 type EmailSettings = {
@@ -501,7 +501,7 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<ReferralSettings | null>(null);
-  const [form, setForm] = useState<ReferralSettings>({ reward_eltx: '0' });
+  const [form, setForm] = useState<ReferralSettings>({ reward_eltx: '0', fee_share_bps: 0 });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -556,19 +556,32 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
         onSubmit={handleSubmit}
         className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner shadow-black/30"
       >
-        <label className="space-y-2 text-sm text-white/70">
-          <span>Reward for first successful purchase (ELTX)</span>
-          <input
-            type="text"
-            value={form.reward_eltx}
-            onChange={(e) => setForm({ reward_eltx: e.target.value })}
-            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
-          />
-        </label>
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="space-y-2 text-sm text-white/70">
+            <span>Reward for first successful purchase (ELTX)</span>
+            <input
+              type="text"
+              value={form.reward_eltx}
+              onChange={(e) => setForm({ ...form, reward_eltx: e.target.value })}
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+            />
+          </label>
+          <label className="space-y-2 text-sm text-white/70">
+            <span>Affiliate share from spot trading fees (bps)</span>
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={form.fee_share_bps}
+              onChange={(e) => setForm({ ...form, fee_share_bps: Number(e.target.value) })}
+              className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
+            />
+          </label>
+        </div>
         <div className="flex items-center justify-between text-xs text-white/60">
           <div className="space-y-1">
             <p>حدد المكافأة اللي المستخدم بياخدها عند أول شراء ناجح لصديقه.</p>
-            <p>تقدر تحط 0 لتعطيل المكافآت بدون ما توقف نظام الإحالة.</p>
+            <p>تقدر تحط 0 لتعطيل مكافأة الشراء وكمان حصة رسوم التداول.</p>
           </div>
           <button
             type="submit"
@@ -580,9 +593,14 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
           </button>
         </div>
         {settings && (
-          <p className="text-xs text-white/50">
-            Current reward: <span className="text-white/80">{settings.reward_eltx} ELTX</span>
-          </p>
+          <div className="space-y-1 text-xs text-white/50">
+            <p>
+              Current reward: <span className="text-white/80">{settings.reward_eltx} ELTX</span>
+            </p>
+            <p>
+              Spot fee share: <span className="text-white/80">{settings.fee_share_bps} bps</span>
+            </p>
+          </div>
         )}
       </form>
     </div>
