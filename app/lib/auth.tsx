@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from './api';
 
 interface AuthContextType {
@@ -12,15 +12,24 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({ user: undefined, refresh: async () => {}, logout: async () => {} });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<any | null | undefined>(undefined);
-  const refresh = async () => {
+  const demoUser = useMemo(
+    () => (process.env.NEXT_PUBLIC_DEMO_MODE === '1' ? { id: 'demo', name: 'Demo User' } : null),
+    []
+  );
+  const [user, setUser] = useState<any | null | undefined>(demoUser ?? undefined);
+  const refresh = useCallback(async () => {
+    if (demoUser) return;
     const res = await apiFetch<any>('/auth/me');
     setUser(res.ok ? res.data : null);
-  };
+  }, [demoUser]);
   useEffect(() => {
     refresh();
-  }, []);
+  }, [refresh]);
   const logout = async () => {
+    if (demoUser) {
+      setUser(null);
+      return;
+    }
     await apiFetch('/auth/logout', { method: 'POST' });
     setUser(null);
   };
