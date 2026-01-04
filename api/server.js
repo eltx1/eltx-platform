@@ -1005,7 +1005,9 @@ const AI_PRICE_SETTING = 'ai_message_price_eltx';
 const DEFAULT_AI_DAILY_FREE = 10;
 const DEFAULT_AI_PRICE = '1';
 const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
+const REFERRAL_FEE_SHARE_SETTING = 'referral_fee_share_bps';
 const DEFAULT_REFERRAL_REWARD = '0';
+const DEFAULT_REFERRAL_FEE_SHARE_BPS = '0';
 const WITHDRAWAL_STATUS = ['pending', 'completed', 'rejected'];
 const SUPPORT_STATUSES = ['open', 'answered', 'closed'];
 
@@ -1606,8 +1608,70 @@ async function getUserContact(userId, conn = pool) {
 }
 
 async function readReferralSettings(conn = pool) {
-  const reward = await getPlatformSettingValue(REFERRAL_REWARD_SETTING, DEFAULT_REFERRAL_REWARD, conn);
-  return { reward_eltx: trimDecimal(reward) };
+  const [reward, shareBps] = await Promise.all([
+    getPlatformSettingValue(REFERRAL_REWARD_SETTING, DEFAULT_REFERRAL_REWARD, conn),
+    getPlatformSettingValue(REFERRAL_FEE_SHARE_SETTING, DEFAULT_REFERRAL_FEE_SHARE_BPS, conn),
+  ]);
+  const share = clampBps(BigInt(Number.parseInt(shareBps, 10) || 0));
+  return { reward_eltx: trimDecimal(reward), fee_share_bps: Number(share) };
+}
+
+async function applyReferralFeeShare(
+  conn,
+  {
+    feeType,
+    feeReference,
+    payerUserId,
+    asset,
+    feeWei,
+    settings,
+  }: {
+    feeType: string;
+    feeReference: string;
+    payerUserId: number;
+    asset: string;
+    feeWei: bigint;
+    settings?: { fee_share_bps?: number };
+  }
+) {
+  if (feeType !== 'spot') return;
+  const shareBps = clampBps(BigInt(settings?.fee_share_bps ?? 0));
+  if (shareBps <= 0n) return;
+  const feeAmountWei = bigIntFromValue(feeWei);
+  if (feeAmountWei <= 0n) return;
+  const executor = conn.query ? conn : pool;
+  const [[referral]] = await executor.query('SELECT referrer_user_id FROM referrals WHERE referred_user_id=? FOR UPDATE', [
+    payerUserId,
+  ]);
+  if (!referral?.referrer_user_id) return;
+  const rewardWei = (feeAmountWei * shareBps) / 10000n;
+  if (rewardWei <= 0n) return;
+  const rewardAsset = (asset || ELTX_SYMBOL).toUpperCase();
+  const decimals = getSymbolDecimals(rewardAsset);
+  const rewardAmount = trimDecimal(formatUnitsStr(rewardWei.toString(), decimals));
+
+  await executor.query(
+    `INSERT INTO user_balances (user_id, asset, balance_wei)
+       VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)`,
+    [referral.referrer_user_id, rewardAsset, rewardWei.toString()]
+  );
+
+  await executor.query(
+    `INSERT INTO referral_rewards (referrer_user_id, referred_user_id, reward_asset, fee_type, fee_reference, purchase_id, fee_wei, reward_eltx, reward_wei)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE reward_asset=VALUES(reward_asset), fee_wei=VALUES(fee_wei), reward_eltx=VALUES(reward_eltx), reward_wei=VALUES(reward_wei)`,
+    [
+      referral.referrer_user_id,
+      payerUserId,
+      rewardAsset,
+      feeType,
+      feeReference,
+      rewardWei.toString(),
+      rewardAmount,
+      rewardWei.toString(),
+    ]
+  );
 }
 
 const EMAIL_SETTING_KEYS = {
@@ -2839,6 +2903,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
     trades: [],
     averagePriceWei: 0n,
   };
+  const referralSettings = await readReferralSettings(conn);
   const oppositeSide = taker.side === 'buy' ? 'sell' : 'buy';
   const priceClause = taker.type === 'limit'
     ? taker.side === 'buy'
@@ -2981,6 +3046,14 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
         market.quote_asset,
         takerFee.toString(),
       ]);
+      await applyReferralFeeShare(conn, {
+        feeType,
+        feeReference: `trade:${tradeId}:taker`,
+        payerUserId: taker.userId,
+        asset: market.quote_asset,
+        feeWei: takerFee,
+        settings: referralSettings,
+      });
     }
     if (makerFee > 0n) {
       await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
@@ -2989,6 +3062,14 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
         market.quote_asset,
         makerFee.toString(),
       ]);
+      await applyReferralFeeShare(conn, {
+        feeType,
+        feeReference: `trade:${tradeId}:maker:${maker.id}`,
+        payerUserId: maker.user_id,
+        asset: market.quote_asset,
+        feeWei: makerFee,
+        settings: referralSettings,
+      });
     }
 
     result.trades.push({
@@ -3102,7 +3183,8 @@ const AiSettingsSchema = z.object({
 });
 
 const ReferralSettingsSchema = z.object({
-  reward_eltx: z.union([z.string(), z.number()]),
+  reward_eltx: z.union([z.string(), z.number()]).optional(),
+  fee_share_bps: z.coerce.number().int().min(0).max(10000).optional(),
 });
 
 const SupportTicketCreateSchema = z.object({
@@ -3582,45 +3664,71 @@ app.get('/referrals/summary', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const code = await ensureReferralCode(pool, userId);
-    const [rows] = await pool.query(
+    const [referralRows] = await pool.query(
       `SELECT r.referred_user_id,
               u.username,
               u.email,
-              u.created_at,
-              rr.reward_eltx,
-              rr.created_at AS rewarded_at,
-              EXISTS(
-                SELECT 1 FROM fiat_purchases fp WHERE fp.user_id = r.referred_user_id AND fp.status='succeeded'
-              ) AS has_purchase
+              u.created_at
          FROM referrals r
          JOIN users u ON u.id = r.referred_user_id
-         LEFT JOIN referral_rewards rr ON rr.referred_user_id = r.referred_user_id
         WHERE r.referrer_user_id = ?
         ORDER BY r.created_at DESC`,
       [userId]
     );
+    const [rewardRows] = await pool.query(
+      `SELECT referred_user_id, reward_asset, reward_wei
+         FROM referral_rewards
+        WHERE referrer_user_id=?`,
+      [userId]
+    );
 
-    const referrals = rows.map((row) => ({
-      referred_user_id: row.referred_user_id,
-      username: row.username,
-      email: row.email,
-      created_at: row.created_at,
-      has_purchase: !!row.has_purchase,
-      reward_eltx: row.reward_eltx?.toString() || '0',
-      rewarded_at: row.rewarded_at || null,
-    }));
+    const rewardsByUser = new Map();
+    const totalRewards = new Map();
+    for (const row of rewardRows) {
+      const asset = (row.reward_asset || ELTX_SYMBOL).toUpperCase();
+      const amountWei = bigIntFromValue(row.reward_wei || 0);
+      if (amountWei <= 0n) continue;
+      const userMap = rewardsByUser.get(row.referred_user_id) || new Map();
+      userMap.set(asset, (userMap.get(asset) || 0n) + amountWei);
+      rewardsByUser.set(row.referred_user_id, userMap);
+      totalRewards.set(asset, (totalRewards.get(asset) || 0n) + amountWei);
+    }
+
+    const formatRewards = (rewardMap) =>
+      Array.from(rewardMap.entries()).map(([asset, amountWei]) => {
+        const decimals = getSymbolDecimals(asset);
+        return {
+          asset,
+          amount_wei: amountWei.toString(),
+          amount: trimDecimal(formatUnitsStr(amountWei.toString(), decimals)),
+        };
+      });
+
+    const referrals = referralRows.map((row) => {
+      const rewardMap = rewardsByUser.get(row.referred_user_id) || new Map();
+      const rewardList = formatRewards(rewardMap);
+      return {
+        referred_user_id: row.referred_user_id,
+        username: row.username,
+        email: row.email,
+        created_at: row.created_at,
+        has_purchase: rewardList.length > 0,
+        rewards: rewardList,
+        rewarded_at: null,
+      };
+    });
 
     const totalInvited = referrals.length;
-    const totalPurchases = referrals.filter((r) => r.has_purchase).length;
-    const totalRewards = referrals.reduce((sum, row) => sum.plus(new Decimal(row.reward_eltx || '0')), new Decimal(0));
+    const totalActive = referrals.filter((r) => r.has_purchase).length;
+    const statsRewards = formatRewards(totalRewards);
 
     res.json({
       ok: true,
       code,
       stats: {
         invited: totalInvited,
-        purchases: totalPurchases,
-        rewards_eltx: trimDecimal(totalRewards.toFixed(18, Decimal.ROUND_DOWN)),
+        purchases: totalActive,
+        rewards: statsRewards,
       },
       referrals,
     });
@@ -5418,9 +5526,16 @@ app.patch('/admin/referrals/settings', async (req, res, next) => {
   try {
     await requireAdmin(req);
     const payload = ReferralSettingsSchema.parse(req.body || {});
-    const reward = normalizePositiveDecimal(payload.reward_eltx, 18);
-    if (reward === null) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid referral reward' });
-    await setPlatformSettingValue(REFERRAL_REWARD_SETTING, reward);
+    const tasks = [];
+    if (payload.reward_eltx !== undefined) {
+      const reward = normalizePositiveDecimal(payload.reward_eltx, 18);
+      if (reward === null) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid referral reward' });
+      tasks.push(setPlatformSettingValue(REFERRAL_REWARD_SETTING, reward));
+    }
+    if (payload.fee_share_bps !== undefined) {
+      tasks.push(setPlatformSettingValue(REFERRAL_FEE_SHARE_SETTING, clampBps(BigInt(payload.fee_share_bps)).toString()));
+    }
+    await Promise.all(tasks);
     const settings = await readReferralSettings();
     res.json({ ok: true, settings });
   } catch (err) {
@@ -9395,12 +9510,17 @@ async function processReferralRewardForPurchase(purchaseId, userId) {
     );
 
     await conn.query(
-      `INSERT INTO referral_rewards (referrer_user_id, referred_user_id, purchase_id, reward_eltx, reward_wei)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO referral_rewards (referrer_user_id, referred_user_id, reward_asset, fee_type, fee_reference, purchase_id, fee_wei, reward_eltx, reward_wei)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE reward_asset=VALUES(reward_asset), fee_wei=VALUES(fee_wei), reward_eltx=VALUES(reward_eltx), reward_wei=VALUES(reward_wei)`,
       [
         referral.referrer_user_id,
         userId,
+        ELTX_SYMBOL,
+        'fiat_purchase',
+        `purchase:${purchaseId}`,
         purchaseId,
+        '0',
         rewardDecimal.toFixed(Math.min(decimals, 18), Decimal.ROUND_DOWN),
         rewardWei.toString(),
       ]

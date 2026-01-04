@@ -644,6 +644,7 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_withdraw
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_support_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_support_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('referral_reward_eltx', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('referral_fee_share_bps', '0');
 
 -- referral codes and rewards
 CREATE TABLE IF NOT EXISTS referral_codes (
@@ -670,16 +671,36 @@ CREATE TABLE IF NOT EXISTS referral_rewards (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   referrer_user_id INT NOT NULL,
   referred_user_id INT NOT NULL,
+  reward_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX',
+  fee_type VARCHAR(32) NOT NULL DEFAULT 'spot',
+  fee_reference VARCHAR(128) NOT NULL DEFAULT '',
   purchase_id BIGINT UNSIGNED NULL,
+  fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   reward_eltx DECIMAL(36,18) NOT NULL DEFAULT 0,
   reward_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY uniq_referral_rewards_referred (referred_user_id),
+  UNIQUE KEY uniq_referral_rewards_reference (fee_type, fee_reference),
+  INDEX idx_referral_rewards_asset (reward_asset),
   INDEX idx_referral_rewards_referrer (referrer_user_id),
   CONSTRAINT fk_referral_rewards_referrer FOREIGN KEY (referrer_user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_referral_rewards_referred FOREIGN KEY (referred_user_id) REFERENCES users(id) ON DELETE CASCADE,
   CONSTRAINT fk_referral_rewards_purchase FOREIGN KEY (purchase_id) REFERENCES fiat_purchases(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE referral_rewards
+  ADD COLUMN IF NOT EXISTS referrer_user_id INT NOT NULL AFTER id,
+  ADD COLUMN IF NOT EXISTS referred_user_id INT NOT NULL AFTER referrer_user_id,
+  ADD COLUMN IF NOT EXISTS reward_asset VARCHAR(32) NOT NULL DEFAULT 'ELTX' AFTER referred_user_id,
+  ADD COLUMN IF NOT EXISTS fee_type VARCHAR(32) NOT NULL DEFAULT 'spot' AFTER reward_asset,
+  ADD COLUMN IF NOT EXISTS fee_reference VARCHAR(128) NOT NULL DEFAULT '' AFTER fee_type,
+  ADD COLUMN IF NOT EXISTS purchase_id BIGINT UNSIGNED NULL AFTER fee_reference,
+  ADD COLUMN IF NOT EXISTS fee_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER purchase_id,
+  ADD COLUMN IF NOT EXISTS reward_eltx DECIMAL(36,18) NOT NULL DEFAULT 0 AFTER fee_wei,
+  ADD COLUMN IF NOT EXISTS reward_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER reward_eltx,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER reward_wei,
+  DROP INDEX IF EXISTS uniq_referral_rewards_referred,
+  ADD UNIQUE KEY IF NOT EXISTS uniq_referral_rewards_reference (fee_type, fee_reference),
+  ADD INDEX IF NOT EXISTS idx_referral_rewards_asset (reward_asset),
+  ADD INDEX IF NOT EXISTS idx_referral_rewards_referrer (referrer_user_id);
 -- internal transfers between users
 CREATE TABLE IF NOT EXISTS wallet_transfers (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

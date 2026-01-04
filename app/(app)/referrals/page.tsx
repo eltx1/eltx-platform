@@ -7,13 +7,19 @@ import { useAuth } from '../../lib/auth';
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 
+type ReferralReward = {
+  asset: string;
+  amount: string;
+  amount_wei: string;
+};
+
 type ReferralRow = {
   referred_user_id: number;
   username: string;
   email: string;
   created_at: string;
   has_purchase: boolean;
-  reward_eltx: string;
+  rewards: ReferralReward[];
   rewarded_at: string | null;
 };
 
@@ -22,7 +28,7 @@ type ReferralSummary = {
   stats: {
     invited: number;
     purchases: number;
-    rewards_eltx: string;
+    rewards: ReferralReward[];
   };
   referrals: ReferralRow[];
 };
@@ -82,6 +88,8 @@ export default function ReferralsPage() {
 
   const stats = summary?.stats;
   const referrals = summary?.referrals || [];
+  const formatRewards = (rewards?: ReferralReward[]) =>
+    rewards && rewards.length ? rewards.map((r) => `${r.amount} ${r.asset}`).join(' + ') : '0';
 
   return (
     <div className="p-4 space-y-6 max-w-5xl mx-auto">
@@ -102,7 +110,7 @@ export default function ReferralsPage() {
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <p className="text-xs uppercase text-white/60">{t.referrals.stats.rewards}</p>
-          <p className="mt-2 text-2xl font-semibold">{loading ? '...' : `${stats?.rewards_eltx ?? '0'} ELTX`}</p>
+          <p className="mt-2 text-2xl font-semibold">{loading ? '...' : formatRewards(stats?.rewards)}</p>
         </div>
       </div>
 
@@ -149,9 +157,7 @@ export default function ReferralsPage() {
                     <p className="text-xs text-white/50">{t.referrals.list.registered}: {new Date(referral.created_at).toLocaleDateString()}</p>
                   </div>
                   <div className="text-sm text-white/70">{statusText}</div>
-                  <div className="text-sm font-semibold text-emerald-200">
-                    {referral.reward_eltx || '0'} ELTX
-                  </div>
+                  <div className="text-sm font-semibold text-emerald-200">{formatRewards(referral.rewards)}</div>
                 </div>
               );
             })}

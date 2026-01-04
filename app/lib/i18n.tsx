@@ -161,11 +161,11 @@ export const dict = {
     },
     referrals: {
       title: 'Invite & Earn',
-      subtitle: 'Share your unique referral link and earn ELTX when friends complete their first purchase.',
+      subtitle: 'Share your unique referral link and earn from the spot trading fees your friends generate.',
       stats: {
         invited: 'Invited',
-        purchases: 'First purchases',
-        rewards: 'ELTX earned',
+        purchases: 'Active traders',
+        rewards: 'Rewards earned',
       },
       link: {
         label: 'Your referral link',
@@ -180,8 +180,8 @@ export const dict = {
         status: 'Status',
         reward: 'Reward',
         registered: 'Registered',
-        pending: 'Waiting for first purchase',
-        purchased: 'First purchase completed',
+        pending: 'No trades yet',
+        purchased: 'Trading in progress',
       },
     },
     wallet: {
@@ -1152,11 +1152,11 @@ export const dict = {
     },
     referrals: {
       title: 'ادعي واربح',
-      subtitle: 'شارك رابط الإحالة الخاص بك واكسب ELTX لما أصحابك يعملوا أول عملية شراء ناجحة.',
+      subtitle: 'شارك رابط الإحالة بتاعك واكسب جزء من رسوم تداول الاسبوت اللي أصحابك بيعملوها.',
       stats: {
         invited: 'المدعوين',
-        purchases: 'أول عمليات شراء',
-        rewards: 'أرباح ELTX',
+        purchases: 'المتداولين النشطين',
+        rewards: 'الأرباح',
       },
       link: {
         label: 'رابط الإحالة الخاص بك',
@@ -1171,8 +1171,8 @@ export const dict = {
         status: 'الحالة',
         reward: 'المكافأة',
         registered: 'تم التسجيل',
-        pending: 'في انتظار أول عملية شراء',
-        purchased: 'أول عملية شراء تمت',
+        pending: 'مافيش تداول لسه',
+        purchased: 'في تداول شغال',
       },
     },
     wallet: {
