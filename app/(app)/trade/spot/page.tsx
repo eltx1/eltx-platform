@@ -946,11 +946,11 @@ function SpotTradePageContent() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-gray-800 bg-[#0f1117]/95 p-3 shadow-lg shadow-black/30 space-y-3">
-              <div className="flex items-start justify-between gap-3 text-sm">
+            <div className="rounded-2xl border border-gray-800 bg-[#0f1117]/95 p-2.5 shadow-lg shadow-black/30 space-y-3">
+              <div className="flex items-start justify-between gap-3 text-[13px]">
                 <div className="space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <div className="text-lg font-semibold truncate">{selectedMarket || t.spotTrade.marketSelector.placeholder}</div>
+                    <div className="text-base font-semibold truncate">{selectedMarket || t.spotTrade.marketSelector.placeholder}</div>
                     <span className="text-[11px] text-white/60 whitespace-nowrap">{baseSymbol}/{quoteSymbol}</span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/70">
@@ -970,7 +970,7 @@ function SpotTradePageContent() {
                 </div>
                 <div className="text-right space-y-1">
                   <div
-                    className={`text-3xl font-extrabold leading-tight ${
+                    className={`text-2xl font-extrabold leading-tight ${
                       changePercent ? (changePercent.gt(0) ? 'text-[#0ecb81]' : 'text-[#f6465d]') : 'text-white'
                     }`}
                   >
@@ -981,7 +981,7 @@ function SpotTradePageContent() {
               </div>
 
               <div
-                className="grid grid-cols-[minmax(140px,0.48fr),minmax(160px,0.52fr)] gap-2"
+                className="grid grid-cols-[minmax(0,0.47fr),minmax(0,0.53fr)] gap-2 overflow-hidden"
                 style={{ height: mobilePanelHeight, minHeight: '460px', maxHeight: 'calc(100vh - 150px)' }}
               >
                 <div className="flex flex-col rounded-xl border border-white/10 bg-black/50 shadow-inner shadow-black/40 overflow-hidden">
@@ -1023,17 +1023,17 @@ function SpotTradePageContent() {
                                 <button
                                   type="button"
                                   onClick={() => handleLevelClick(level.rawPrice)}
-                                  className="relative w-full grid grid-cols-[1fr,0.95fr] gap-2 px-2 py-1.5 text-left hover:bg-[#f6465d]/5 transition"
+                                  className="relative w-full grid grid-cols-[1fr,0.95fr] gap-1.5 px-2 py-1 text-left hover:bg-[#f6465d]/5 transition"
                                 >
-                                  <span className="truncate font-mono tabular-nums text-[#f6465d] text-sm font-semibold leading-tight">{level.price}</span>
-                                  <span className="truncate text-right font-mono tabular-nums text-white text-sm leading-tight">{level.amount}</span>
+                                  <span className="truncate font-mono tabular-nums text-[#f6465d] text-[13px] font-semibold leading-tight">{level.price}</span>
+                                  <span className="truncate text-right font-mono tabular-nums text-white text-[13px] leading-tight">{level.amount}</span>
                                 </button>
                               </div>
                             ))
                           )}
 
                           <div className="rounded-lg border border-white/10 bg-gradient-to-r from-white/5 to-white/10 px-2 py-2 text-center shadow">
-                            <div className="text-xl font-bold text-[#0ecb81]">
+                            <div className="text-lg font-bold text-[#0ecb81]">
                               {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'}
                             </div>
                             <div className="text-[11px] text-white/70">
@@ -1053,10 +1053,10 @@ function SpotTradePageContent() {
                                 <button
                                   type="button"
                                   onClick={() => handleLevelClick(level.rawPrice)}
-                                  className="relative w-full grid grid-cols-[1fr,0.95fr] gap-2 px-2 py-1.5 text-left hover:bg-[#0ecb81]/5 transition"
+                                  className="relative w-full grid grid-cols-[1fr,0.95fr] gap-1.5 px-2 py-1 text-left hover:bg-[#0ecb81]/5 transition"
                                 >
-                                  <span className="truncate font-mono tabular-nums text-[#0ecb81] text-sm font-semibold leading-tight">{level.price}</span>
-                                  <span className="truncate text-right font-mono tabular-nums text-white text-sm leading-tight">{level.amount}</span>
+                                  <span className="truncate font-mono tabular-nums text-[#0ecb81] text-[13px] font-semibold leading-tight">{level.price}</span>
+                                  <span className="truncate text-right font-mono tabular-nums text-white text-[13px] leading-tight">{level.amount}</span>
                                 </button>
                               </div>
                             ))
@@ -1097,7 +1097,7 @@ function SpotTradePageContent() {
                   <div className="flex items-center justify-between gap-2 pb-2">
                     <div className="inline-flex flex-1 rounded-full bg-white/5 p-1 border border-white/10">
                       <button
-                        className={`flex-1 py-2 text-sm font-semibold uppercase tracking-wide rounded-full transition ${
+                        className={`flex-1 py-1.5 text-[13px] font-semibold uppercase tracking-wide rounded-full transition ${
                           formSide === 'buy' ? 'bg-[#0ecb81] text-black shadow-md shadow-emerald-900/40' : 'text-white/70'
                         }`}
                         onClick={() => setFormSide('buy')}
@@ -1105,7 +1105,7 @@ function SpotTradePageContent() {
                         {t.spotTrade.buy}
                       </button>
                       <button
-                        className={`flex-1 py-2 text-sm font-semibold uppercase tracking-wide rounded-full transition ${
+                        className={`flex-1 py-1.5 text-[13px] font-semibold uppercase tracking-wide rounded-full transition ${
                           formSide === 'sell' ? 'bg-[#f6465d] text-white shadow-md shadow-rose-900/40' : 'text-white/70'
                         }`}
                         onClick={() => setFormSide('sell')}
@@ -1116,7 +1116,7 @@ function SpotTradePageContent() {
                     <select
                       value={formType}
                       onChange={(e) => setFormType(e.target.value as 'limit' | 'market')}
-                      className="rounded-lg bg-black/60 border border-white/15 px-2 py-2 text-[12px] shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70 whitespace-nowrap"
+                      className="rounded-lg bg-black/60 border border-white/15 px-2 py-1.5 text-[11px] shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70 whitespace-nowrap"
                     >
                       <option value="limit">{t.spotTrade.limit}</option>
                       <option value="market" disabled={!marketAllowsMarketOrders}>
@@ -1125,9 +1125,9 @@ function SpotTradePageContent() {
                     </select>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                  <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-3 pr-1 min-w-0">
                     {formType === 'limit' && (
-                      <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-2">
+                      <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-1.5">
                         <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-white/60">
                           <span>
                             {t.spotTrade.price} ({quoteSymbol})
@@ -1143,16 +1143,16 @@ function SpotTradePageContent() {
                             </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
                           <input
                             type="number"
                             min="0"
                             value={price}
                             onChange={(e) => setPrice(e.target.value)}
-                            className="flex-1 rounded-lg border border-white/15 bg-black/60 px-3 py-2.5 text-sm font-semibold shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70"
+                            className="flex-1 rounded-lg border border-white/15 bg-black/60 px-3 py-2 text-[13px] font-semibold shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70 min-w-0"
                             placeholder="0.00"
                           />
-                          <div className="flex flex-col gap-1 text-[11px] w-16">
+                          <div className="flex flex-col gap-1 text-[11px] w-14 shrink-0">
                             <button
                               type="button"
                               className="rounded-lg bg-white/10 px-2 py-1 border border-white/10 hover:border-[#0ecb81]/60 transition"
@@ -1175,26 +1175,26 @@ function SpotTradePageContent() {
                       </div>
                     )}
 
-                    <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-2">
+                    <div className="space-y-2 rounded-xl border border-white/10 bg-white/5 p-1.5">
                       <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-white/60">
                         <span>
                           {t.spotTrade.amount} ({baseSymbol})
                         </span>
-                        <span className="text-[11px] text-white/60 whitespace-nowrap">
+                        <span className="text-[11px] text-white/60 whitespace-nowrap overflow-hidden text-ellipsis">
                           {t.spotTrade.balanceLabels.base}: {formatWithPrecision(availableBase, baseDecimals)} {baseSymbol}
                         </span>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
                         <input
                           ref={amountInputRef}
                           type="number"
                           min="0"
                           value={amount}
                           onChange={(e) => onAmountChange(e.target.value)}
-                          className="flex-1 rounded-lg border border-white/15 bg-black/60 px-3 py-2.5 text-sm shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70"
+                          className="flex-1 rounded-lg border border-white/15 bg-black/60 px-3 py-2 text-[13px] shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70 min-w-0"
                           placeholder="0.00"
                         />
-                        <div className="flex flex-col gap-1 text-[11px] w-16">
+                        <div className="flex flex-col gap-1 text-[11px] w-14 shrink-0">
                           <button
                             type="button"
                             className="rounded-lg bg-white/10 px-2 py-1 border border-white/10 hover:border-[#0ecb81]/60 transition"
@@ -1211,36 +1211,36 @@ function SpotTradePageContent() {
                           </button>
                         </div>
                       </div>
-                      <div className="space-y-2">
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={sliderValue}
-                          onChange={(e) => handleSliderFill(Number(e.target.value))}
-                          className="w-full accent-white h-2 cursor-pointer"
-                        />
-                        <div className="flex justify-between text-[11px] text-white/60 font-semibold tracking-wide">
-                          {['0%', '25%', '50%', '75%', '100%'].map((label) => (
-                            <span key={label}>{label}</span>
-                          ))}
-                        </div>
-                        <div className="grid grid-cols-4 gap-2 text-[11px]">
-                          {[0.25, 0.5, 0.75, 1].map((ratio) => (
-                            <button
-                              key={ratio}
-                              type="button"
-                              className="rounded-lg bg-black/40 px-2 py-1.5 font-semibold border border-white/10 hover:border-[#0ecb81]/60 hover:bg-white/10 transition"
-                              onClick={() => handleQuickFill(ratio)}
-                            >
-                              {Math.round(ratio * 100)}%
-                            </button>
-                          ))}
+                        <div className="space-y-2">
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            value={sliderValue}
+                            onChange={(e) => handleSliderFill(Number(e.target.value))}
+                            className="w-full accent-white h-2 cursor-pointer"
+                          />
+                          <div className="flex justify-between text-[10px] text-white/60 font-semibold tracking-wide">
+                            {['0%', '25%', '50%', '75%', '100%'].map((label) => (
+                              <span key={label}>{label}</span>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-4 gap-2 text-[11px]">
+                            {[0.25, 0.5, 0.75, 1].map((ratio) => (
+                              <button
+                                key={ratio}
+                                type="button"
+                                className="rounded-lg bg-black/40 px-2 py-1 font-semibold border border-white/10 hover:border-[#0ecb81]/60 hover:bg-white/10 transition"
+                                onClick={() => handleQuickFill(ratio)}
+                              >
+                                {Math.round(ratio * 100)}%
+                              </button>
+                            ))}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-2 space-y-2 text-sm">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-2 space-y-2 text-[13px]">
                       <div className="flex items-center justify-between">
                         <span className="text-white/70">{t.spotTrade.total}</span>
                         <span className="font-semibold">
@@ -1248,7 +1248,7 @@ function SpotTradePageContent() {
                         </span>
                       </div>
                       {estimatedFeeValue && estimatedFeeValue.gt(0) && (
-                        <div className="flex items-center justify-between text-[13px]">
+                        <div className="flex items-center justify-between text-[12px]">
                           <span className="text-white/60">{t.spotTrade.form.fee}</span>
                           <span className="font-semibold">
                             {feeRateLabel} • {formatWithPrecision(estimatedFeeValue, quoteDecimals)} {quoteSymbol}
@@ -1256,7 +1256,7 @@ function SpotTradePageContent() {
                         </div>
                       )}
                       {formType === 'market' && marketEstimation && marketEstimation.hasLiquidity && marketEstimation.average && (
-                        <div className="flex items-center justify-between text-[13px]">
+                        <div className="flex items-center justify-between text-[12px]">
                           <span className="text-white/60">{t.spotTrade.form.estimatedPrice}</span>
                           <span className="font-semibold">
                             {formatWithPrecision(marketEstimation.average, pricePrecision)} {quoteSymbol}
@@ -1264,7 +1264,7 @@ function SpotTradePageContent() {
                         </div>
                       )}
                       {formType === 'market' && totalForDisplay && (
-                        <div className="flex items-center justify-between text-[13px]">
+                        <div className="flex items-center justify-between text-[12px]">
                           <span className="text-white/60">{t.spotTrade.form.estimated}</span>
                           <span className="font-semibold">
                             {formatWithPrecision(totalForDisplay, quoteDecimals)} {quoteSymbol}
@@ -1272,14 +1272,14 @@ function SpotTradePageContent() {
                         </div>
                       )}
                       <div className="grid grid-cols-2 gap-2 text-[11px] text-white/70">
-                        <span>
+                        <span className="truncate">
                           Avbl: {formatWithPrecision(availableQuote, quoteDecimals)} {quoteSymbol}
                         </span>
-                        <span className="text-right">
+                        <span className="text-right truncate">
                           {t.spotTrade.balanceLabels.base}: {formatWithPrecision(availableBase, baseDecimals)} {baseSymbol}
                         </span>
                       </div>
-                      <div className="flex items-center gap-3 text-[12px] text-white/70">
+                      <div className="flex items-center gap-2 text-[12px] text-white/70">
                         <label className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-black/30 px-2 py-1">
                           <input type="checkbox" disabled className="accent-emerald-500" />
                           TP/SL
@@ -1321,7 +1321,7 @@ function SpotTradePageContent() {
                     <button
                       onClick={handlePlaceOrder}
                       disabled={placing || !validation.valid || !selectedMarket}
-                      className={`w-full py-3 rounded-xl text-base font-semibold transition text-white shadow-lg shadow-black/40 disabled:opacity-60 disabled:cursor-not-allowed ${
+                      className={`w-full py-2.5 rounded-xl text-[15px] font-semibold transition text-white shadow-lg shadow-black/40 disabled:opacity-60 disabled:cursor-not-allowed ${
                         formSide === 'buy' ? 'bg-[#0ecb81] hover:brightness-110 text-black' : 'bg-[#f6465d] hover:brightness-110'
                       }`}
                     >
