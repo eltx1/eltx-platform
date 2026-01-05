@@ -123,8 +123,9 @@ type AiSettings = { daily_free_messages: number; message_price_eltx: string };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
-type ReferralSettings = { reward_eltx: string; fee_share_bps: number };
-type ReferralSettingsResponse = { settings: ReferralSettings };
+type ReferralSettings = { reward_eltx: string; fee_share_bps: string };
+type ReferralSettingsPayload = { reward_eltx: string; fee_share_bps: string | number };
+type ReferralSettingsResponse = { settings: ReferralSettingsPayload };
 
 type EmailSettings = {
   enabled: boolean;
@@ -504,19 +505,35 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<ReferralSettings | null>(null);
-  const [form, setForm] = useState<ReferralSettings>({ reward_eltx: '0', fee_share_bps: 0 });
+  const [form, setForm] = useState<ReferralSettings>({ reward_eltx: '0', fee_share_bps: '0' });
+  const presentReferralSettings = useCallback(
+    (incoming: ReferralSettingsPayload): ReferralSettings => ({
+      reward_eltx: incoming.reward_eltx,
+      fee_share_bps: (incoming.fee_share_bps ?? '0').toString(),
+    }),
+    []
+  );
+  const sanitizeFeeShareInput = (raw: string, previous: string) => {
+    const normalized = raw.replace(',', '.');
+    if (!/^\d*\.?\d{0,4}$/.test(normalized)) return previous;
+    if (!normalized.length) return '';
+    const asNumber = Number(normalized);
+    if (Number.isFinite(asNumber) && asNumber > 10000) return '10000';
+    return normalized;
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     const res = await apiFetch<ReferralSettingsResponse>('/admin/referrals/settings');
     if (res.ok) {
-      setSettings(res.data.settings);
-      setForm(res.data.settings);
+      const normalized = presentReferralSettings(res.data.settings);
+      setSettings(normalized);
+      setForm(normalized);
     } else {
       onNotify(res.error || 'Failed to load referral settings', 'error');
     }
     setLoading(false);
-  }, [onNotify]);
+  }, [onNotify, presentReferralSettings]);
 
   useEffect(() => {
     load();
@@ -525,14 +542,19 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    const payload: ReferralSettings = {
+      reward_eltx: form.reward_eltx,
+      fee_share_bps: form.fee_share_bps.trim().length ? form.fee_share_bps : '0',
+    };
     const res = await apiFetch<ReferralSettingsResponse>('/admin/referrals/settings', {
       method: 'PATCH',
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
     setSaving(false);
     if (res.ok) {
-      setSettings(res.data.settings);
-      setForm(res.data.settings);
+      const normalized = presentReferralSettings(res.data.settings);
+      setSettings(normalized);
+      setForm(normalized);
       onNotify('Referral settings updated', 'success');
     } else {
       onNotify(res.error || 'Failed to update referral settings', 'error');
@@ -572,11 +594,17 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
           <label className="space-y-2 text-sm text-white/70">
             <span>Affiliate share from spot trading fees (bps)</span>
             <input
-              type="number"
-              min={0}
-              max={10000}
+              type="text"
+              inputMode="decimal"
+              pattern="\\d*\\.?\\d{0,4}"
+              placeholder="0"
               value={form.fee_share_bps}
-              onChange={(e) => setForm({ ...form, fee_share_bps: Number(e.target.value) })}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  fee_share_bps: sanitizeFeeShareInput(e.target.value, prev.fee_share_bps),
+                }))
+              }
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
             />
           </label>
@@ -601,7 +629,7 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
               Current reward: <span className="text-white/80">{settings.reward_eltx} ELTX</span>
             </p>
             <p>
-              Spot fee share: <span className="text-white/80">{settings.fee_share_bps} bps</span>
+              Spot fee share: <span className="text-white/80">{settings.fee_share_bps || '0'} bps</span>
             </p>
           </div>
         )}

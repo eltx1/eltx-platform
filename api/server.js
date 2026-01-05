@@ -1067,6 +1067,8 @@ const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
 const REFERRAL_FEE_SHARE_SETTING = 'referral_fee_share_bps';
 const DEFAULT_REFERRAL_REWARD = '0';
 const DEFAULT_REFERRAL_FEE_SHARE_BPS = '0';
+const REFERRAL_FEE_SHARE_PRECISION = 4;
+const MAX_REFERRAL_FEE_SHARE_BPS = new Decimal(10000);
 const WITHDRAWAL_STATUS = ['pending', 'completed', 'rejected'];
 const SUPPORT_STATUSES = ['open', 'answered', 'closed'];
 
@@ -1671,8 +1673,8 @@ async function readReferralSettings(conn = pool) {
     getPlatformSettingValue(REFERRAL_REWARD_SETTING, DEFAULT_REFERRAL_REWARD, conn),
     getPlatformSettingValue(REFERRAL_FEE_SHARE_SETTING, DEFAULT_REFERRAL_FEE_SHARE_BPS, conn),
   ]);
-  const share = clampBps(BigInt(Number.parseInt(shareBps, 10) || 0));
-  return { reward_eltx: trimDecimal(reward), fee_share_bps: Number(share) };
+  const share = normalizeBpsDecimal(shareBps);
+  return { reward_eltx: trimDecimal(reward), fee_share_bps: share ?? '0' };
 }
 
 /**
@@ -1684,7 +1686,7 @@ async function readReferralSettings(conn = pool) {
  *   payerUserId: number;
  *   asset: string;
  *   feeWei: bigint;
- *   settings?: { fee_share_bps?: number };
+ *   settings?: { fee_share_bps?: string | number };
  * }} params
  */
 async function applyReferralFeeShare(
@@ -1692,8 +1694,10 @@ async function applyReferralFeeShare(
   { feeType, feeReference, payerUserId, asset, feeWei, settings }
 ) {
   if (feeType !== 'spot') return;
-  const shareBps = clampBps(BigInt(settings?.fee_share_bps ?? 0));
-  if (shareBps <= 0n) return;
+  const shareBps = normalizeBpsDecimal(settings?.fee_share_bps ?? 0);
+  if (!shareBps) return;
+  const shareDecimal = new Decimal(shareBps);
+  if (!shareDecimal.isFinite() || shareDecimal.lte(0)) return;
   const feeAmountWei = bigIntFromValue(feeWei);
   if (feeAmountWei <= 0n) return;
   const executor = conn.query ? conn : pool;
@@ -1701,7 +1705,10 @@ async function applyReferralFeeShare(
     payerUserId,
   ]);
   if (!referral?.referrer_user_id) return;
-  const rewardWei = (feeAmountWei * shareBps) / 10000n;
+  const rewardWeiDecimal = new Decimal(feeAmountWei.toString())
+    .mul(shareDecimal)
+    .div(10000);
+  const rewardWei = bigIntFromValue(rewardWeiDecimal.toFixed(0, Decimal.ROUND_DOWN));
   if (rewardWei <= 0n) return;
   const rewardAsset = (asset || ELTX_SYMBOL).toUpperCase();
   const decimals = getSymbolDecimals(rewardAsset);
@@ -2540,6 +2547,16 @@ function clampBps(value) {
   return value;
 }
 
+function normalizeBpsDecimal(value, precision = REFERRAL_FEE_SHARE_PRECISION) {
+  const decimalValue = parseDecimalValue(value ?? 0);
+  if (!decimalValue) return null;
+  let normalized = decimalValue;
+  if (normalized.lt(0)) normalized = new Decimal(0);
+  if (normalized.gt(MAX_REFERRAL_FEE_SHARE_BPS)) normalized = MAX_REFERRAL_FEE_SHARE_BPS;
+  const fixed = normalized.toFixed(precision, Decimal.ROUND_DOWN);
+  return trimDecimal(fixed);
+}
+
 async function getSpotMarketForSwap(asset, conn = pool) {
   const executor = conn.query ? conn : pool;
   const [rows] = await executor.query(
@@ -3242,7 +3259,10 @@ const AiSettingsSchema = z.object({
 
 const ReferralSettingsSchema = z.object({
   reward_eltx: z.union([z.string(), z.number()]).optional(),
-  fee_share_bps: z.coerce.number().int().min(0).max(10000).optional(),
+  fee_share_bps: z
+    .union([z.string(), z.number()])
+    .optional()
+    .refine((val) => val === undefined || parseDecimalValue(val) !== null, { message: 'Invalid fee share bps' }),
 });
 
 const SupportTicketCreateSchema = z.object({
@@ -5601,7 +5621,9 @@ app.patch('/admin/referrals/settings', async (req, res, next) => {
       tasks.push(setPlatformSettingValue(REFERRAL_REWARD_SETTING, reward));
     }
     if (payload.fee_share_bps !== undefined) {
-      tasks.push(setPlatformSettingValue(REFERRAL_FEE_SHARE_SETTING, clampBps(BigInt(payload.fee_share_bps)).toString()));
+      const shareBps = normalizeBpsDecimal(payload.fee_share_bps);
+      if (shareBps === null) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid referral fee share' });
+      tasks.push(setPlatformSettingValue(REFERRAL_FEE_SHARE_SETTING, shareBps));
     }
     await Promise.all(tasks);
     const settings = await readReferralSettings();
