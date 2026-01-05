@@ -865,7 +865,7 @@ function SpotTradePageContent() {
   if (user === null) return null;
 
   return (
-    <div className="space-y-5 overflow-x-hidden">
+    <div className="space-y-5 overflow-x-hidden text-[13px] sm:text-sm">
       <SpotMarketSelector
         open={marketSelectorOpen}
         markets={markets}
@@ -913,7 +913,7 @@ function SpotTradePageContent() {
                 className="flex-1 text-left rounded-lg border border-white/10 bg-black/40 px-2.5 py-1.5 hover:border-white/20 transition"
               >
                 <div className="text-[11px] uppercase tracking-wide text-white/60">{t.spotTrade.market}</div>
-                <div className="flex items-center gap-2 text-base font-semibold">
+                <div className="flex items-center gap-2 text-sm font-semibold">
                   <span className="truncate">{selectedMarket || t.spotTrade.marketSelector.placeholder}</span>
                   <span className="text-white/60 text-sm">▾</span>
                 </div>
@@ -970,7 +970,7 @@ function SpotTradePageContent() {
                 </div>
                 <div className="text-right space-y-0.5">
                   <div
-                    className={`text-xl font-bold leading-tight ${
+                    className={`text-lg font-semibold leading-tight ${
                       changePercent ? (changePercent.gt(0) ? 'text-[#0ecb81]' : 'text-[#f6465d]') : 'text-white'
                     }`}
                   >
@@ -1033,7 +1033,7 @@ function SpotTradePageContent() {
                           )}
 
                           <div className="rounded-lg border border-white/10 bg-gradient-to-r from-white/5 to-white/10 px-1.5 py-1.5 text-center shadow">
-                            <div className="text-base font-bold text-[#0ecb81]">
+                            <div className="text-sm font-semibold text-[#0ecb81]">
                               {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'}
                             </div>
                             <div className="text-[10px] text-white/70">
@@ -1441,7 +1441,7 @@ function SpotTradePageContent() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-base font-semibold">
+                          <span className="text-sm font-semibold">
                             {selectedMarket || t.spotTrade.marketSelector.placeholder}
                           </span>
                           {quoteSymbol && (
@@ -1478,7 +1478,7 @@ function SpotTradePageContent() {
                   {selectedMarketMeta?.last_price && <span>{t.spotTrade.lastPrice}</span>}
                 </div>
                 <div className="flex items-baseline gap-3">
-                  <div className="text-3xl font-semibold">
+                  <div className="text-2xl font-semibold">
                     {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'} {quoteSymbol}
                   </div>
                   {bestBidDecimal && bestAskDecimal && (
@@ -1876,7 +1876,7 @@ function SpotTradePageContent() {
                           <div className="px-3 py-3 my-1 rounded-lg border border-white/10 bg-white/5 flex items-center justify-between text-sm">
                             <div className="flex flex-col">
                               <span className="text-xs uppercase tracking-wide text-white/60">{selectedMarket}</span>
-                              <span className="text-2xl font-semibold text-green-400">
+                              <span className="text-xl font-semibold text-green-400">
                                 {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'} {quoteSymbol}
                               </span>
                             </div>
