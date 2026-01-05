@@ -913,224 +913,211 @@ function SpotTradePageContent() {
             enabled={!!selectedMarket}
           />
 
-          <div className="md:hidden space-y-6 pb-28">
-            <div className="rounded-3xl bg-gray-900/60 border border-white/10 p-4 shadow-2xl shadow-black/30 space-y-4">
-              <div className="flex flex-col items-center text-center gap-3">
+          <div className="md:hidden space-y-6 pb-36">
+            <div className="rounded-2xl border border-gray-800 bg-[#1e2026]/90 p-4 shadow-md shadow-black/30 space-y-4">
+              <div className="flex items-start justify-between gap-3">
                 <button
                   type="button"
                   onClick={() => setMarketSelectorOpen(true)}
-                  className="w-full rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-left shadow-inner shadow-black/30"
+                  className="flex-1 text-left rounded-xl border border-white/10 bg-black/40 px-3 py-2 shadow-inner shadow-black/40"
                 >
                   <div className="text-[11px] uppercase tracking-wide text-white/60">{t.spotTrade.market}</div>
-                  <div className="flex flex-col gap-2 mt-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-2xl font-bold">{selectedMarket || t.spotTrade.marketSelector.placeholder}</div>
-                      {changePercentLabel && (
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[12px] font-semibold tracking-tight ${
-                            changePercent && changePercent.gt(0)
-                              ? 'bg-[#0ecb81]/15 text-[#0ecb81] border border-[#0ecb81]/40'
-                              : changePercent && changePercent.lt(0)
-                                ? 'bg-[#f6465d]/15 text-[#f6465d] border border-[#f6465d]/40'
-                                : 'bg-white/10 text-white/80 border border-white/15'
-                          }`}
-                        >
-                          {changePercentLabel}%
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="text-[13px] text-white/70">
-                        {t.spotTrade.lastPrice}: {displayPriceLabel} {quoteSymbol}
-                      </div>
-                      <span className="text-[11px] px-2 py-1 rounded-full bg-white/10 border border-white/15 text-white/80">
-                        {t.spotTrade.marketSelector.open}
-                      </span>
-                    </div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="text-2xl font-bold leading-none">{selectedMarket || t.spotTrade.marketSelector.placeholder}</div>
+                    <span className="text-white/60 text-sm">▾</span>
+                  </div>
+                  <div className="mt-1 text-[12px] text-white/60">
+                    {t.spotTrade.lastPrice}: {displayPriceLabel} {quoteSymbol}
                   </div>
                 </button>
-
-                <div className="flex flex-col items-center gap-1">
-                  <div className="flex items-center gap-2">
-                    <div className="text-4xl font-extrabold text-[#0ecb81]">
-                      {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'}
-                    </div>
-                    <div
-                      className={`text-sm px-2 py-1 rounded-full border ${
-                        changePercent
-                          ? changePercent.gt(0)
-                            ? 'bg-[#0ecb81]/15 border-[#0ecb81]/40 text-[#0ecb81]'
-                            : changePercent.lt(0)
-                              ? 'bg-[#f6465d]/15 border-[#f6465d]/40 text-[#f6465d]'
-                              : 'bg-white/10 border-white/20 text-white'
-                          : 'bg-white/5 border-white/20 text-white/70'
-                      }`}
-                    >
-                      {changePercentLabel ? `${changePercentLabel}%` : '—'}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-white/70">
+                <div className="flex flex-col items-end gap-2">
+                  {changePercentLabel && (
                     <span
-                      className={`flex items-center gap-1 px-2 py-1 rounded-full border ${
-                        streamConnected ? 'border-green-500/50 bg-green-500/10 text-green-200' : 'border-yellow-400/50 bg-yellow-500/10 text-yellow-100'
+                      className={`rounded-full px-2.5 py-1 text-[12px] font-semibold tracking-tight border ${
+                        changePercent && changePercent.gt(0)
+                          ? 'bg-[#0ecb81]/15 text-[#0ecb81] border-[#0ecb81]/40'
+                          : changePercent && changePercent.lt(0)
+                            ? 'bg-[#f6465d]/15 text-[#f6465d] border-[#f6465d]/40'
+                            : 'bg-white/10 text-white/80 border-white/15'
                       }`}
                     >
-                      <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
-                      {streamConnected ? t.trade.liveRate : t.trade.loading}
+                      {changePercentLabel}%
                     </span>
-                    {spreadInfo && (
-                      <span className="px-2 py-1 rounded-full bg-white/5 border border-white/15">
-                        {t.spotTrade.orderbook.spread}: {spreadInfo.value} {quoteSymbol}
-                      </span>
-                    )}
-                  </div>
+                  )}
+                  <span
+                    className={`flex items-center gap-1 rounded-full px-2 py-1 text-[11px] border ${
+                      streamConnected ? 'border-[#0ecb81]/40 bg-[#0ecb81]/10 text-[#0ecb81]' : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
+                    }`}
+                  >
+                    <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
+                    {streamConnected ? t.trade.liveRate : t.trade.loading}
+                  </span>
                 </div>
               </div>
+              <div className="flex flex-col items-center gap-1 text-center">
+                <div
+                  className={`text-4xl font-extrabold leading-tight ${
+                    changePercent ? (changePercent.gt(0) ? 'text-[#0ecb81]' : 'text-[#f6465d]') : 'text-white'
+                  }`}
+                >
+                  {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-white/70">
+                  <span className="rounded-full bg-white/5 px-2 py-1 border border-white/10">
+                    {t.spotTrade.lastPrice}: {displayPriceLabel} {quoteSymbol}
+                  </span>
+                  {spreadInfo && (
+                    <span className="rounded-full bg-white/5 px-2 py-1 border border-white/10">
+                      {t.spotTrade.orderbook.spread}: {spreadInfo.value} {quoteSymbol}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
 
-              <div className="space-y-3 w-full">
-                <div className="flex items-center justify-between text-[12px] uppercase tracking-wide text-white/70">
+            <div className="rounded-2xl border border-gray-800 bg-[#14161c]/90 p-3 shadow-md shadow-black/30 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-[12px] uppercase tracking-wide text-white/70">
                   <span>{t.spotTrade.orderbook.title}</span>
-                  <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-full p-1 text-[11px] font-semibold shadow-inner shadow-black/20">
-                    {(['orderbook', 'trades'] as const).map((tab) => (
-                      <button
-                        key={tab}
-                        onClick={() => setMobileDepthView(tab)}
-                        className={`px-3 py-1.5 rounded-full transition-all duration-200 ${
-                          mobileDepthView === tab ? 'bg-white text-black shadow-lg shadow-black/20' : 'text-white/70 hover:text-white'
-                        }`}
-                      >
-                        {tab === 'orderbook' ? t.spotTrade.orderbook.title : t.spotTrade.trades.title}
-                      </button>
-                    ))}
-                  </div>
+                  <span className="h-1 w-1 rounded-full bg-white/30" />
+                  <span>{t.spotTrade.trades.title}</span>
                 </div>
-
-                {mobileDepthView === 'orderbook' ? (
-                  <div className="rounded-2xl bg-black/60 border border-white/10 p-3 space-y-3 shadow-inner shadow-black/40">
-                    <div className="grid grid-cols-[1fr,0.85fr] text-[12px] uppercase tracking-wide text-white/60">
-                      <span>
-                        {t.spotTrade.orderbook.price} ({quoteSymbol})
-                      </span>
-                      <span className="text-right">
-                        {t.spotTrade.orderbook.amount} ({baseSymbol})
-                      </span>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="max-h-40 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-white/10">
-                        {loadingBook ? (
-                          <div className="opacity-70 text-sm px-1 py-2">{t.trade.loading}</div>
-                        ) : (
-                          asksDisplay.slice(0, 12).map((level, idx) => (
-                            <div key={level.key} className="relative overflow-hidden rounded-lg">
-                              <div
-                        className="pointer-events-none absolute inset-y-0 right-0 bg-[#f6465d]/15"
-                        style={{ width: `${Math.min(100, Math.max(0, level.depth * 100))}%` }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleLevelClick(level.rawPrice)}
-                        className={`relative w-full grid grid-cols-[1fr,0.9fr] gap-2 px-3 py-2 text-left text-sm transition ${
-                          idx === 0 ? 'bg-[#f6465d]/10' : 'hover:bg-[#f6465d]/10'
-                        }`}
-                      >
-                        <span className="truncate font-mono tabular-nums text-[#f6465d] text-lg font-semibold">{level.price}</span>
-                        <span className="truncate text-right font-mono tabular-nums text-white text-lg font-semibold">{level.amount}</span>
-                      </button>
-                    </div>
-                  ))
-                )}
+                <div className="flex w-full rounded-full border border-white/10 bg-black/40 p-1 text-[11px] font-semibold shadow-inner shadow-black/30">
+                  {(['orderbook', 'trades'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setMobileDepthView(tab)}
+                      className={`flex-1 rounded-full px-3 py-2 transition-all duration-200 ${
+                        mobileDepthView === tab ? 'bg-white text-black shadow-md shadow-black/30' : 'text-white/70'
+                      }`}
+                    >
+                      {tab === 'orderbook' ? t.spotTrade.orderbook.title : t.spotTrade.trades.title}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-                      <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-white/5 to-white/10 px-3 py-3 space-y-1 shadow">
-                        <div className="flex items-center justify-between text-[11px] text-white/70">
-                          <span className="uppercase tracking-wide">{selectedMarket}</span>
-                          {spreadInfo && (
-                            <span>
-                              {t.spotTrade.orderbook.spread}: {spreadInfo.value} {quoteSymbol}
-                            </span>
-                          )}
-                        </div>
+              {mobileDepthView === 'orderbook' ? (
+                <div className="space-y-3 rounded-2xl border border-white/10 bg-black/50 p-3 shadow-inner shadow-black/30">
+                  <div className="grid grid-cols-[1fr,0.85fr] text-[12px] uppercase tracking-wide text-white/60">
+                    <span>
+                      {t.spotTrade.orderbook.price} ({quoteSymbol})
+                    </span>
+                    <span className="text-right">
+                      {t.spotTrade.orderbook.amount} ({baseSymbol})
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="max-h-44 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-white/10">
+                      {loadingBook ? (
+                        <div className="opacity-70 text-sm px-1 py-2">{t.trade.loading}</div>
+                      ) : (
+                        asksDisplay.slice(0, 12).map((level, idx) => (
+                          <div key={level.key} className="relative overflow-hidden rounded-lg">
+                            <div
+                              className="pointer-events-none absolute inset-y-0 right-0 bg-[#f6465d]/15"
+                              style={{ width: `${Math.min(100, Math.max(0, level.depth * 100))}%` }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleLevelClick(level.rawPrice)}
+                              className={`relative w-full grid grid-cols-[1fr,0.9fr] gap-2 px-3 py-2 text-left transition ${
+                                idx === 0 ? 'bg-[#f6465d]/10' : 'hover:bg-[#f6465d]/10'
+                              }`}
+                            >
+                              <span className="truncate font-mono tabular-nums text-[#f6465d] text-lg font-semibold">{level.price}</span>
+                              <span className="truncate text-right font-mono tabular-nums text-white text-lg font-semibold">{level.amount}</span>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-gradient-to-r from-white/5 to-white/10 px-3 py-3 space-y-1 shadow">
+                      <div className="flex items-center justify-between text-[11px] text-white/70 uppercase tracking-wide">
+                        <span>{selectedMarket}</span>
+                        {spreadInfo && (
+                          <span>
+                            {t.spotTrade.orderbook.spread}: {spreadInfo.value} {quoteSymbol}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-end justify-between">
                         <div className="text-4xl font-extrabold text-[#0ecb81]">
                           {displayPrice ? formatWithPrecision(displayPrice, pricePrecision) : '—'}
                         </div>
                         <div className="text-sm text-white/70">≈ {displayPriceLabel}</div>
-                        </div>
                       </div>
+                    </div>
 
-                      <div className="max-h-40 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-white/10">
-                        {loadingBook ? (
-                          <div className="opacity-70 text-sm px-1 py-2">{t.trade.loading}</div>
-                        ) : (
-                          bidsDisplay.slice(0, 12).map((level, idx) => (
-                            <div key={level.key} className="relative overflow-hidden rounded-lg">
-                              <div
-                        className="pointer-events-none absolute inset-y-0 left-0 bg-[#0ecb81]/15"
-                        style={{ width: `${Math.min(100, Math.max(0, level.depth * 100))}%` }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleLevelClick(level.rawPrice)}
-                        className={`relative w-full grid grid-cols-[1fr,0.9fr] gap-2 px-3 py-2 text-left text-sm transition ${
-                          idx === 0 ? 'bg-[#0ecb81]/10' : 'hover:bg-[#0ecb81]/10'
-                        }`}
+                    <div className="max-h-44 overflow-y-auto space-y-1 pr-1 scrollbar-thin scrollbar-thumb-white/10">
+                      {loadingBook ? (
+                        <div className="opacity-70 text-sm px-1 py-2">{t.trade.loading}</div>
+                      ) : (
+                        bidsDisplay.slice(0, 12).map((level, idx) => (
+                          <div key={level.key} className="relative overflow-hidden rounded-lg">
+                            <div
+                              className="pointer-events-none absolute inset-y-0 left-0 bg-[#0ecb81]/15"
+                              style={{ width: `${Math.min(100, Math.max(0, level.depth * 100))}%` }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleLevelClick(level.rawPrice)}
+                              className={`relative w-full grid grid-cols-[1fr,0.9fr] gap-2 px-3 py-2 text-left transition ${
+                                idx === 0 ? 'bg-[#0ecb81]/10' : 'hover:bg-[#0ecb81]/10'
+                              }`}
+                            >
+                              <span className="truncate font-mono tabular-nums text-[#0ecb81] text-lg font-semibold">{level.price}</span>
+                              <span className="truncate text-right font-mono tabular-nums text-white text-lg font-semibold">{level.amount}</span>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-black/50 p-0 max-h-[360px] overflow-y-auto shadow-inner shadow-black/30">
+                  <div className="grid grid-cols-[1fr,0.8fr,0.7fr] gap-2 text-[11px] uppercase tracking-wide text-white/60 px-3 py-2 sticky top-0 bg-black/80 backdrop-blur border-b border-white/10">
+                    <span>{t.spotTrade.trades.columns.time}</span>
+                    <span className="text-right">{t.spotTrade.trades.columns.price}</span>
+                    <span className="text-right">{t.spotTrade.trades.columns.amount}</span>
+                  </div>
+                  {recentTrades.length === 0 ? (
+                    <div className="opacity-70 text-sm px-3 py-2">{t.spotTrade.trades.empty}</div>
+                  ) : (
+                    recentTrades.slice(0, 18).map((trade) => (
+                      <div
+                        key={trade.id}
+                        className="grid grid-cols-[1fr,0.8fr,0.7fr] gap-2 text-sm px-3 py-2 border-b border-white/5 last:border-0 hover:bg-white/5"
                       >
-                        <span className="truncate font-mono tabular-nums text-[#0ecb81] text-lg font-semibold">{level.price}</span>
-                        <span className="truncate text-right font-mono tabular-nums text-white text-lg font-semibold">{level.amount}</span>
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-2xl bg-black/60 border border-white/10 p-0 max-h-[360px] overflow-y-auto shadow-inner shadow-black/40">
-                    <div className="grid grid-cols-[1fr,0.8fr,0.7fr] gap-2 text-[11px] uppercase tracking-wide text-white/60 px-3 py-2 sticky top-0 bg-black/80 backdrop-blur border-b border-white/10">
-                      <span>{t.spotTrade.trades.columns.time}</span>
-                      <span className="text-right">{t.spotTrade.trades.columns.price}</span>
-                      <span className="text-right">{t.spotTrade.trades.columns.amount}</span>
-                    </div>
-                    {recentTrades.length === 0 ? (
-                      <div className="opacity-70 text-sm px-3 py-2">{t.spotTrade.trades.empty}</div>
-                    ) : (
-                      recentTrades.slice(0, 18).map((trade) => (
-                        <div
-                          key={trade.id}
-                          className="grid grid-cols-[1fr,0.8fr,0.7fr] gap-2 text-sm rounded-none px-3 py-2 border-b border-white/5 last:border-0 hover:bg-white/5"
-                        >
-                          <span className="opacity-70">{new Date(trade.created_at).toLocaleTimeString()}</span>
-                          <span className={`${trade.taker_side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'} font-mono tabular-nums text-lg font-semibold text-right`}>
-                            {formatWithPrecision(safeDecimal(trade.price), pricePrecision)}
-                          </span>
-                          <span className="font-mono tabular-nums text-right text-base text-white">
-                            {formatWithPrecision(safeDecimal(trade.base_amount), amountPrecision)}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
+                        <span className="opacity-70">{new Date(trade.created_at).toLocaleTimeString()}</span>
+                        <span className={`${trade.taker_side === 'buy' ? 'text-[#0ecb81]' : 'text-[#f6465d]'} font-mono tabular-nums text-lg font-semibold text-right`}>
+                          {formatWithPrecision(safeDecimal(trade.price), pricePrecision)}
+                        </span>
+                        <span className="font-mono tabular-nums text-right text-base text-white">
+                          {formatWithPrecision(safeDecimal(trade.base_amount), amountPrecision)}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
 
-            <div className="space-y-5 rounded-3xl bg-gray-900/70 border border-white/10 p-4 shadow-xl shadow-black/25 backdrop-blur">
-              <div className="rounded-2xl border border-white/10 bg-black/40 overflow-hidden flex shadow-inner shadow-black/30">
+            <div className="space-y-5 rounded-2xl border border-gray-800 bg-[#1b1f27]/90 p-4 shadow-md shadow-black/25 backdrop-blur">
+              <div className="rounded-full border border-gray-800 bg-black/50 p-1 flex shadow-inner shadow-black/30">
                 <button
-                  className={`flex-1 py-3 text-lg font-semibold uppercase tracking-wide transition-all duration-200 ${
-                    formSide === 'buy'
-                      ? 'bg-[#0ecb81] text-black shadow-lg shadow-emerald-900/50'
-                      : 'text-white/70 hover:text-white'
+                  className={`flex-1 py-3 text-lg font-semibold uppercase tracking-wide rounded-full transition-all duration-200 ${
+                    formSide === 'buy' ? 'bg-[#0ecb81] text-black shadow-lg shadow-emerald-900/50' : 'text-white/70'
                   }`}
                   onClick={() => setFormSide('buy')}
                 >
                   {t.spotTrade.buy}
                 </button>
                 <button
-                  className={`flex-1 py-3 text-lg font-semibold uppercase tracking-wide transition-all duration-200 ${
-                    formSide === 'sell'
-                      ? 'bg-[#f6465d] text-white shadow-lg shadow-rose-900/50'
-                      : 'text-white/70 hover:text-white'
+                  className={`flex-1 py-3 text-lg font-semibold uppercase tracking-wide rounded-full transition-all duration-200 ${
+                    formSide === 'sell' ? 'bg-[#f6465d] text-white shadow-lg shadow-rose-900/50' : 'text-white/70'
                   }`}
                   onClick={() => setFormSide('sell')}
                 >
@@ -1144,7 +1131,7 @@ function SpotTradePageContent() {
                   <select
                     value={formType}
                     onChange={(e) => setFormType(e.target.value as 'limit' | 'market')}
-                    className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm shadow-inner shadow-black/40 focus:outline-none focus:border-emerald-400/70"
+                    className="rounded-xl bg-black/60 border border-white/15 px-3 py-2 text-sm shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70"
                   >
                     <option value="limit">{t.spotTrade.limit}</option>
                     <option value="market" disabled={!marketAllowsMarketOrders}>
@@ -1155,7 +1142,7 @@ function SpotTradePageContent() {
                 <button
                   type="button"
                   onClick={handleBestPrice}
-                  className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white/90 bg-white/5 shadow transition hover:border-emerald-300/60"
+                  className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-white/90 bg-white/5 shadow transition hover:border-[#0ecb81]/60"
                 >
                   BBO
                 </button>
@@ -1181,14 +1168,14 @@ function SpotTradePageContent() {
                     <div className="flex flex-col gap-1 text-sm">
                       <button
                         type="button"
-                        className="rounded-lg bg-white/10 px-3 py-1 border border-white/10 hover:border-emerald-300/60 transition"
+                        className="rounded-lg bg-white/10 px-3 py-1 border border-white/10 hover:border-[#0ecb81]/60 transition"
                         onClick={() => handleLevelClick(formatWithPrecision((priceDecimal || ZERO).plus(1), pricePrecision))}
                       >
                         +
                       </button>
                       <button
                         type="button"
-                        className="rounded-lg bg-white/10 px-3 py-1 border border-white/10 hover:border-emerald-300/60 transition"
+                        className="rounded-lg bg-white/10 px-3 py-1 border border-white/10 hover:border-[#0ecb81]/60 transition"
                         onClick={() => {
                           const next = priceDecimal ? priceDecimal.minus(1) : ZERO;
                           handleLevelClick(next.gt(0) ? formatWithPrecision(next, pricePrecision) : '0');
@@ -1213,7 +1200,7 @@ function SpotTradePageContent() {
                     <button
                       type="button"
                       onClick={() => handleQuickFill(1)}
-                      className="rounded-full border border-white/20 px-2.5 py-1 text-[11px] font-semibold bg-white/5 hover:border-emerald-300/60 transition"
+                      className="rounded-full border border-white/20 px-2.5 py-1 text-[11px] font-semibold bg-white/5 hover:border-[#0ecb81]/60 transition"
                     >
                       {formSide === 'buy' ? 'Max Buy' : 'Max Sell'}
                     </button>
@@ -1226,13 +1213,13 @@ function SpotTradePageContent() {
                     min="0"
                     value={amount}
                     onChange={(e) => onAmountChange(e.target.value)}
-                    className="flex-1 rounded-xl border border-white/15 bg-black/60 px-4 py-3 text-base shadow-inner shadow-black/40 focus:outline-none focus:border-emerald-400/70"
+                    className="flex-1 rounded-xl border border-white/15 bg-black/60 px-4 py-3 text-base shadow-inner shadow-black/40 focus:outline-none focus:border-[#0ecb81]/70"
                     placeholder="0.00"
                   />
                   <button
                     type="button"
                     onClick={() => handleQuickFill(1)}
-                    className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold border border-white/15 shadow transition hover:border-emerald-300/60"
+                    className="rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold border border-white/15 shadow transition hover:border-[#0ecb81]/60"
                   >
                     100%
                   </button>
@@ -1244,7 +1231,7 @@ function SpotTradePageContent() {
                     max={100}
                     value={sliderValue}
                     onChange={(e) => handleSliderFill(Number(e.target.value))}
-                    className="w-full accent-green-500 h-2 cursor-pointer"
+                    className="w-full accent-white h-2 cursor-pointer"
                   />
                   <div className="flex justify-between text-[11px] text-white/60 font-semibold tracking-wide">
                     {['0%', '25%', '50%', '75%', '100%'].map((label) => (
@@ -1257,7 +1244,7 @@ function SpotTradePageContent() {
                     <button
                       key={ratio}
                       type="button"
-                      className="rounded-lg bg-white/5 px-3 py-2 font-semibold border border-white/10 hover:border-emerald-300/60 hover:bg-white/10 transition"
+                      className="rounded-lg bg-white/5 px-3 py-2 font-semibold border border-white/10 hover:border-[#0ecb81]/60 hover:bg-white/10 transition"
                       onClick={() => handleQuickFill(ratio)}
                     >
                       {Math.round(ratio * 100)}%
@@ -1278,7 +1265,7 @@ function SpotTradePageContent() {
                   <button
                     type="button"
                     onClick={() => handleQuickFill(1)}
-                    className="rounded-full px-3 py-1 text-xs font-semibold border border-emerald-400/40 text-emerald-200 bg-emerald-500/10 hover:border-emerald-300/70 transition"
+                    className="rounded-full px-3 py-1 text-xs font-semibold border border-[#0ecb81]/40 text-emerald-200 bg-[#0ecb81]/10 hover:border-[#0ecb81]/70 transition"
                   >
                     {formSide === 'buy' ? 'Max Buy' : 'Max Sell'}
                   </button>
@@ -1288,7 +1275,7 @@ function SpotTradePageContent() {
               <button
                 type="button"
                 onClick={() => setShowAdvanced((prev) => !prev)}
-                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold transition hover:border-emerald-300/60"
+                className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold transition hover:border-[#0ecb81]/60"
               >
                 <span>{t.spotTrade.form.advanced || 'Advanced options'}</span>
                 <span className="text-xs text-white/60">{showAdvanced ? '−' : '+'}</span>
@@ -1389,9 +1376,7 @@ function SpotTradePageContent() {
                 onClick={handlePlaceOrder}
                 disabled={placing || !validation.valid || !selectedMarket}
                 className={`w-full py-4 rounded-2xl text-lg font-semibold transition text-white shadow-lg shadow-black/40 disabled:opacity-60 disabled:cursor-not-allowed ${
-                  formSide === 'buy'
-                    ? 'bg-[#0ecb81] hover:brightness-110 text-black'
-                    : 'bg-[#f6465d] hover:brightness-110'
+                  formSide === 'buy' ? 'bg-[#0ecb81] hover:brightness-110 text-black' : 'bg-[#f6465d] hover:brightness-110'
                 }`}
               >
                 {placing
@@ -1400,10 +1385,12 @@ function SpotTradePageContent() {
                     ? `${t.spotTrade.buy} ${baseSymbol || ''}`.trim()
                     : `${t.spotTrade.sell} ${baseSymbol || ''}`.trim()}
               </button>
-              <p className="mt-2 text-center text-[11px] text-white/60">{t.spotTrade.form.makerTaker.replace('{maker}', makerPercentLabel).replace('{taker}', takerPercentLabel)}</p>
+              <p className="mt-2 text-center text-[11px] text-white/60">
+                {t.spotTrade.form.makerTaker.replace('{maker}', makerPercentLabel).replace('{taker}', takerPercentLabel)}
+              </p>
             </div>
 
-            <div className="rounded-3xl bg-[#070d16]/95 border border-white/10 p-4 shadow-xl shadow-black/25 space-y-3">
+            <div className="rounded-2xl border border-gray-800 bg-[#0f1218]/90 p-4 shadow-md shadow-black/25 space-y-3">
               <div className="flex items-center justify-between text-sm">
                 <h3 className="font-semibold">{t.spotTrade.trades.title}</h3>
                 <span className="text-xs text-white/60">{t.spotTrade.trades.title}</span>
@@ -1435,13 +1422,17 @@ function SpotTradePageContent() {
               </div>
             </div>
 
-            <div className="rounded-3xl bg-[#0b1320]/90 border border-white/10 p-4 shadow-xl shadow-black/25 space-y-4">
+            <div className="rounded-2xl border border-gray-800 bg-[#0e1117]/90 p-4 shadow-md shadow-black/25 space-y-4">
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <span className="px-3 py-1 rounded-full bg-[#0ecb81]/15 border border-[#0ecb81]/40 text-[#0ecb81]">
+                <span className="flex-1 rounded-full border border-[#0ecb81]/40 bg-[#0ecb81]/15 px-3 py-1 text-center text-[#0ecb81]">
                   {t.spotTrade.tabs.open} ({orders.length})
                 </span>
-                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/60">{t.spotTrade.tabs.holdings}</span>
-                <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10 text-white/60">{t.spotTrade.tabs.grid}</span>
+                <span className="flex-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-center text-white/70">
+                  {t.spotTrade.tabs.holdings}
+                </span>
+                <span className="flex-1 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-center text-white/70">
+                  {t.spotTrade.tabs.grid}
+                </span>
               </div>
               {orders.length === 0 ? (
                 <div className="text-sm text-white/70">{t.spotTrade.orders.empty}</div>
@@ -1500,7 +1491,6 @@ function SpotTradePageContent() {
               </div>
             </div>
           </div>
-
           <div className="hidden md:grid gap-6 2xl:grid-cols-[400px,1fr] xl:grid-cols-[360px,1fr]">
             <div className="space-y-5 bg-gray-900/60 border border-white/10 rounded-2xl p-5 shadow-lg shadow-black/20 backdrop-blur">
               <div className="flex items-start justify-between gap-3">
