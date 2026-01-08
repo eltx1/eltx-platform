@@ -73,21 +73,21 @@ function formatUpdatedLabel(value: string | null, t: (typeof dict)[keyof typeof 
 
 function MarketSkeleton({ symbol }: { symbol: string }) {
   return (
-    <div className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-2.5 rounded-2xl border border-white/10 bg-gradient-to-r from-white/[0.04] via-white/[0.02] to-transparent px-3 py-2.5 shadow-inner shadow-black/25 sm:px-4">
-      <div className="flex items-center gap-2.5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-xs font-semibold uppercase text-white/60 ring-1 ring-inset ring-white/15 sm:h-10 sm:w-10">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-2xl border border-white/10 bg-gradient-to-r from-white/[0.04] via-white/[0.02] to-transparent px-3 py-2 shadow-inner shadow-black/25 sm:px-4">
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-[10px] font-semibold uppercase text-white/60 ring-1 ring-inset ring-white/15 sm:h-9 sm:w-9">
           {symbol}
         </div>
-        <div className="space-y-2">
-          <div className="h-3 w-24 rounded bg-white/10 sm:w-28" />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="h-3 w-20 rounded bg-white/10 sm:w-24" />
           <div className="h-3 w-16 rounded bg-white/10 sm:w-20" />
         </div>
       </div>
-      <div className="space-y-2 text-right">
-        <div className="h-4 w-24 rounded bg-white/10 sm:ml-auto sm:w-28" />
-        <div className="h-3 w-20 rounded bg-white/5 sm:ml-auto sm:w-24" />
+      <div className="flex items-center justify-end gap-2">
+        <div className="h-3 w-16 rounded bg-white/10 sm:w-20" />
+        <div className="h-3 w-12 rounded bg-white/5 sm:w-16" />
       </div>
-      <div className="ml-auto h-8 w-20 rounded-full bg-white/10 sm:w-24" />
+      <div className="ml-auto h-7 w-16 rounded-full bg-white/10 sm:w-20" />
     </div>
   );
 }
@@ -96,7 +96,7 @@ function TokenAvatar({ symbol, label, logoUrl }: { symbol: string; label: string
   const normalizedSymbol = symbol.toUpperCase();
   const src = normalizedSymbol === 'ELTX' ? PLATFORM_LOGO_URL : logoUrl || FALLBACK_LOGOS[normalizedSymbol];
   return (
-    <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-white/10 via-white/5 to-transparent text-xs font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 shadow-md shadow-black/30 sm:h-10 sm:w-10">
+    <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-white/10 via-white/5 to-transparent text-[10px] font-bold uppercase tracking-tight text-white ring-1 ring-inset ring-white/15 shadow-md shadow-black/30 sm:h-9 sm:w-9">
       {src ? (
         <img src={src} alt={`${label} logo`} className="h-full w-full object-cover" loading="lazy" />
       ) : (
@@ -158,16 +158,13 @@ export default function DashboardMarketBoard() {
 
     return (
       <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#0a0f18]/70 shadow-2xl shadow-black/40 ring-1 ring-white/5">
-        <div className="flex flex-wrap items-center gap-2.5 bg-white/[0.03] px-3.5 py-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-white/70 sm:px-5">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 bg-white/[0.03] px-3.5 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70 sm:px-5 sm:text-[11px]">
           <span className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-amber-300" />
             {t.home.market.layout.pair}
           </span>
-          <div className="ml-auto grid flex-1 grid-cols-[1fr_1fr_auto] items-center gap-3 text-right text-[10px] sm:flex-none sm:text-[11px]">
-            <span className="text-center sm:text-right">{t.home.market.layout.price}</span>
-            <span className="text-center sm:text-right">{t.home.market.layout.change}</span>
-            <span className="hidden sm:block text-right">{t.home.market.layout.source}</span>
-          </div>
+          <span className="text-right">{t.home.market.layout.price}</span>
+          <span className="text-right">{t.home.market.layout.change}</span>
         </div>
         {markets.map((marketRaw) => {
           const market = {
@@ -181,28 +178,28 @@ export default function DashboardMarketBoard() {
             <Link
               key={market.symbol}
               href={`/trade/spot?market=${encodeURIComponent(resolveSpotMarketSymbol(market.symbol))}`}
-              className="grid grid-cols-[1.3fr_1fr_auto] items-center gap-2.5 border-b border-white/5 bg-gradient-to-r from-white/[0.01] via-white/[0.02] to-transparent px-3.5 py-2.5 transition hover:bg-white/[0.05] last:border-b-0 sm:px-5"
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-white/5 bg-gradient-to-r from-white/[0.01] via-white/[0.02] to-transparent px-3.5 py-2 transition hover:bg-white/[0.05] last:border-b-0 sm:px-5"
               aria-label={`${market.label} spot market`}
             >
-              <div className="flex items-center gap-2.5 sm:gap-3.5">
+              <div className="flex items-center gap-2 sm:gap-2.5">
                 <TokenAvatar symbol={market.symbol} label={market.label} logoUrl={market.logoUrl} />
-                <div className="space-y-0.5">
-                  <p className="text-sm font-semibold leading-tight text-white sm:text-base">{market.label}</p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/60">
-                    <span className="font-semibold uppercase tracking-[0.14em]">{market.symbol}</span>
-                    <span className="h-1 w-1 rounded-full bg-white/20" />
-                    <span className="rounded-full bg-white/5 px-2 py-1 ring-1 ring-inset ring-white/10">{sourceLabel}</span>
-                  </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs text-white/80 sm:text-sm">
+                  <span className="font-semibold text-white">{market.label}</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/60">{market.symbol}</span>
+                  <span className="text-[10px] text-white/50">•</span>
+                  <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-white/60 ring-1 ring-inset ring-white/10">
+                    {sourceLabel}
+                  </span>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-lg font-semibold text-white sm:text-xl">{priceLines.primary}</p>
-                <p className="text-[11px] text-white/50">{priceLines.secondary}</p>
+              <div className="flex items-center justify-end gap-2 text-right text-sm text-white sm:text-base">
+                <span className="font-semibold">{priceLines.primary}</span>
+                <span className="text-[10px] text-white/50 sm:text-[11px]">{priceLines.secondary}</span>
               </div>
               <div className="ml-auto flex items-center justify-end">
                 {change ? (
                   <span
-                    className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[12px] font-semibold shadow-md shadow-black/30 ring-1 ring-inset ${
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-semibold shadow-md shadow-black/30 ring-1 ring-inset ${
                       change.direction === 'up'
                         ? 'bg-emerald-500 text-emerald-50 ring-emerald-400/80'
                         : change.direction === 'down'
@@ -211,17 +208,17 @@ export default function DashboardMarketBoard() {
                     }`}
                   >
                     {change.direction === 'up' ? (
-                      <ArrowUp className="h-3.5 w-3.5" />
+                      <ArrowUp className="h-3 w-3" />
                     ) : change.direction === 'down' ? (
-                      <ArrowDown className="h-3.5 w-3.5" />
+                      <ArrowDown className="h-3 w-3" />
                     ) : (
-                      <Sparkles className="h-3.5 w-3.5" />
+                      <Sparkles className="h-3 w-3" />
                     )}
                     <span>{change.label}</span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5 text-[12px] font-semibold text-white/80 ring-1 ring-inset ring-white/15">
-                    <Sparkles className="h-3.5 w-3.5" />
+                  <span className="inline-flex items-center gap-1 rounded-lg bg-white/10 px-2 py-1 text-[11px] font-semibold text-white/80 ring-1 ring-inset ring-white/15">
+                    <Sparkles className="h-3 w-3" />
                     {t.home.market.fresh}
                   </span>
                 )}
