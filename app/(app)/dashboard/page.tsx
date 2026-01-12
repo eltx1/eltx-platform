@@ -118,19 +118,19 @@ export default function DashboardPage() {
   return (
     <div className="p-3 sm:p-4 space-y-3 sm:space-y-4 overflow-x-hidden">
       <h1 className="text-lg font-semibold sm:text-xl">{t.dashboard.title}</h1>
-      <div className="rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between px-3.5 py-3 sm:px-4 sm:py-4">
-        <div className="space-y-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-white/70 sm:text-xs">
+      <div className="rounded-2xl bg-gradient-to-br from-white/10 via-white/5 to-transparent border border-white/10 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 py-2.5 sm:px-3.5 sm:py-3">
+        <div className="space-y-0.5">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-white/70 sm:text-[11px]">
             {t.dashboard.balanceCard.title}
           </div>
-          <div className="text-xl font-bold leading-tight sm:text-3xl sm:leading-tight">
+          <div className="text-lg font-bold leading-tight sm:text-2xl sm:leading-tight">
             {loadingBalance ? t.trade.loading : balanceDisplay}
           </div>
           {!loadingBalance && !hasBalance && (
-            <div className="text-[11px] opacity-70">{t.dashboard.balanceCard.empty}</div>
+            <div className="text-[10px] opacity-70 sm:text-[11px]">{t.dashboard.balanceCard.empty}</div>
           )}
           {eltxAsset && (
-            <div className="pt-1.5 space-y-1.5 text-[11px] sm:text-xs">
+            <div className="pt-1 space-y-1 text-[10px] sm:text-[11px]">
               <div className={`flex flex-wrap items-center justify-between gap-2 leading-snug ${changeColor}`}>
                 <span>{t.dashboard.balanceCard.change24h}</span>
                 <span>
@@ -145,9 +145,17 @@ export default function DashboardPage() {
             </div>
           )}
         </div>
-        <a href="/wallet" className="btn btn-primary self-start sm:self-auto">
-          {t.common.deposit}
-        </a>
+        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
+          <a href="/wallet" className="btn btn-primary px-3 py-1.5 text-[11px] sm:text-xs">
+            {t.common.deposit}
+          </a>
+          <a href="/pay" className="btn btn-primary px-3 py-1.5 text-[11px] sm:text-xs">
+            {t.common.send}
+          </a>
+          <a href="/trade/spot" className="btn btn-primary px-3 py-1.5 text-[11px] sm:text-xs">
+            {t.common.trade}
+          </a>
+        </div>
       </div>
       <div className="space-y-5 pt-1 sm:space-y-6">
         <div className="pt-4 border-t border-white/5 sm:pt-5">
