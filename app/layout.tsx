@@ -8,34 +8,35 @@ import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
 import ServiceWorkerManager from '../components/ServiceWorkerManager';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://eltx.io';
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://lordai.net';
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
   title: {
-    default: 'ELTX | Crypto Trading Platform & Web3 Exchange',
-    template: '%s | ELTX',
+    default: 'LordAi.Net | AI Web3 Social Media Network',
+    template: '%s | LordAi.Net',
   },
   description:
-    'Trade ELTX and leading cryptocurrencies with fast on-chain settlement, secure wallets, and bilingual support for English and Arabic users.',
+    'LordAi.Net is an AI-powered social media network for Web3 communities with trading, staking, payments, and bilingual English/Arabic experiences.',
   keywords: [
-    'ELTX exchange',
+    'LordAi.Net',
+    'AI social media network',
+    'Web3 social platform',
     'crypto trading platform',
-    'buy ELTX token',
     'spot trading',
     'P2P crypto marketplace',
     'web3 wallet',
     'staking',
     'DeFi gateway',
+    'منصة سوشيال ميديا Web3',
     'منصة تداول كريبتو',
-    'شراء وبيع العملات الرقمية',
   ],
   openGraph: {
-    title: 'ELTX | Crypto Trading Platform & Web3 Exchange',
+    title: 'LordAi.Net | AI Web3 Social Media Network',
     description:
-      'Start trading and investing in ELTX with secure wallets, instant swaps, and Arabic/English support built for crypto users everywhere.',
+      'Share, chat, and earn on LordAi.Net with AI-powered social features, plus secure trading, staking, and payments.',
     url: siteUrl,
-    siteName: 'ELTX',
+    siteName: 'LordAi.Net',
     locale: 'en_US',
     type: 'website',
   },
