@@ -7,18 +7,18 @@ import SectionCta from './SectionCta';
 const data = [
   {
     icon: Building2,
-    title: 'Governments',
-    points: ['Transparent records', 'Secure payments'],
+    title: 'Communities',
+    points: ['Public feeds', 'Group chats'],
   },
   {
     icon: Briefcase,
-    title: 'Companies',
-    points: ['Payroll automation', 'Cross-border transfers'],
+    title: 'Creators',
+    points: ['Monetized content', 'Analytics insights'],
   },
   {
     icon: User,
-    title: 'Individuals',
-    points: ['Fast remittance', 'Easy savings'],
+    title: 'Traders',
+    points: ['On-chain tools', 'Fast swaps'],
   },
 ];
 
@@ -30,7 +30,7 @@ export default function Industries() {
           <p className="text-xs uppercase tracking-[0.3em] text-purple-200/70">Reach</p>
           <h2 className="text-3xl font-bold">We serve</h2>
           <p className="text-white/70 text-sm md:text-base">
-            Government rails, companies needing cross-border payments, and individuals looking for fast remittances.
+            Social communities, creators, and traders who want a unified Web3 home.
           </p>
         </div>
       </div>
@@ -66,11 +66,10 @@ export default function Industries() {
       </div>
       <div className="max-w-6xl mx-auto px-4">
         <SectionCta
-          title="Choose the ELTX flow that fits you"
-          copy="Governments, teams, and individuals can open an account to move value securely. Log in if you already have access."
+          title="Choose the LordAi.Net flow that fits you"
+          copy="Whether you’re posting daily, trading daily, or both, your profile keeps everything connected."
         />
       </div>
     </section>
   );
 }
-
