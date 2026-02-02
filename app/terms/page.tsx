@@ -13,19 +13,19 @@ export default function TermsPage() {
       <>
         <p className="opacity-80 text-sm">Last updated: 10/9/2025</p>
         <p className="opacity-80 text-sm">
-          Welcome to ELTX. By using our platform, apps, or services ("Services"), you agree to these Terms.
+          Welcome to LordAi.Net. By using our platform, apps, or services ("Services"), you agree to these Terms.
         </p>
         <ol className="list-decimal pl-4 space-y-4 text-sm opacity-80">
           <li className="space-y-1">
             <p className="font-medium">Definitions</p>
-            <p>“ELTX”, “we”, “us”, “our”: EliteX Agency LTD (UK), operator of the Services.</p>
+            <p>“LordAi.Net”, “we”, “us”, “our”: EliteX Agency LTD (UK), operator of the Services.</p>
             <p>“User”, “you”, “your”: Any person or entity using the Services.</p>
             <p>“Assets”: Supported native coins and standard tokens on integrated networks.</p>
           </li>
           <li className="space-y-1">
             <p className="font-medium">Nature of the Service</p>
             <p>
-              ELTX provides custodial digital-asset services. User deposits are auto-swept to platform vaults for operational
+              LordAi.Net provides custodial digital-asset services. User deposits are auto-swept to platform vaults for operational
               security and accounting.
             </p>
             <p>
@@ -94,23 +94,23 @@ export default function TermsPage() {
           <li className="space-y-1">
             <p className="font-medium">Intellectual Property</p>
             <p>
-              All ELTX software, trademarks, and content are owned by or licensed to EliteX Agency LTD. You receive a limited,
+              All LordAi.Net software, trademarks, and content are owned by or licensed to EliteX Agency LTD. You receive a limited,
               revocable, non-transferable license to use the Services as permitted by these Terms.
             </p>
           </li>
           <li className="space-y-1">
             <p className="font-medium">Disclaimer; Limitation of Liability</p>
             <p>
-              The Services are provided “as is” and “as available.” To the maximum extent permitted by law, ELTX disclaims all
+              The Services are provided “as is” and “as available.” To the maximum extent permitted by law, LordAi.Net disclaims all
               warranties and is not liable for indirect, consequential, or incidental damages, or loss of profits. Our total
-              aggregate liability will not exceed the fees you paid to ELTX during the last 3 months related to the event giving
+              aggregate liability will not exceed the fees you paid to LordAi.Net during the last 3 months related to the event giving
               rise to liability.
             </p>
           </li>
           <li className="space-y-1">
             <p className="font-medium">Indemnification</p>
             <p>
-              You agree to indemnify and hold ELTX harmless from claims, losses, liabilities, and expenses arising from your use
+              You agree to indemnify and hold LordAi.Net harmless from claims, losses, liabilities, and expenses arising from your use
               of the Services or breach of these Terms.
             </p>
           </li>
@@ -133,18 +133,18 @@ export default function TermsPage() {
       <>
         <p className="opacity-80 text-sm">آخر تحديث: 10/9/2025</p>
         <p className="opacity-80 text-sm">
-          مرحبًا بك في ELTX. باستخدامك منصتنا أو تطبيقاتنا أو خدماتنا ("الخدمات")، فإنك توافق على هذه الشروط.
+          مرحبًا بك في LordAi.Net. باستخدامك منصتنا أو تطبيقاتنا أو خدماتنا ("الخدمات")، فإنك توافق على هذه الشروط.
         </p>
         <ol className="list-decimal pl-4 space-y-4 text-sm opacity-80">
           <li className="space-y-1">
             <p className="font-medium">التعريفات</p>
-            <p>"ELTX" أو "نحن": شركة EliteX Agency LTD (المملكة المتحدة) المشغِّلة للخدمات.</p>
+            <p>"LordAi.Net" أو "نحن": شركة EliteX Agency LTD (المملكة المتحدة) المشغِّلة للخدمات.</p>
             <p>"المستخدم" أو "أنت": أي شخص أو جهة تستخدم الخدمات.</p>
             <p>"الأصول": العملات الأصلية والتوكنات القياسية المدعومة على الشبكات المتكاملة.</p>
           </li>
           <li className="space-y-1">
             <p className="font-medium">طبيعة الخدمة</p>
-            <p>توفر ELTX خدمات حفظ للأصول الرقمية. يتم تحويل ودائع المستخدمين تلقائيًا إلى خزائن المنصة لأغراض الأمان والمحاسبة.</p>
+            <p>توفر LordAi.Net خدمات حفظ للأصول الرقمية. يتم تحويل ودائع المستخدمين تلقائيًا إلى خزائن المنصة لأغراض الأمان والمحاسبة.</p>
             <p>نحن لا نقدم استشارات استثمارية أو قانونية أو ضريبية، ولا نضمن أرباحًا أو أداءً سعريًا.</p>
             <p>قد تتم إضافة أو إزالة الأصول والشبكات المدعومة لأسباب تقنية أو قانونية أو مرتبطة بالمخاطر.</p>
           </li>
@@ -200,23 +200,23 @@ export default function TermsPage() {
           <li className="space-y-1">
             <p className="font-medium">الملكية الفكرية</p>
             <p>
-              جميع برمجيات ELTX وعلاماتها التجارية ومحتواها مملوكة أو مرخّصة لشركة EliteX Agency LTD. تحصل على ترخيص محدود
+              جميع برمجيات LordAi.Net وعلاماتها التجارية ومحتواها مملوكة أو مرخّصة لشركة EliteX Agency LTD. تحصل على ترخيص محدود
               قابل للإلغاء وغير قابل للنقل لاستخدام الخدمات وفقًا لهذه الشروط.
             </p>
           </li>
           <li className="space-y-1">
             <p className="font-medium">إخلاء المسؤولية والحد من المسؤولية</p>
             <p>
-              تُقدَّم الخدمات "كما هي" و"حسب توافرها". إلى الحد الأقصى الذي يسمح به القانون، تخلي ELTX مسؤوليتها عن جميع
+              تُقدَّم الخدمات "كما هي" و"حسب توافرها". إلى الحد الأقصى الذي يسمح به القانون، تخلي LordAi.Net مسؤوليتها عن جميع
               الضمانات ولا تتحمل مسؤولية الأضرار غير المباشرة أو التبعية أو العرضية أو خسارة الأرباح. لن تتجاوز
-              مسؤوليتنا الإجمالية الرسوم التي دفعتها لـ ELTX خلال الأشهر الثلاثة الأخيرة المتعلقة بالحدث الذي نشأت عنه
+              مسؤوليتنا الإجمالية الرسوم التي دفعتها لـ LordAi.Net خلال الأشهر الثلاثة الأخيرة المتعلقة بالحدث الذي نشأت عنه
               المسؤولية.
             </p>
           </li>
           <li className="space-y-1">
             <p className="font-medium">التعويض</p>
             <p>
-              توافق على تعويض ELTX وإبرائها من أي مطالبات أو خسائر أو التزامات أو نفقات ناتجة عن استخدامك للخدمات أو
+              توافق على تعويض LordAi.Net وإبرائها من أي مطالبات أو خسائر أو التزامات أو نفقات ناتجة عن استخدامك للخدمات أو
               خرقك لهذه الشروط.
             </p>
           </li>

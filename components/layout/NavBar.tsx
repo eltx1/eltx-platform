@@ -8,6 +8,8 @@ import { Menu } from 'lucide-react';
 import { useAuth } from '../../app/lib/auth';
 import MobileMenu from './MobileMenu';
 import { dict, useLang } from '../../app/lib/i18n';
+import { apiFetch } from '../../app/lib/api';
+import { formatWei } from '../../app/lib/format';
 
 interface NavLink { href: string; label: string; }
 
@@ -18,6 +20,8 @@ export default function NavBar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [logoError, setLogoError] = useState(false);
+  const [balance, setBalance] = useState<string | null>(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
   const hideNav = pathname?.startsWith('/mo');
 
   useEffect(() => {
@@ -31,6 +35,35 @@ export default function NavBar() {
       document.body.style.overflow = '';
     };
   }, [hideNav, open]);
+
+  useEffect(() => {
+    let active = true;
+    const loadBalance = async () => {
+      if (!user) {
+        setBalance(null);
+        return;
+      }
+      setLoadingBalance(true);
+      const res = await apiFetch<{ assets: Array<{ symbol: string; balance: string; balance_wei: string; decimals: number }> }>('/wallet/assets');
+      if (!active) return;
+      if (res.ok) {
+        const asset = res.data.assets.find((a) => (a.symbol || '').toUpperCase() === 'USDT');
+        if (asset) {
+          const value = asset.balance || formatWei(asset.balance_wei, asset.decimals);
+          setBalance(value);
+        } else {
+          setBalance('0');
+        }
+      } else {
+        setBalance(null);
+      }
+      setLoadingBalance(false);
+    };
+    loadBalance();
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   if (hideNav) {
     return null;
@@ -49,14 +82,24 @@ export default function NavBar() {
   return (
     <header className="sticky top-0 z-50 bg-neutral-950/80 backdrop-blur-xl border-b border-white/10">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
-        <Link href="/" className="flex items-center gap-3 font-bold" aria-label="ELTX Home">
-          {logoError ? (
-            <span className="text-lg">ELTX</span>
-          ) : (
-            <Image src="/assets/img/logo.jpeg" alt="ELTX Logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
+        <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-3 font-bold" aria-label="LordAi.Net Home">
+            {logoError ? (
+              <span className="text-lg">LordAi.Net</span>
+            ) : (
+              <Image src="/assets/img/logo.jpeg" alt="LordAi.Net Logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
+            )}
+            <span className="hidden sm:inline text-sm text-white/70">AI Web3 Social Media Network</span>
+          </Link>
+          {user && (
+            <div className="hidden sm:flex flex-col text-[10px] leading-tight text-white/70">
+              <span className="uppercase tracking-[0.2em]">{t.nav.balance}</span>
+              <span className="text-xs font-semibold text-white">
+                {loadingBalance ? '...' : `${balance ?? '0'} USDT`}
+              </span>
+            </div>
           )}
-          <span className="hidden sm:inline text-sm text-white/70">Enterprise crypto protocol</span>
-        </Link>
+        </div>
         <nav className="hidden sm:flex items-center gap-4 text-sm">
           {links.map((l) => (
             <Link key={l.href} href={l.href} className={`hover:text-white/90 transition-colors ${isActive(l.href)}`}>
