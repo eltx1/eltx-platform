@@ -2,11 +2,12 @@ import type { Metadata } from 'next';
 import LoginContent from './LoginContent';
 
 export const metadata: Metadata = {
-  title: 'Login | ELTX crypto exchange & payments platform',
+  title: 'Login | LordAi.Net social network & crypto services',
   description:
-    'Sign in to ELTX to access crypto exchange tools, buy crypto, send global transfers, accept payments, and stake assets securely.',
+    'Sign in to LordAi.Net to publish posts, chat with creators, and access trading, payments, and staking tools.',
   keywords: [
-    'ELTX login',
+    'LordAi.Net login',
+    'AI social network',
     'crypto exchange sign in',
     'buy crypto',
     'staking platform',

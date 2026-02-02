@@ -6,15 +6,15 @@ import SectionCta from './SectionCta';
 const phases = [
   {
     title: 'Phase 1: Launch',
-    points: ['Token genesis and airdrops', 'Community channels open', 'Initial listing'],
+    points: ['Social profiles & posting', 'Community channels open', 'Initial creator rewards'],
   },
   {
     title: 'Phase 2: Platform',
-    points: ['Staking and governance', 'AI assistant beta', 'Tribe competitions'],
+    points: ['Staking and governance', 'AI assistant beta', 'Realtime chat'],
   },
   {
     title: 'Phase 3: Expansion',
-    points: ['Marketplace & P2P trading', 'Cross-chain bridges', 'Mobile experience'],
+    points: ['Marketplace & P2P trading', 'Advanced feeds', 'Mobile experience'],
   },
 ];
 
@@ -54,7 +54,7 @@ export default function Roadmap() {
         <SectionCta
           eyebrow="Next steps"
           title="Move with our roadmap"
-          copy="Create an ELTX account to experience each phase as it ships, or sign in to track your progress across launches."
+          copy="Create a LordAi.Net account to experience each phase as it ships, or sign in to track your progress across launches."
         />
       </div>
     </section>

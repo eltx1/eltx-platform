@@ -3,11 +3,12 @@ import { Suspense } from 'react';
 import SignupContent from './SignupContent';
 
 export const metadata: Metadata = {
-  title: 'Sign up | ELTX crypto exchange onboarding',
+  title: 'Sign up | LordAi.Net social network onboarding',
   description:
-    'Create your ELTX account to start trading on the crypto exchange, buy crypto instantly, send global transfers, accept payments, and stake securely.',
+    'Create your LordAi.Net account to publish posts, chat with friends, and trade, stake, and send payments securely.',
   keywords: [
-    'ELTX signup',
+    'LordAi.Net signup',
+    'AI social network',
     'create crypto account',
     'buy crypto instantly',
     'crypto payments gateway',

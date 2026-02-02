@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       <>
         <p className="opacity-80 text-sm">Last updated: 10/9/2025</p>
         <p className="opacity-80 text-sm">
-          This Privacy Policy explains how ELTX (“we”, “us”) collects, uses, and protects personal data in connection with our
+          This Privacy Policy explains how LordAi.Net (“we”, “us”) collects, uses, and protects personal data in connection with our
           Services.
         </p>
         <ol className="list-decimal pl-4 space-y-4 text-sm opacity-80">
@@ -108,7 +108,7 @@ export default function PrivacyPage() {
       <>
         <p className="opacity-80 text-sm">آخر تحديث: 10/9/2025</p>
         <p className="opacity-80 text-sm">
-          توضح سياسة الخصوصية هذه كيف تجمع ELTX ("نحن") البيانات الشخصية وتستخدمها وتحميها فيما يتعلق بخدماتنا.
+          توضح سياسة الخصوصية هذه كيف تجمع LordAi.Net ("نحن") البيانات الشخصية وتستخدمها وتحميها فيما يتعلق بخدماتنا.
         </p>
         <ol className="list-decimal pl-4 space-y-4 text-sm opacity-80">
           <li className="space-y-1">

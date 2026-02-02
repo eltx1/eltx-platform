@@ -9,8 +9,8 @@ type FaqItem = { id: number; question: string; answer: string; createdAt?: strin
 const fallbackFaqs: FaqItem[] = [
   {
     id: 1,
-    question: 'What is ELTX?',
-    answer: 'ELTX is the utility token that powers trading, staking, and the secure wallet experience across the platform.',
+    question: 'What is LordAi.Net?',
+    answer: 'LordAi.Net is an AI-powered Web3 social network where you can post, chat, and earn while keeping trading and wallet tools close.',
   },
   {
     id: 2,
@@ -31,7 +31,7 @@ const fallbackFaqs: FaqItem[] = [
   {
     id: 5,
     question: 'Who can I contact for support?',
-    answer: 'Email support@eltx.online or open a ticket from the help center for priority assistance from the team.',
+    answer: 'Email support@lordai.net or open a ticket from the help center for priority assistance from the team.',
   },
 ];
 
@@ -80,7 +80,7 @@ export default function FAQPage() {
               <p className="text-sm uppercase tracking-wide text-white/60">FAQ</p>
               <h1 className="text-3xl font-semibold md:text-4xl">{t.dashboard.cards.faq.title}</h1>
               <p className="mt-2 max-w-2xl text-sm text-white/70">
-                Answers to the most common questions about ELTX, deposits, staking, and support. Updated in real time by the team.
+                Answers to the most common questions about LordAi.Net, deposits, staking, and support. Updated in real time by the team.
               </p>
             </div>
             <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white/70">
@@ -174,12 +174,12 @@ export default function FAQPage() {
                 <Mail className="h-5 w-5 text-blue-200" />
                 <p className="uppercase tracking-wide text-white/60">Need more help?</p>
               </div>
-              <h3 className="mt-3 text-xl font-semibold text-white">Talk with ELTX support</h3>
+              <h3 className="mt-3 text-xl font-semibold text-white">Talk with LordAi.Net support</h3>
               <p className="mt-2 text-sm text-white/70">
                 Can’t find your answer? Reach out to our support engineers and we’ll get back in minutes during business hours.
               </p>
               <div className="mt-4 space-y-2 text-sm text-white/80">
-                <p className="rounded-xl border border-white/10 bg-black/30 px-4 py-2">support@eltx.online</p>
+                <p className="rounded-xl border border-white/10 bg-black/30 px-4 py-2">support@lordai.net</p>
                 <p className="rounded-xl border border-white/10 bg-black/30 px-4 py-2">Help center → Account & payments</p>
               </div>
             </div>
