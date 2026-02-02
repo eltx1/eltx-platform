@@ -4,8 +4,8 @@ export default function Community(){
     <h3 className="text-sm text-[var(--muted)] mt-2">Partners</h3>
     <div className="flex flex-wrap gap-2 mt-1">{['A','B','C','D'].map(x=><span key={x} className="w-12 h-12 rounded-xl border border-[var(--line)] bg-black/5 grid place-items-center font-black">{x}</span>)}</div>
     <div className="flex flex-wrap gap-2 mt-3">
-      <a className="btn btn-primary" target="_blank" href="https://t.me/eltx_official">Telegram Channel</a>
-      <a className="btn btn-primary" target="_blank" href="https://t.me/eltx_chat">Telegram Chat</a>
-      <a className="btn btn-primary" target="_blank" href="https://x.com/ELTX_Official">X (Twitter)</a>
+      <a className="btn btn-primary" target="_blank" href="https://t.me/lordai_net">Telegram Channel</a>
+      <a className="btn btn-primary" target="_blank" href="https://t.me/lordai_chat">Telegram Chat</a>
+      <a className="btn btn-primary" target="_blank" href="https://x.com/LordAiNet">X (Twitter)</a>
     </div></div></section>);
 }

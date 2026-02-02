@@ -1,4 +1,4 @@
-# ELTX — Next.js App (v2)
+# LordAi.Net — Next.js App (v2)
 
 ## Run
 ```bash
@@ -34,6 +34,9 @@ mysql -u <user> -p <database> < docs/sql/manual_swap_seed.sql
 - العمولة الافتراضية بقت 0.50% (50 bps) للسواب وللسبوت (ميكر وتيكر)، وتقدر تعدلها أو تراجع رصيد العمولات من تبويب **Fees** في لوحة `/mo`.
 - تم إضافة أزواج سبوت جديدة ELTX/BNB و ELTX/ETH. شغّل ترحيل `db/migrations/202503300000_platform_fees_and_pairs.sql` أو حدّث `db/wallet.sql` علشان تتسجل عندك.
 
+### Social platform tables (LordAi.Net)
+- شغّل ترحيل `db/migrations/202504050900_social_core.sql` علشان يتضاف نظام البروفايلات والبوستات والتفاعل و الـ Follow.
+
 ### ENV required (names only)
 ```
 CHAIN
@@ -57,7 +60,7 @@ SESSION_COOKIE_NAME
   `src/utils/hdWallet.js` must be the only place that derives paths/keys so the API and sweepers
   stay in sync.
 
-`CORS_ORIGIN` accepts a comma-separated list of allowed origins, e.g. `https://eltx.online`.
+`CORS_ORIGIN` accepts a comma-separated list of allowed origins, e.g. `https://lordai.net`.
 
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.
 
@@ -86,7 +89,7 @@ The API polls these rows periodically (and at startup) so you can rotate keys wi
 the frontend.
 
 After configuring the keys, register the webhook endpoint at the full API path
-`https://api.eltx.online/stripe/webhook` (or `https://<api-domain>/stripe/webhook`). Use the same
+`https://api.lordai.net/stripe/webhook` (or `https://<api-domain>/stripe/webhook`). Use the same
 host you expose as `NEXT_PUBLIC_API_BASE`—the **API** host, not the public frontend—to avoid 404
 responses from the website server. There is no extra path segment beyond `/stripe/webhook`.
 
