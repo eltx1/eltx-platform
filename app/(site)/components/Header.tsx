@@ -95,7 +95,7 @@ export default function Header() {
   return (
     <header className="p-4 border-b border-white/10 flex items-center justify-between relative">
       <Link href="/" className="flex items-center gap-2" aria-label={t.site_title}>
-        <Image src={logo} alt="ELTX" width={32} height={32} className="rounded" />
+        <Image src={logo} alt="LordAi.Net" width={32} height={32} className="rounded" />
       </Link>
       <nav className="hidden sm:flex items-center gap-4">
         <NavLinks />
