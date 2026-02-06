@@ -16,7 +16,6 @@ export type SocialPost = {
 };
 
 export type SocialProfile = {
-  profileId: string;
   publicName: string;
   handle: string;
   bio: string;
@@ -28,7 +27,6 @@ const PROFILE_KEY = 'lordai.social.profile';
 const WORD_LIMIT_KEY = 'lordai.social.postWordLimit';
 
 const defaultProfile: SocialProfile = {
-  profileId: 'lordai_creator',
   publicName: 'LordAI Creator',
   handle: '@lordai_creator',
   bio: 'Building, trading, and sharing on LordAi.Net.',
@@ -109,14 +107,8 @@ export function getPostWordLimit() {
 
 export function getProfile(): SocialProfile {
   if (typeof window === 'undefined') return defaultProfile;
-  const stored = safeParse<Partial<SocialProfile> | null>(window.localStorage.getItem(PROFILE_KEY), null);
-  if (!stored) return defaultProfile;
-  const profileId = stored.profileId || (stored.handle ? stored.handle.replace('@', '') : defaultProfile.profileId);
-  return {
-    ...defaultProfile,
-    ...stored,
-    profileId,
-  };
+  const stored = safeParse<SocialProfile | null>(window.localStorage.getItem(PROFILE_KEY), null);
+  return stored ? { ...defaultProfile, ...stored } : defaultProfile;
 }
 
 export function saveProfile(profile: SocialProfile) {
@@ -129,22 +121,10 @@ export function getStoredPosts(): SocialPost[] {
   return safeParse<SocialPost[]>(window.localStorage.getItem(POSTS_KEY), []);
 }
 
-function setStoredPosts(posts: SocialPost[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(POSTS_KEY, JSON.stringify(posts));
-}
-
 export function savePost(post: SocialPost) {
   if (typeof window === 'undefined') return;
   const posts = getStoredPosts();
-  setStoredPosts([post, ...posts]);
-}
-
-export function updatePostsForProfile(profileId: string, updates: Partial<Pick<SocialPost, 'authorName' | 'handle' | 'avatarUrl'>>) {
-  if (typeof window === 'undefined') return;
-  const posts = getStoredPosts();
-  const next = posts.map((post) => (post.profileId === profileId ? { ...post, ...updates } : post));
-  setStoredPosts(next);
+  window.localStorage.setItem(POSTS_KEY, JSON.stringify([post, ...posts]));
 }
 
 export function getAllPosts(): SocialPost[] {
@@ -186,7 +166,7 @@ export function createPost({
     id: `local-${Date.now()}`,
     authorName: profile.publicName,
     handle: profile.handle,
-    profileId: profile.profileId,
+    profileId: profile.handle.replace('@', ''),
     content,
     createdAt: new Date().toISOString(),
     avatarUrl: profile.avatarUrl,

@@ -71,6 +71,6 @@ CREATE TABLE IF NOT EXISTS social_follows (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Optional: default post length setting (if platform_settings exists)
-INSERT INTO platform_settings (name, value)
+INSERT INTO platform_settings (setting_key, setting_value)
 VALUES ('social_post_word_limit', '1000')
-ON DUPLICATE KEY UPDATE value = VALUES(value);
+ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
