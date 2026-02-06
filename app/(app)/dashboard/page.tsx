@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 import { useAuth } from '../../lib/auth';
 import {
   Wallet,
@@ -175,7 +176,6 @@ export default function DashboardPage() {
             <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
             <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} />
           </div>
-        </div>
 
         <div className="pt-4 border-t border-white/5">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Earn</h2>
