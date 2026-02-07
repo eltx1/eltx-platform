@@ -208,6 +208,11 @@ function getStripeStatusPayload(audience = 'public') {
 
 const MASTER_MNEMONIC = getMasterMnemonic();
 process.env.MASTER_MNEMONIC = MASTER_MNEMONIC;
+const isDemoMode = process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test';
+if (!process.env.DATABASE_URL && isDemoMode) {
+  process.env.DATABASE_URL = 'mysql://root@localhost/eltx_demo';
+  console.warn('[api] DEMO_MODE enabled; using fallback DATABASE_URL.');
+}
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
 });
@@ -455,24 +460,28 @@ pool.getConnection = async function (...args) {
   return conn;
 };
 
-ensureWalletSchema()
-  .then(() => refreshStripeConfigFromDb())
-  .catch(() => {});
+if (isDemoMode) {
+  console.warn('[api] DEMO_MODE enabled; skipping wallet schema sync, stripe refresh, and background runner.');
+} else {
+  ensureWalletSchema()
+    .then(() => refreshStripeConfigFromDb())
+    .catch(() => {});
 
-const STRIPE_CONFIG_REFRESH_INTERVAL_MS = Math.max(
-  60_000,
-  Number(process.env.STRIPE_CONFIG_REFRESH_INTERVAL_MS || 5 * 60 * 1000)
-);
-const stripeRefreshTimer = setInterval(() => {
-  refreshStripeConfigFromDb();
-}, STRIPE_CONFIG_REFRESH_INTERVAL_MS);
-if (typeof stripeRefreshTimer.unref === 'function') {
-  stripeRefreshTimer.unref();
+  const STRIPE_CONFIG_REFRESH_INTERVAL_MS = Math.max(
+    60_000,
+    Number(process.env.STRIPE_CONFIG_REFRESH_INTERVAL_MS || 5 * 60 * 1000)
+  );
+  const stripeRefreshTimer = setInterval(() => {
+    refreshStripeConfigFromDb();
+  }, STRIPE_CONFIG_REFRESH_INTERVAL_MS);
+  if (typeof stripeRefreshTimer.unref === 'function') {
+    stripeRefreshTimer.unref();
+  }
+
+  // start background scanner runner
+  const startRunner = require('./background/runner');
+  startRunner(pool);
 }
-
-// start background scanner runner
-const startRunner = require('./background/runner');
-startRunner(pool);
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
