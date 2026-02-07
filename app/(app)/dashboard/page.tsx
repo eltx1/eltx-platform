@@ -176,6 +176,7 @@ export default function DashboardPage() {
             <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
             <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} />
           </div>
+        </div>
 
         <div className="pt-4 border-t border-white/5">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Earn</h2>
