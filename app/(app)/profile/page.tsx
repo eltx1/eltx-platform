@@ -4,19 +4,22 @@ import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { dict, useLang } from '../../lib/i18n';
+import { useAuth } from '../../lib/auth';
 import PostCard from '../../../components/social/PostCard';
 import { getAllPosts, getProfile, type SocialPost, type SocialProfile } from '../../lib/social-store';
 
 export default function ProfilePage() {
   const { lang } = useLang();
+  const { user } = useAuth();
   const t = dict[lang];
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [posts, setPosts] = useState<SocialPost[]>([]);
 
   useEffect(() => {
-    setProfile(getProfile());
-    setPosts(getAllPosts());
-  }, []);
+    if (!user?.id) return;
+    setProfile(getProfile(user.id));
+    setPosts(getAllPosts(user.id));
+  }, [user?.id]);
 
   const userPosts = useMemo(() => {
     if (!profile) return [];

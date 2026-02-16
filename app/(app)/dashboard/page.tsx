@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { useAuth } from '../../lib/auth';
 import {
   Wallet,
@@ -58,9 +57,10 @@ export default function DashboardPage() {
   }, [user, router]);
 
   useEffect(() => {
-    setPosts(getAllPosts());
+    if (!user?.id) return;
+    setPosts(getAllPosts(user.id));
     setWordLimit(getPostWordLimit());
-  }, []);
+  }, [user?.id]);
 
   const wordCount = useMemo(() => {
     if (!quickPost.trim()) return 0;
@@ -102,9 +102,17 @@ export default function DashboardPage() {
                 toast(t.dashboard.social.quickPostLimit);
                 return;
               }
-              const profile = getProfile();
+              if (!user?.id) {
+                toast(t.dashboard.social.sessionMissing);
+                return;
+              }
+              const profile = getProfile(user.id);
               const newPost = createPost({ content: quickPost.trim(), profile });
-              savePost(newPost);
+              const saveResult = savePost(newPost, user.id);
+              if (!saveResult.ok) {
+                toast(t.dashboard.social.quickPostStorageError);
+                return;
+              }
               setPosts((prev) => [newPost, ...prev]);
               setQuickPost('');
               toast(t.dashboard.social.quickPostSuccess);
@@ -176,6 +184,7 @@ export default function DashboardPage() {
             <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
             <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} />
           </div>
+        </div>
 
         <div className="pt-4 border-t border-white/5">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Earn</h2>
