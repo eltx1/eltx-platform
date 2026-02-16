@@ -29,7 +29,7 @@ const {
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-const STRIPE_BASE_FALLBACK = 'https://eltx.online';
+const STRIPE_BASE_FALLBACK = 'https://lordai.net';
 const STRIPE_PRICING_ASSET = 'USD';
 
 const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
@@ -1902,7 +1902,7 @@ function presentEmailSettings(settings) {
   };
 }
 
-const PLATFORM_URL = 'https://eltx.online';
+const PLATFORM_URL = 'https://lordai.net';
 
 function wrapEmailHtml(title, bodyLines, lang = 'en') {
   const direction = lang === 'ar' ? 'rtl' : 'ltr';

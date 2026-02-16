@@ -892,7 +892,7 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
                   type="email"
                   value={form.from_address}
                   onChange={(e) => setForm({ ...form, from_address: e.target.value })}
-                  placeholder="support@eltx.online"
+                  placeholder="support@lordai.net"
                   className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
                 />
                 <p className="text-xs text-white/50">يتم استخدام SMTP_USER كبديل لو الحقل دا فاضي.</p>
@@ -903,7 +903,7 @@ function NotificationsPanel({ onNotify }: { onNotify: (message: string, variant?
                   rows={3}
                   value={adminRecipients}
                   onChange={(e) => setAdminRecipients(e.target.value)}
-                  placeholder="ops@eltx.online, security@eltx.online"
+                  placeholder="ops@lordai.net, security@lordai.net"
                   className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
                 />
                 <p className="text-xs text-white/50">هنبعت ليهم تنبيهات KYC أو اي اخطارات حرجة.</p>
@@ -1868,7 +1868,7 @@ function LoginForm({ onSubmit, loading }: { onSubmit: (identifier: string, passw
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
               className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
-              placeholder="admin@eltx.online"
+              placeholder="admin@lordai.net"
               required
             />
           </div>
@@ -2058,7 +2058,7 @@ function AdminUsersPanel({ admin, onNotify }: { admin: Admin; onNotify: (message
                 onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
                 className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
                 type="email"
-                placeholder="ops@eltx.online"
+                placeholder="ops@lordai.net"
               />
             </div>
             <div>
