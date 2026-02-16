@@ -5,18 +5,21 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
-import { getProfile, saveProfile, type SocialProfile } from '../../../lib/social-store';
+import { useAuth } from '../../../lib/auth';
+import { getProfile, isValidAvatarUrl, saveProfile, type SocialProfile } from '../../../lib/social-store';
 
 export default function EditProfilePage() {
   const { lang } = useLang();
   const t = dict[lang];
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const [profile, setProfile] = useState<SocialProfile | null>(null);
 
   useEffect(() => {
-    setProfile(getProfile());
-  }, []);
+    if (!user?.id) return;
+    setProfile(getProfile(user.id));
+  }, [user?.id]);
 
   if (!profile) {
     return null;
@@ -84,7 +87,19 @@ export default function EditProfilePage() {
           <button
             className="btn btn-primary px-4 py-2 text-xs"
             onClick={() => {
-              saveProfile(profile);
+              if (!user?.id) {
+                toast(t.dashboard.social.sessionMissing);
+                return;
+              }
+              if (!isValidAvatarUrl(profile.avatarUrl)) {
+                toast(t.dashboard.social.profileAvatarInvalid);
+                return;
+              }
+              const saveResult = saveProfile(profile, user.id);
+              if (!saveResult.ok) {
+                toast(t.dashboard.social.quickPostStorageError);
+                return;
+              }
               toast(t.dashboard.social.profileUpdated);
               router.push('/profile');
             }}

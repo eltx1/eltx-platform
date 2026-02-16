@@ -5,13 +5,15 @@ import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
-import { createPost, getPostWordLimit, getProfile, savePost } from '../../../lib/social-store';
+import { useAuth } from '../../../lib/auth';
+import { createPost, getPostWordLimit, getProfile, savePost, validatePostImage } from '../../../lib/social-store';
 
 export default function NewPostPage() {
   const { lang } = useLang();
   const t = dict[lang];
   const router = useRouter();
   const toast = useToast();
+  const { user } = useAuth();
   const [content, setContent] = useState('');
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [wordLimit, setWordLimit] = useState(1000);
@@ -30,6 +32,13 @@ export default function NewPostPage() {
       setImageUrl(null);
       return;
     }
+
+    const validation = validatePostImage(file);
+    if (!validation.ok) {
+      toast(t.dashboard.social.imageTooLarge);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = () => setImageUrl(reader.result as string);
     reader.readAsDataURL(file);
@@ -79,9 +88,17 @@ export default function NewPostPage() {
               toast(t.dashboard.social.quickPostLimit);
               return;
             }
-            const profile = getProfile();
+            if (!user?.id) {
+              toast(t.dashboard.social.sessionMissing);
+              return;
+            }
+            const profile = getProfile(user.id);
             const newPost = createPost({ content: content.trim(), imageUrl, profile });
-            savePost(newPost);
+            const saveResult = savePost(newPost, user.id);
+            if (!saveResult.ok) {
+              toast(t.dashboard.social.quickPostStorageError);
+              return;
+            }
             toast(t.dashboard.social.quickPostSuccess);
             router.push('/profile');
           }}

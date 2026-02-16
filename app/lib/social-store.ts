@@ -25,6 +25,13 @@ export type SocialProfile = {
 const POSTS_KEY = 'lordai.social.posts';
 const PROFILE_KEY = 'lordai.social.profile';
 const WORD_LIMIT_KEY = 'lordai.social.postWordLimit';
+const USER_SCOPE_KEY = 'guest';
+const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
+
+export type PersistResult = {
+  ok: boolean;
+  reason?: 'quota' | 'unknown';
+};
 
 const defaultProfile: SocialProfile = {
   publicName: 'LordAI Creator',
@@ -98,6 +105,50 @@ function safeParse<T>(value: string | null, fallback: T): T {
   }
 }
 
+function getScopedKey(key: string, userId?: string | null) {
+  const safeUserId = userId?.trim().replace(/[^a-zA-Z0-9_-]/g, '_') || USER_SCOPE_KEY;
+  return `${key}:${safeUserId}`;
+}
+
+function safeSetItem(key: string, value: string): PersistResult {
+  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
+  try {
+    window.localStorage.setItem(key, value);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+      return { ok: false, reason: 'quota' };
+    }
+    return { ok: false, reason: 'unknown' };
+  }
+}
+
+export function normalizeAvatarUrl(rawUrl: string) {
+  const value = rawUrl.trim();
+  if (!value) return defaultProfile.avatarUrl;
+  if (value.startsWith('/')) return value;
+
+  try {
+    const parsed = new URL(value);
+    const isAllowedHost = parsed.protocol === 'https:' && parsed.hostname === 'assets.coingecko.com';
+    return isAllowedHost ? value : defaultProfile.avatarUrl;
+  } catch {
+    return defaultProfile.avatarUrl;
+  }
+}
+
+export function isValidAvatarUrl(rawUrl: string) {
+  return normalizeAvatarUrl(rawUrl) === rawUrl.trim();
+}
+
+export function validatePostImage(file?: File | null) {
+  if (!file) return { ok: true as const };
+  if (file.size > MAX_IMAGE_FILE_SIZE_BYTES) {
+    return { ok: false as const, reason: 'file-too-large' as const };
+  }
+  return { ok: true as const };
+}
+
 export function getPostWordLimit() {
   if (typeof window === 'undefined') return 1000;
   const raw = window.localStorage.getItem(WORD_LIMIT_KEY);
@@ -105,30 +156,31 @@ export function getPostWordLimit() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1000;
 }
 
-export function getProfile(): SocialProfile {
+export function getProfile(userId?: string | null): SocialProfile {
   if (typeof window === 'undefined') return defaultProfile;
-  const stored = safeParse<SocialProfile | null>(window.localStorage.getItem(PROFILE_KEY), null);
-  return stored ? { ...defaultProfile, ...stored } : defaultProfile;
+  const stored = safeParse<SocialProfile | null>(window.localStorage.getItem(getScopedKey(PROFILE_KEY, userId)), null);
+  return stored ? { ...defaultProfile, ...stored, avatarUrl: normalizeAvatarUrl(stored.avatarUrl || '') } : defaultProfile;
 }
 
-export function saveProfile(profile: SocialProfile) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+export function saveProfile(profile: SocialProfile, userId?: string | null): PersistResult {
+  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
+  const sanitizedProfile = { ...profile, avatarUrl: normalizeAvatarUrl(profile.avatarUrl) };
+  return safeSetItem(getScopedKey(PROFILE_KEY, userId), JSON.stringify(sanitizedProfile));
 }
 
-export function getStoredPosts(): SocialPost[] {
+export function getStoredPosts(userId?: string | null): SocialPost[] {
   if (typeof window === 'undefined') return [];
-  return safeParse<SocialPost[]>(window.localStorage.getItem(POSTS_KEY), []);
+  return safeParse<SocialPost[]>(window.localStorage.getItem(getScopedKey(POSTS_KEY, userId)), []);
 }
 
-export function savePost(post: SocialPost) {
-  if (typeof window === 'undefined') return;
-  const posts = getStoredPosts();
-  window.localStorage.setItem(POSTS_KEY, JSON.stringify([post, ...posts]));
+export function savePost(post: SocialPost, userId?: string | null): PersistResult {
+  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
+  const posts = getStoredPosts(userId);
+  return safeSetItem(getScopedKey(POSTS_KEY, userId), JSON.stringify([post, ...posts]));
 }
 
-export function getAllPosts(): SocialPost[] {
-  const stored = getStoredPosts();
+export function getAllPosts(userId?: string | null): SocialPost[] {
+  const stored = getStoredPosts(userId);
   const all = [...stored, ...seedPosts];
   const byId = new Map<string, SocialPost>();
   all.forEach((post) => {
