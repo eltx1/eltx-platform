@@ -29,7 +29,7 @@ const {
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-const STRIPE_BASE_FALLBACK = 'https://eltx.online';
+const STRIPE_BASE_FALLBACK = 'https://lordai.net';
 const STRIPE_PRICING_ASSET = 'USD';
 
 const DEFAULT_SPOT_MAX_SLIPPAGE_BPS = 300n;
@@ -208,6 +208,11 @@ function getStripeStatusPayload(audience = 'public') {
 
 const MASTER_MNEMONIC = getMasterMnemonic();
 process.env.MASTER_MNEMONIC = MASTER_MNEMONIC;
+const isDemoMode = process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test';
+if (!process.env.DATABASE_URL && isDemoMode) {
+  process.env.DATABASE_URL = 'mysql://root@localhost/eltx_demo';
+  console.warn('[api] DEMO_MODE enabled; using fallback DATABASE_URL.');
+}
 ['MASTER_MNEMONIC', 'DATABASE_URL'].forEach((v) => {
   if (!process.env[v]) throw new Error(`${v} is not set`);
 });
@@ -216,9 +221,35 @@ logMasterFingerprint('api-server');
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://eltx.online'];
+
+function normalizeOrigin(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return null;
+  }
+}
+
+const configuredOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((v) => normalizeOrigin(v))
+  .filter(Boolean);
+const appBaseOrigin = normalizeOrigin(process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL);
+const allowedOrigins = [...new Set([...configuredOrigins, appBaseOrigin].filter(Boolean))];
+
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins.length) return callback(null, true);
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (normalizedOrigin && allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
@@ -455,29 +486,33 @@ pool.getConnection = async function (...args) {
   return conn;
 };
 
-ensureWalletSchema()
-  .then(() => refreshStripeConfigFromDb())
-  .catch(() => {});
+if (isDemoMode) {
+  console.warn('[api] DEMO_MODE enabled; skipping wallet schema sync, stripe refresh, and background runner.');
+} else {
+  ensureWalletSchema()
+    .then(() => refreshStripeConfigFromDb())
+    .catch(() => {});
 
-const STRIPE_CONFIG_REFRESH_INTERVAL_MS = Math.max(
-  60_000,
-  Number(process.env.STRIPE_CONFIG_REFRESH_INTERVAL_MS || 5 * 60 * 1000)
-);
-const stripeRefreshTimer = setInterval(() => {
-  refreshStripeConfigFromDb();
-}, STRIPE_CONFIG_REFRESH_INTERVAL_MS);
-if (typeof stripeRefreshTimer.unref === 'function') {
-  stripeRefreshTimer.unref();
+  const STRIPE_CONFIG_REFRESH_INTERVAL_MS = Math.max(
+    60_000,
+    Number(process.env.STRIPE_CONFIG_REFRESH_INTERVAL_MS || 5 * 60 * 1000)
+  );
+  const stripeRefreshTimer = setInterval(() => {
+    refreshStripeConfigFromDb();
+  }, STRIPE_CONFIG_REFRESH_INTERVAL_MS);
+  if (typeof stripeRefreshTimer.unref === 'function') {
+    stripeRefreshTimer.unref();
+  }
+
+  // start background scanner runner
+  const startRunner = require('./background/runner');
+  startRunner(pool);
 }
-
-// start background scanner runner
-const startRunner = require('./background/runner');
-startRunner(pool);
 
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const IS_PROD = process.env.NODE_ENV === 'production';
-const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || (IS_PROD ? '.eltx.online' : undefined);
+const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || undefined;
 const USER_SESSION_TTL_SECONDS = Math.max(300, Number(process.env.SESSION_TTL_SECONDS || 60 * 60 * 24 * 7));
 const sessionCookie = {
   httpOnly: true,
@@ -1867,7 +1902,7 @@ function presentEmailSettings(settings) {
   };
 }
 
-const PLATFORM_URL = 'https://eltx.online';
+const PLATFORM_URL = 'https://lordai.net';
 
 function wrapEmailHtml(title, bodyLines, lang = 'en') {
   const direction = lang === 'ar' ? 'rtl' : 'ltr';

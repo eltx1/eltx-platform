@@ -2,7 +2,7 @@
 
 ## Check API headers
 ```bash
-curl -I https://api.eltx.online/wallet/transactions -H "Cookie: sid=..."
+curl -I https://api.lordai.net/wallet/transactions -H "Cookie: sid=..."
 ```
 Expect:
 - `Cache-Control: no-store, no-cache, must-revalidate, max-age=0`

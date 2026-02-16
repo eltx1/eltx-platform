@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
-import { getProfile, saveProfile, updatePostsForProfile, type SocialProfile } from '../../../lib/social-store';
+import { getProfile, saveProfile, type SocialProfile } from '../../../lib/social-store';
 
 export default function EditProfilePage() {
   const { lang } = useLang();
@@ -15,8 +15,7 @@ export default function EditProfilePage() {
   const [profile, setProfile] = useState<SocialProfile | null>(null);
 
   useEffect(() => {
-    const current = getProfile();
-    setProfile(current);
+    setProfile(getProfile());
   }, []);
 
   if (!profile) {
@@ -85,12 +84,6 @@ export default function EditProfilePage() {
           <button
             className="btn btn-primary px-4 py-2 text-xs"
             onClick={() => {
-              if (!profile) return;
-              updatePostsForProfile(profile.profileId, {
-                authorName: profile.publicName,
-                handle: profile.handle,
-                avatarUrl: profile.avatarUrl,
-              });
               saveProfile(profile);
               toast(t.dashboard.social.profileUpdated);
               router.push('/profile');

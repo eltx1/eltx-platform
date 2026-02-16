@@ -3,10 +3,15 @@ const { ethers } = require('ethers');
 // Base derivation path for all HD wallets in the platform.
 // Do NOT change this after generating any user addresses.
 const DERIVATION_PATH_PREFIX = "m/44'/60'/0'/0";
+const DEMO_MNEMONIC = 'test test test test test test test test test test test junk';
 
 function getMasterMnemonic() {
   const mnemonic = (process.env.MASTER_MNEMONIC || '').trim();
   if (!mnemonic) {
+    if (process.env.DEMO_MODE === 'true' || process.env.NODE_ENV === 'test') {
+      console.warn('[hd-wallet] DEMO_MODE enabled; using deterministic test mnemonic.');
+      return DEMO_MNEMONIC;
+    }
     const err = new Error('MASTER_MNEMONIC not set');
     err.code = 'MASTER_MNEMONIC_MISSING';
     throw err;

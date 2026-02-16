@@ -11,7 +11,7 @@
 - ما تعملش Cache Everything على `/sw.js` أو صفحات الـ Dashboard اللي محتاجة تبقى Live (`/wallet`, `/transactions`، أو أي صفحة معاملات ديناميكية).
 
 ## التحقق (Debug)
-- من التيرمنال: `curl -I https://api.eltx.online/wallet/transactions -H "Cookie: sid=..."` وتوقع `CF-Cache-Status: DYNAMIC|BYPASS`.
+- من التيرمنال: `curl -I https://api.lordai.net/wallet/transactions -H "Cookie: sid=..."` وتوقع `CF-Cache-Status: DYNAMIC|BYPASS`.
 - من DevTools: بص على `CF-Cache-Status` و`Cache-Control`، وتأكد إن الـ response مش HIT.
 - لو حصل HIT: نفّذ Purge by URL للأصول المعدلة (`/sw.js`، الصفحات الديناميكية) أو راجع ترتيب الـ Rules.
 

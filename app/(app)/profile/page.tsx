@@ -20,7 +20,7 @@ export default function ProfilePage() {
 
   const userPosts = useMemo(() => {
     if (!profile) return [];
-    return posts.filter((post) => post.profileId === profile.profileId);
+    return posts.filter((post) => post.handle === profile.handle);
   }, [posts, profile]);
 
   if (!profile) {
