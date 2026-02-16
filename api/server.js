@@ -221,9 +221,35 @@ logMasterFingerprint('api-server');
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://eltx.online'];
+
+function normalizeOrigin(value) {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    return new URL(trimmed).origin;
+  } catch {
+    return null;
+  }
+}
+
+const configuredOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((v) => normalizeOrigin(v))
+  .filter(Boolean);
+const appBaseOrigin = normalizeOrigin(process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL);
+const allowedOrigins = [...new Set([...configuredOrigins, appBaseOrigin].filter(Boolean))];
+
 const corsOptions = {
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (!allowedOrigins.length) return callback(null, true);
+    const normalizedOrigin = normalizeOrigin(origin);
+    if (normalizedOrigin && allowedOrigins.includes(normalizedOrigin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`CORS blocked for origin: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],
@@ -486,7 +512,7 @@ if (isDemoMode) {
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const IS_PROD = process.env.NODE_ENV === 'production';
-const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || (IS_PROD ? '.eltx.online' : undefined);
+const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || undefined;
 const USER_SESSION_TTL_SECONDS = Math.max(300, Number(process.env.SESSION_TTL_SECONDS || 60 * 60 * 24 * 7));
 const sessionCookie = {
   httpOnly: true,
