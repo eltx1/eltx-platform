@@ -10,6 +10,6 @@ export default function Features(){
       <Card icon="🤖" title="AI Assistant" text="Insights, alerts, and portfolio tips." pills={['Smart Alerts','Insights','Tips']}/>
       <Card icon="💹" title="Trade" text="Internal orderbook with low fees." pills={['Orderbook','Low Fees','Fast']}/>
       <Card icon="📈" title="Staking" text="Flexible pools and rewards." pills={['Flexible','APY','Rewards']}/>
-      <Card icon="🎮" title="Play to Earn" text="Quests and mini games to earn ELTX." pills={['Quests','Mini Games','Perks']}/>
+      <Card icon="🎮" title="Play to Earn" text="Quests and mini games to earn rewards." pills={['Quests','Mini Games','Perks']}/>
     </div></div></section>);
 }

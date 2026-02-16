@@ -1,9 +1,9 @@
 export type Lang = 'en' | 'ar';
 export const dict = {
   en: {
-    site_title: 'ELTX',
-    hero_title: 'ELTX — Community‑Driven Utility Token',
-    hero_sub: 'Fast, secure, rewarding. Built mobile‑first.',
+    site_title: 'LordAi.Net',
+    hero_title: 'LordAi.Net — AI Web3 Social Media Network',
+    hero_sub: 'Social-first, secure, and rewarding. Built mobile‑first.',
     explore: 'Explore',
     roadmap: 'View Roadmap',
     whitepaper: 'Whitepaper',
@@ -19,9 +19,9 @@ export const dict = {
     invalid_credentials: 'Invalid email or password',
   },
   ar: {
-    site_title: 'ELTX',
-    hero_title: 'ELTX — توكن منفعي يقوده المجتمع',
-    hero_sub: 'سريع وآمن ومجزٍ. مصمّم للموبايل أولًا.',
+    site_title: 'LordAi.Net',
+    hero_title: 'LordAi.Net — منصة سوشيال ميديا Web3 بالذكاء الاصطناعي',
+    hero_sub: 'سوشيال أولًا، آمن، ومجزٍ. مصمّم للموبايل أولًا.',
     explore: 'استكشف',
     roadmap: 'الخريطة',
     whitepaper: 'الورقة البيضاء',

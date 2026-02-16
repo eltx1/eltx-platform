@@ -55,10 +55,9 @@ export default function Swap() {
         <SectionCta
           eyebrow="Swap faster"
           title="Create an account to keep swapping"
-          copy="Sign up or log in to save your swap preferences, manage balances, and come back to ELTX in one tap."
+          copy="Sign up or log in to save your swap preferences, manage balances, and come back to LordAi.Net in one tap."
         />
       </div>
     </section>
   );
 }
-

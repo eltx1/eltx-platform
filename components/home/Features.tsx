@@ -1,15 +1,15 @@
 'use client';
 
-import { Shield, Zap, Network, Coins } from 'lucide-react';
+import { Shield, Zap, Network, Coins, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SectionCta from './SectionCta';
 
 
 const data = [
+  { icon: MessageCircle, title: 'Social-first', desc: 'Post, share, and chat with your Web3 community.' },
   { icon: Shield, title: 'Secure', desc: 'Audited smart contracts keep your assets safe.' },
-  { icon: Zap, title: 'Fast', desc: 'Instant transactions with low fees.' },
-  { icon: Network, title: 'Cross-chain Ready', desc: 'Built for interoperability across blockchains.' },
-  { icon: Coins, title: 'Earn', desc: 'Stake and grow your holdings.' },
+  { icon: Zap, title: 'Fast', desc: 'Instant interactions and transactions with low fees.' },
+  { icon: Coins, title: 'Earn', desc: 'Monetize content and grow with staking rewards.' },
 ];
 
 export default function Features() {
@@ -18,9 +18,9 @@ export default function Features() {
       <div className="max-w-6xl mx-auto space-y-6 text-center">
         <div className="space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-200/80">Features</p>
-          <h2 className="text-3xl font-bold">Why ELTX?</h2>
+          <h2 className="text-3xl font-bold">Why LordAi.Net?</h2>
           <p className="text-white/70 text-sm md:text-base">
-            All current platform benefits shown with cleaner design and quick-to-scan cards.
+            Social experiences first, with powerful trading and wallet features right beside them.
           </p>
         </div>
       </div>
@@ -45,7 +45,7 @@ export default function Features() {
                   <h3 className="font-semibold text-lg">{d.title}</h3>
                 </div>
                 <p className="text-sm opacity-80 leading-relaxed flex-1">{d.desc}</p>
-                <div className="text-xs text-white/70">Ready for dashboard, wallet, staking & swaps.</div>
+                <div className="text-xs text-white/70">Social feed, trading, wallet, staking & swaps.</div>
               </div>
             </motion.div>
           );
@@ -53,9 +53,9 @@ export default function Features() {
       </div>
       <div className="max-w-6xl mx-auto px-4 mt-10">
         <SectionCta
-          eyebrow="Secure onboarding"
-          title="Ready to use ELTX features?"
-          copy="Sign up to unlock dashboard tracking, staking, and swaps. If you already created your account, sign in to continue."
+          eyebrow="Social onboarding"
+          title="Ready to try LordAi.Net?"
+          copy="Create your profile, publish your first post, and keep trading, staking, and payments all in one place."
         />
       </div>
     </section>

@@ -18,7 +18,7 @@ export default function AppDownloadBar() {
             {!logoError ? (
               <Image
                 src="/assets/img/logo.jpeg"
-                alt="ELTX logo"
+                alt="LordAi.Net logo"
                 width={44}
                 height={44}
                 className="h-11 w-11 rounded-full border border-white/10 bg-black/40 object-cover shadow-inner shadow-purple-900/30"

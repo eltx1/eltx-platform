@@ -6,23 +6,23 @@ import SectionCta from './SectionCta';
 const pillars = [
   {
     icon: ShieldCheck,
-    title: 'Security first',
-    copy: 'Secure infrastructure reinforced by audited smart contracts.',
+    title: 'Safety by design',
+    copy: 'Protected profiles, secure wallets, and audited smart contracts.',
   },
   {
     icon: Sparkles,
-    title: 'Easy experience',
-    copy: 'Simple journeys for opening accounts, managing wallets and sending value.',
+    title: 'Social made simple',
+    copy: 'Post, share, and chat while your wallet and trading tools stay one tap away.',
   },
   {
     icon: Gauge,
     title: 'Fast performance',
-    copy: 'Optimized for instant confirmations and smooth on-chain interactions.',
+    copy: 'Optimized for instant social interactions and smooth on-chain actions.',
   },
   {
     icon: Expand,
     title: 'Built to scale',
-    copy: 'Cross-chain ready architecture prepared for new networks and future upgrades.',
+    copy: 'Web3-ready architecture prepared for new communities and future upgrades.',
   },
 ];
 
@@ -31,13 +31,13 @@ export default function About() {
     <section className="py-16 px-4 bg-gradient-to-b from-neutral-950 via-purple-950/20 to-neutral-950">
       <div className="max-w-6xl mx-auto space-y-8">
         <div className="space-y-3 text-center md:text-left md:space-y-4">
-          <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-300/80">About ELTX</p>
+          <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-300/80">About LordAi.Net</p>
           <h2 className="text-3xl md:text-4xl font-extrabold leading-tight">
-            Built for a secure, fast and cross-chain ready digital asset future.
+            The social layer for Web3 creators, traders, and communities.
           </h2>
           <p className="text-base md:text-lg text-white/80 max-w-3xl mx-auto md:mx-0">
-            ELTX keeps every flow simple—from dashboards and wallets to conversions—while maintaining
-            enterprise-grade security and speed.
+            LordAi.Net blends social media, AI assistance, and crypto services so creators can publish,
+            chat, earn, and trade in one unified experience.
           </p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -60,12 +60,11 @@ export default function About() {
           })}
         </div>
         <SectionCta
-          eyebrow="Join ELTX"
+          eyebrow="Join LordAi.Net"
           title="Create your profile in minutes"
-          copy="Open an account and get instant access to dashboards, wallets, and secure swaps. Already with us? Sign in to continue where you left off."
+          copy="Set up your profile, share your first post, and keep trading, staking, and payments in the same dashboard."
         />
       </div>
     </section>
   );
 }
-

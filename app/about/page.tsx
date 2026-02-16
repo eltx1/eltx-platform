@@ -9,11 +9,11 @@ export default function AboutPage() {
   const content: Record<'en' | 'ar', ReactNode> = {
     en: (
       <>
-        <p className="opacity-80 text-sm">ELTX — the utility token platform</p>
+        <p className="opacity-80 text-sm">LordAi.Net — AI Web3 social media platform</p>
         <p className="opacity-80 text-sm">
-          ELTX is a digital-asset platform that makes deposits, custody, and transfers simple and reliable across supported
-          blockchains (currently BNB Smart Chain, with Ethereum and Solana coming soon). We combine a clean user experience
-          with rigorous, auditable accounting behind the scenes.
+          LordAi.Net is a social-first Web3 platform that blends posts, chat, and creator earnings with trading, staking, and
+          secure wallet services across supported blockchains (currently BNB Smart Chain, with Ethereum and Solana coming soon).
+          We combine a clean user experience with rigorous, auditable accounting behind the scenes.
         </p>
         <h2 className="font-medium mt-4">What we do</h2>
         <ul className="list-disc pl-4 space-y-2">
@@ -61,10 +61,11 @@ export default function AboutPage() {
     ),
     ar: (
       <>
-        <p className="opacity-80 text-sm">ELTX — منصة التوكنات الخدمية</p>
+        <p className="opacity-80 text-sm">LordAi.Net — منصة سوشيال ميديا Web3 بالذكاء الاصطناعي</p>
         <p className="opacity-80 text-sm">
-          ELTX هي منصة أصول رقمية تجعل الإيداع والحفظ والتحويلات سهلة وموثوقة عبر سلاسل البلوكشين المدعومة (حاليًا شبكة BNB
-          الذكية مع إضافة إيثريوم وسولانا قريبًا). ندمج تجربة مستخدم بسيطة مع محاسبة دقيقة وقابلة للمراجعة خلف الكواليس.
+          LordAi.Net منصة سوشيال Web3 بتركّز على البوستات والدردشة وربح المحتوى، ومعاها خدمات تداول واستاكينج ومحافظ آمنة عبر
+          سلاسل البلوكشين المدعومة (حاليًا شبكة BNB الذكية مع إضافة إيثريوم وسولانا قريبًا). ندمج تجربة مستخدم بسيطة مع محاسبة
+          دقيقة وقابلة للمراجعة خلف الكواليس.
         </p>
         <h2 className="font-medium mt-4">ماذا نقدم</h2>
         <ul className="list-disc pl-4 space-y-2">
