@@ -4,6 +4,13 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 export type Lang = 'en' | 'ar';
 
+const SUPPORTED_LANGS: readonly Lang[] = ['en', 'ar'];
+
+function parseLang(value: string | null | undefined): Lang {
+  if (value && SUPPORTED_LANGS.includes(value as Lang)) return value as Lang;
+  return 'en';
+}
+
 export const dict = {
   en: {
     site_title: 'LordAi.Net',
@@ -2097,8 +2104,8 @@ const LangContext = createContext<{ lang: Lang; setLang: (l: Lang) => void }>({ 
 export function LangProvider({ children }: { children: React.ReactNode }) {
   const [lang, setLang] = useState<Lang>('en');
   useEffect(() => {
-    const stored = (typeof window !== 'undefined' && localStorage.getItem('lang')) as Lang | null;
-    if (stored) setLang(stored);
+    if (typeof window === 'undefined') return;
+    setLang(parseLang(localStorage.getItem('lang')));
   }, []);
   useEffect(() => {
     if (typeof document !== 'undefined') {
