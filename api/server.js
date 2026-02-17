@@ -233,12 +233,38 @@ function normalizeOrigin(value) {
   }
 }
 
+function buildOriginVariants(value) {
+  const normalized = normalizeOrigin(value);
+  if (!normalized) return [];
+  const variants = new Set([normalized]);
+  try {
+    const url = new URL(normalized);
+    const host = url.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1';
+    if (!isLocal) {
+      if (host.startsWith('www.')) {
+        variants.add(`${url.protocol}//${host.slice(4)}${url.port ? `:${url.port}` : ''}`);
+      } else {
+        variants.add(`${url.protocol}//www.${host}${url.port ? `:${url.port}` : ''}`);
+      }
+    }
+  } catch {
+    // no-op
+  }
+  return [...variants];
+}
+
 const configuredOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
-  .map((v) => normalizeOrigin(v))
-  .filter(Boolean);
+  .flatMap((v) => buildOriginVariants(v));
 const appBaseOrigin = normalizeOrigin(process.env.APP_BASE_URL || process.env.NEXT_PUBLIC_APP_URL);
-const allowedOrigins = [...new Set([...configuredOrigins, appBaseOrigin].filter(Boolean))];
+const apiBaseOrigin = normalizeOrigin(process.env.NEXT_PUBLIC_API_BASE || process.env.API_BASE_URL);
+const allowedOrigins = [
+  ...new Set([...configuredOrigins, ...buildOriginVariants(appBaseOrigin), ...buildOriginVariants(apiBaseOrigin)].filter(Boolean)),
+];
+if (allowedOrigins.length) {
+  console.log('[api] CORS allowlist:', allowedOrigins.join(', '));
+}
 
 const corsOptions = {
   origin: (origin, callback) => {
