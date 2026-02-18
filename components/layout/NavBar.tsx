@@ -77,10 +77,10 @@ export default function NavBar() {
     { href: '/faq', label: t.nav.faq },
   ];
 
-  const isActive = (href: string) => (pathname === href ? 'text-yellow-400' : '');
+  const isActive = (href: string) => (pathname === href ? 'text-white font-semibold' : 'text-white/70');
 
   return (
-    <header className="sticky top-0 z-50 bg-neutral-950/80 backdrop-blur-xl border-b border-white/10">
+    <header className="sticky top-0 z-50 border-b border-[#2f3336] bg-black/80 backdrop-blur-xl">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-3 font-bold" aria-label="LordAi.Net Home">
@@ -89,10 +89,10 @@ export default function NavBar() {
             ) : (
               <Image src="/assets/img/logo.jpeg" alt="LordAi.Net Logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
             )}
-            <span className="hidden sm:inline text-sm text-white/70">AI Web3 Social Media Network</span>
+            <span className="hidden sm:inline text-sm text-white/70">X-style social trading platform</span>
           </Link>
           {user && (
-            <div className="hidden sm:flex flex-col text-[10px] leading-tight text-white/70">
+            <div className="hidden sm:flex flex-col rounded-xl border border-[#2f3336] bg-[#16181c] px-3 py-1.5 text-[10px] leading-tight text-white/70">
               <span className="uppercase tracking-[0.2em]">{t.nav.balance}</span>
               <span className="text-xs font-semibold text-white">
                 {loadingBalance ? '...' : `${balance ?? '0'} USDT`}
@@ -100,18 +100,18 @@ export default function NavBar() {
             </div>
           )}
         </div>
-        <nav className="hidden sm:flex items-center gap-4 text-sm">
+        <nav className="hidden sm:flex items-center gap-2 text-sm">
           {links.map((l) => (
-            <Link key={l.href} href={l.href} className={`hover:text-white/90 transition-colors ${isActive(l.href)}`}>
+            <Link key={l.href} href={l.href} className={`rounded-full px-3 py-2 transition-colors hover:bg-white/10 ${isActive(l.href)}`}>
               {l.label}
             </Link>
           ))}
           {!user && (
             <>
-              <Link href="/login" className="hover:text-white/90">{t.nav.login}</Link>
+              <Link href="/login" className="rounded-full px-3 py-2 hover:bg-white/10">{t.nav.login}</Link>
               <Link
                 href="/signup"
-                className="px-3 py-2 rounded-full bg-gradient-to-r from-purple-600 via-fuchsia-500 to-cyan-500 text-white font-semibold shadow-lg shadow-purple-900/30 hover:opacity-90"
+                className="px-4 py-2 rounded-full bg-[#1d9bf0] text-white font-semibold hover:brightness-110"
               >
                 {t.nav.signup}
               </Link>
@@ -119,12 +119,12 @@ export default function NavBar() {
           )}
           {user && (
             <>
-              <Link href="/dashboard" className="hover:text-white/90">{t.nav.dashboard}</Link>
+              <Link href="/dashboard" className="rounded-full px-3 py-2 hover:bg-white/10">{t.nav.dashboard}</Link>
               <button
                 onClick={async () => {
                   await logout();
                 }}
-                className="hover:text-white/90"
+                className="rounded-full px-3 py-2 hover:bg-white/10"
               >
                 {t.nav.logout}
               </button>
@@ -132,13 +132,13 @@ export default function NavBar() {
           )}
           <button
             onClick={() => setLang(lang === 'en' ? 'ar' : 'en')}
-            className="rounded-full border border-white/10 px-3 py-1 hover:bg-white/10"
+            className="rounded-full border border-[#2f3336] px-3 py-1 hover:bg-white/10"
           >
             {lang === 'en' ? 'AR' : 'EN'}
           </button>
         </nav>
         <button
-          className="sm:hidden rounded-full border border-white/15 p-2 hover:bg-white/10"
+          className="sm:hidden rounded-full border border-[#2f3336] bg-[#16181c] p-2 hover:bg-white/10"
           onClick={() => setOpen(true)}
           aria-label="Open Menu"
         >

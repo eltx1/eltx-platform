@@ -70,10 +70,10 @@ export default function DashboardPage() {
   const forYouFeed = useMemo(() => getForYouFeed(posts), [posts]);
 
   return (
-    <div className="p-3 sm:p-4 space-y-4 sm:space-y-5 overflow-x-hidden relative">
+    <div className="space-y-4 overflow-x-hidden rounded-2xl border border-[#2f3336] bg-black p-3 sm:p-4 sm:space-y-5">
       <h1 className="text-lg font-semibold sm:text-xl">{t.dashboard.title}</h1>
 
-      <section className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
+      <section className="x-card space-y-4 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-white/60">{t.dashboard.social.quickPostKicker}</p>
@@ -84,7 +84,7 @@ export default function DashboardPage() {
           </span>
         </div>
         <textarea
-          className="w-full min-h-[120px] rounded-2xl border border-white/10 bg-black/40 p-4 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
+          className="x-input min-h-[120px] p-4 text-sm placeholder:text-white/40"
           placeholder={t.dashboard.social.quickPostPlaceholder}
           value={quickPost}
           onChange={(event) => setQuickPost(event.target.value)}
@@ -124,7 +124,7 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-3">
+      <section className="x-card space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-white/60">{t.dashboard.social.askAiKicker}</p>
@@ -133,7 +133,7 @@ export default function DashboardPage() {
         </div>
         <div className="flex flex-col sm:flex-row gap-3">
           <input
-            className="flex-1 rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
+            className="x-input flex-1 px-4 py-3 text-sm placeholder:text-white/40"
             placeholder={t.dashboard.social.askAiPlaceholder}
             value={aiQuestion}
             onChange={(event) => setAiQuestion(event.target.value)}
@@ -156,12 +156,12 @@ export default function DashboardPage() {
       </section>
 
       <div className="space-y-4 pt-1 sm:space-y-5">
-        <div className="pt-3 border-t border-white/5 sm:pt-4">
+        <div className="pt-3 border-t border-[#2f3336] sm:pt-4">
           <DashboardMarketBoard />
         </div>
 
-        <div className="pt-4 border-t border-white/5">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Payments</h2>
+        <div className="pt-4 border-t border-[#2f3336]">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/65">Payments</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             <SectionCard
               title={t.dashboard.cards.wallet.title}
@@ -177,8 +177,8 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/5">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Trade</h2>
+        <div className="pt-4 border-t border-[#2f3336]">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/65">Trade</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             <SectionCard title="ELTX Swap" href="/trade" icon={ArrowLeftRight} />
             <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
@@ -186,16 +186,16 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/5">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Earn</h2>
+        <div className="pt-4 border-t border-[#2f3336]">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/65">Earn</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             <SectionCard title="Staking" href="/staking" icon={Coins} />
             <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} />
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/5">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">{t.dashboard.ai.kicker}</h2>
+        <div className="pt-4 border-t border-[#2f3336]">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/65">{t.dashboard.ai.kicker}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             <SectionCard
               title={t.dashboard.cards.aiAgent.title}
@@ -206,16 +206,16 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/5">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Social</h2>
+        <div className="pt-4 border-t border-[#2f3336]">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/65">Social</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} />
             <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} />
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/5">
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/70">Profile</h2>
+        <div className="pt-4 border-t border-[#2f3336]">
+          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/65">Profile</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 sm:gap-3">
             <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
             <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
@@ -224,7 +224,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="pt-4 border-t border-white/5 space-y-4">
+        <div className="pt-4 border-t border-[#2f3336] space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs uppercase tracking-[0.3em] text-white/60">{t.dashboard.social.forYouKicker}</p>
@@ -241,7 +241,7 @@ export default function DashboardPage() {
       </div>
 
       <button
-        className="fixed bottom-24 left-4 sm:left-6 h-12 w-12 rounded-full bg-gradient-to-br from-purple-500 via-fuchsia-500 to-cyan-400 text-white shadow-lg shadow-purple-900/40 flex items-center justify-center hover:scale-105 transition"
+        className="fixed bottom-24 left-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#1d9bf0] text-white shadow-lg transition hover:brightness-110 sm:left-6"
         onClick={() => router.push('/posts/new')}
         aria-label={t.dashboard.social.newPostCta}
       >
