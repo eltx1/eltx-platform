@@ -35,7 +35,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="x-shell min-h-screen">
       <div className="mx-auto grid w-full max-w-[1320px] grid-cols-1 gap-5 px-3 pb-[calc(env(safe-area-inset-bottom)+120px)] pt-4 md:grid-cols-[250px_minmax(0,1fr)] md:px-5 xl:grid-cols-[270px_minmax(0,1fr)_300px]">
-        <aside className="x-rail sticky top-4 hidden h-[calc(100vh-2rem)] md:flex md:flex-col md:justify-between">
+        <aside className="x-rail sticky hidden md:flex md:flex-col md:justify-between md:top-[calc(var(--global-header-height)+1rem)] md:h-[calc(100vh-var(--global-header-height)-2rem)]">
           <div className="space-y-2">
             {items.map(({ href, key, icon: Icon }) => {
               const active = pathname === href || pathname?.startsWith(`${href}/`);
@@ -52,7 +52,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <main className="min-w-0 space-y-4">{children}</main>
 
-        <aside className="x-rail sticky top-4 hidden h-fit space-y-4 xl:block">
+        <aside className="x-rail sticky hidden h-fit space-y-4 xl:block xl:top-[calc(var(--global-header-height)+1rem)]">
           <div className="x-card p-4">
             <h3 className="text-sm font-semibold">{lang === 'ar' ? 'الترند الآن' : 'Trends now'}</h3>
             <ul className="mt-3 space-y-3 text-sm text-white/70">

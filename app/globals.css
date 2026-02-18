@@ -10,6 +10,7 @@
   --x-text: #e7e9ea;
   --x-muted: #71767b;
   --x-brand: #1d9bf0;
+  --global-header-height: 72px;
 }
 
 html,
@@ -34,6 +35,7 @@ a {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  padding: 10px 14px;
   border-radius: 9999px;
   font-weight: 700;
   transition: 0.2s ease;
