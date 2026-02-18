@@ -40,13 +40,13 @@ export default function MobileMenu({
     <>
       <div
         data-open={open}
-        className="fixed inset-0 bg-black/40 backdrop-blur-sm opacity-0 pointer-events-none data-[open=true]:opacity-100 data-[open=true]:pointer-events-auto transition-opacity duration-200 z-[60]"
+        className="fixed inset-0 bg-black/65 backdrop-blur-sm opacity-0 pointer-events-none data-[open=true]:opacity-100 data-[open=true]:pointer-events-auto transition-opacity duration-200 z-[60]"
         onClick={() => setOpen(false)}
       />
       <nav
         ref={panelRef}
         data-open={open}
-        className="fixed top-0 right-0 h-full w-80 max-w-[85%] bg-neutral-900 text-white translate-x-full data-[open=true]:translate-x-0 transition-transform duration-200 z-[70] p-6 flex flex-col gap-4"
+        className="fixed top-0 right-0 h-full w-80 max-w-[85%] border-l border-[#2f3336] bg-black text-white translate-x-full data-[open=true]:translate-x-0 transition-transform duration-200 z-[70] p-6 flex flex-col gap-4"
         role="dialog"
         aria-modal="true"
       >
@@ -54,23 +54,23 @@ export default function MobileMenu({
           <X />
         </button>
         {links.map((l) => (
-          <Link key={l.href} href={l.href} onClick={() => setOpen(false)} className="hover:opacity-80">
+          <Link key={l.href} href={l.href} onClick={() => setOpen(false)} className="rounded-full px-3 py-2 hover:bg-white/10">
             {l.label}
           </Link>
         ))}
         {!user && (
           <>
-            <Link href="/login" onClick={() => setOpen(false)} className="hover:opacity-80">
+            <Link href="/login" onClick={() => setOpen(false)} className="rounded-full px-3 py-2 hover:bg-white/10">
               {t.nav.login}
             </Link>
-            <Link href="/signup" onClick={() => setOpen(false)} className="hover:opacity-80">
+            <Link href="/signup" onClick={() => setOpen(false)} className="rounded-full px-3 py-2 hover:bg-white/10">
               {t.nav.signup}
             </Link>
           </>
         )}
         {user && (
           <>
-            <Link href="/dashboard" onClick={() => setOpen(false)} className="hover:opacity-80">
+            <Link href="/dashboard" onClick={() => setOpen(false)} className="rounded-full px-3 py-2 hover:bg-white/10">
               {t.nav.dashboard}
             </Link>
             <button
@@ -78,7 +78,7 @@ export default function MobileMenu({
                 await logout();
                 setOpen(false);
               }}
-              className="hover:opacity-80 text-left"
+              className="rounded-full px-3 py-2 hover:bg-white/10 text-left"
             >
               {t.nav.logout}
             </button>

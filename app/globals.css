@@ -2,45 +2,142 @@
 @tailwind components;
 @tailwind utilities;
 
-:root{
-  --bg:#fdfdfd; --bg2:#f7f9fc; --line:rgba(0,0,0,.1);
-  --text:#111; --muted:#4b5563;
-  --brand1:#ff5a3c; --brand2:#ffc34d;
+:root {
+  --x-bg: #000000;
+  --x-surface: #16181c;
+  --x-surface-soft: #1d1f23;
+  --x-border: #2f3336;
+  --x-text: #e7e9ea;
+  --x-muted: #71767b;
+  --x-brand: #1d9bf0;
 }
-html,body{height:100%}
-body{color:var(--text);background:
- radial-gradient(1200px 600px at 50% -200px,rgba(255,90,60,.05),transparent),
- linear-gradient(180deg,var(--bg),var(--bg2));}
 
-body{background:#0a0a0a;color:#fff;background-image:radial-gradient(#1a1a1a 1px,transparent 1px);background-size:40px 40px;}
-.container{max-width:1040px;margin:0 auto;padding:0 14px}
-a{color:inherit}
-.ticker{position:sticky;top:0;z-index:50;background:#ffffffcc;border-bottom:1px solid var(--line);backdrop-filter:blur(8px);overflow:hidden}
-.ticker .track{display:flex;gap:32px;white-space:nowrap;animation:marquee 26s linear infinite;padding:8px 14px;font-size:13px}
-@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
-.header{position:sticky;top:32px;z-index:40}
-.nav-toggle{border:1px solid var(--line);border-radius:10px;padding:7px 10px}
-.nav{display:none;position:fixed;left:10px;right:10px;top:90px;border:1px solid var(--line);background:rgba(255,255,255,.95);backdrop-filter:blur(8px);padding:10px;border-radius:14px}
-.nav.open{display:flex;flex-direction:column;gap:8px}
-.nav a{padding:10px;border-radius:10px}
-.nav a:hover{background:rgba(0,0,0,.06)}
-.hero .ring{width:190px;height:190px;border-radius:50%;background:linear-gradient(180deg,rgba(255,90,60,.28),rgba(255,195,77,.18));border:1px solid rgba(0,0,0,.1);display:grid;place-items:center;position:relative;box-shadow:0 30px 80px rgba(255,90,60,.25);animation:float 4s ease-in-out infinite, pulse 6s ease-in-out infinite}
-.hero .ring img{width:68%;height:68%;border-radius:50%;border:2px solid rgba(0,0,0,.1);background:#fff}
-@keyframes pulse {0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
-@keyframes float {0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}
+html,
+body {
+  height: 100%;
 }
-.btn{display:inline-flex;align-items:center;gap:8px;padding:10px 14px;border-radius:12px;text-decoration:none;font-weight:900;transition:transform .15s ease, box-shadow .2s ease}
-.btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.btn:active{transform:translateY(1px)}
-.btn-primary{background:linear-gradient(90deg,var(--brand1),var(--brand2));color:#2b1800;border:1px solid rgba(0,0,0,.1)}
-.btn-ghost{border:1px solid rgba(0,0,0,.15);color:var(--text);background:rgba(0,0,0,.02)}
-.panel{background:rgba(0,0,0,.03);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.1)}
-.donut{--size:230px; width:var(--size);height:var(--size);border-radius:50%;margin:0 auto;background:var(--donut);position:relative}
-.donut .hole{position:relative;width:calc(var(--size) - 44px);height:calc(var(--size) - 44px);margin:22px auto;border-radius:50%;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;flex-direction:column}
-.bottom-nav{position:sticky;bottom:0;display:flex;justify-content:space-around;gap:6px;padding:10px;border-top:1px solid var(--line);background:#ffffffcc;backdrop-filter:blur(8px)}
-.animate-blob{animation:blob 20s infinite;}
-.animation-delay-2000{animation-delay:2s;}
-.animation-delay-4000{animation-delay:4s;}
-@keyframes blob{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(30px,-50px) scale(1.1)}66%{transform:translate(-20px,20px) scale(.9)}}
-.animate-gradient-slow{background-size:200% 200%;animation:gradient 15s ease infinite;}
-@keyframes gradient{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+
+body {
+  color: var(--x-text);
+  background: var(--x-bg);
+  background-image: radial-gradient(circle at 14% 8%, rgba(29, 155, 240, 0.15), transparent 28%),
+    radial-gradient(circle at 88% 2%, rgba(120, 86, 255, 0.12), transparent 24%);
+  letter-spacing: 0.01em;
+}
+
+a {
+  color: inherit;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 9999px;
+  font-weight: 700;
+  transition: 0.2s ease;
+}
+
+.btn-primary {
+  background: var(--x-brand);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.btn-ghost {
+  border: 1px solid var(--x-border);
+  color: var(--x-text);
+  background: transparent;
+}
+
+.x-shell {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent 35%);
+}
+
+.x-card {
+  border: 1px solid var(--x-border);
+  background: color-mix(in oklab, var(--x-surface) 92%, black);
+  border-radius: 18px;
+}
+
+.x-input {
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid var(--x-border);
+  background: #000;
+  color: var(--x-text);
+}
+
+.x-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--x-brand) 70%, #fff 10%);
+  border-color: transparent;
+}
+
+.x-rail {
+  border: 1px solid var(--x-border);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(14px);
+  border-radius: 20px;
+  padding: 12px;
+}
+
+.x-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 9999px;
+  padding: 10px 14px;
+  color: var(--x-text);
+  transition: 0.2s ease;
+}
+
+.x-nav-item:hover {
+  background: rgba(239, 243, 244, 0.08);
+}
+
+.x-nav-item.is-active {
+  background: rgba(29, 155, 240, 0.22);
+  color: #fff;
+  font-weight: 700;
+}
+
+.animate-blob {
+  animation: blob 20s infinite;
+}
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+@keyframes blob {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+}
+.animate-gradient-slow {
+  background-size: 200% 200%;
+  animation: gradient 15s ease infinite;
+}
+@keyframes gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}

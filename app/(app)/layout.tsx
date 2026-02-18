@@ -1,10 +1,11 @@
 import AppBottomNav from '../../components/layout/AppBottomNav';
+import AppShell from '../../components/layout/AppShell';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative min-h-screen bg-[radial-gradient(circle_at_20%_20%,rgba(129,140,248,0.08),transparent_35%),radial-gradient(circle_at_80%_10%,rgba(192,132,252,0.08),transparent_32%)]">
-      <div className="mx-auto w-full max-w-[1800px] px-3 sm:px-5 lg:px-8 xl:px-10 pt-4 pb-[calc(env(safe-area-inset-bottom)+140px)]">{children}</div>
+    <>
+      <AppShell>{children}</AppShell>
       <AppBottomNav />
-    </div>
+    </>
   );
 }

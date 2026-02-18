@@ -22,21 +22,21 @@ export default function PostCard({ post }: { post: SocialPost }) {
   }, [post.createdAt]);
 
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg shadow-black/20 space-y-3">
+    <article className="rounded-2xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#16181c]">
       <div className="flex items-start gap-3">
-        <div className="h-10 w-10 rounded-full overflow-hidden bg-white/10">
+        <div className="h-10 w-10 overflow-hidden rounded-full border border-[#2f3336] bg-[#111]">
           <Image src={post.avatarUrl || '/assets/img/logo.jpeg'} alt={post.authorName} width={40} height={40} className="h-full w-full object-cover" />
         </div>
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-semibold">{post.authorName}</span>
+            <span className="font-semibold text-white">{post.authorName}</span>
             <span className="text-white/60">{post.handle}</span>
             <span className="text-white/40">•</span>
             <span className="text-white/50 text-xs">{dateLabel}</span>
           </div>
-          <p className="mt-2 text-sm text-white/80 leading-relaxed whitespace-pre-wrap">{post.content}</p>
+          <p className="mt-2 text-sm text-white/85 leading-relaxed whitespace-pre-wrap">{post.content}</p>
           {post.imageUrl && (
-            <div className="mt-3 overflow-hidden rounded-2xl border border-white/10">
+            <div className="mt-3 overflow-hidden rounded-2xl border border-[#2f3336]">
               <Image src={post.imageUrl} alt="Post media" width={680} height={380} className="h-auto w-full object-cover" />
             </div>
           )}
@@ -44,7 +44,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
       </div>
       <div className="flex flex-wrap items-center gap-6 text-xs text-white/60">
         <button
-          className={`inline-flex items-center gap-2 transition ${liked ? 'text-rose-300' : 'hover:text-white'}`}
+          className={`inline-flex items-center gap-2 transition ${liked ? 'text-rose-300' : 'hover:text-[#f91880]'}`}
           onClick={() => {
             setLiked((prev) => !prev);
             setLikes((prev) => (liked ? Math.max(0, prev - 1) : prev + 1));
@@ -55,7 +55,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
           <span>{likes}</span>
         </button>
         <button
-          className="inline-flex items-center gap-2 hover:text-white transition"
+          className="inline-flex items-center gap-2 hover:text-[#1d9bf0] transition"
           onClick={() => {
             setComments((prev) => prev + 1);
             toast('Comment added (demo).');
@@ -65,7 +65,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
           <span>{comments}</span>
         </button>
         <button
-          className="inline-flex items-center gap-2 hover:text-white transition"
+          className="inline-flex items-center gap-2 hover:text-[#00ba7c] transition"
           onClick={() => {
             setReposts((prev) => prev + 1);
             toast('Repost shared on your profile (demo).');
