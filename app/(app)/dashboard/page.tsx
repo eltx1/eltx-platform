@@ -241,7 +241,7 @@ export default function DashboardPage() {
       </div>
 
       <button
-        className="fixed bottom-24 left-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#1d9bf0] text-white shadow-lg transition hover:brightness-110 sm:left-6"
+        className="fixed bottom-24 left-4 flex h-12 w-12 items-center justify-center rounded-full bg-[#c9a75c] text-white shadow-lg transition hover:brightness-110 sm:left-6"
         onClick={() => router.push('/posts/new')}
         aria-label={t.dashboard.social.newPostCta}
       >

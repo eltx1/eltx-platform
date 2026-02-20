@@ -19,7 +19,7 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
     >
       <div
         className={`flex h-10 w-10 items-center justify-center rounded-full border transition ${
-          active ? 'border-[#1d9bf0] bg-[#1d9bf0]/20' : 'border-[#2f3336] bg-[#111] group-hover:bg-white/10'
+          active ? 'border-[#c9a75c] bg-[#c9a75c]/20' : 'border-[#2f3336] bg-[#111] group-hover:bg-white/10'
         }`}
       >
         <Icon className="h-5 w-5" strokeWidth={2.2} />

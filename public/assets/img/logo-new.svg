@@ -1,0 +1,40 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#05070D"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="280" y1="210" x2="770" y2="730" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4DE9A"/>
+      <stop offset="0.5" stop-color="#D7B96A"/>
+      <stop offset="1" stop-color="#B08B3A"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="1024" height="1024" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="76" fill="url(#bg)"/>
+
+  <g filter="url(#shadow)">
+    <rect x="300" y="360" width="56" height="300" fill="url(#gold)"/>
+
+    <path d="M356 705L620 260L845 705H770L620 430L475 705H356Z" fill="url(#gold)"/>
+
+    <g transform="translate(512 545)">
+      <rect x="-40" y="-40" width="80" height="80" rx="16" fill="url(#gold)"/>
+      <circle cx="-18" cy="0" r="5" fill="#111827"/>
+      <circle cx="0" cy="0" r="5" fill="#111827"/>
+      <circle cx="18" cy="0" r="5" fill="#111827"/>
+      <rect x="-70" y="-6" width="16" height="12" rx="3" fill="url(#gold)"/>
+      <rect x="54" y="-6" width="16" height="12" rx="3" fill="url(#gold)"/>
+      <rect x="-6" y="-70" width="12" height="16" rx="3" fill="url(#gold)"/>
+      <rect x="-6" y="54" width="12" height="16" rx="3" fill="url(#gold)"/>
+    </g>
+
+    <path d="M515 170L532 204H569L539 226L551 260L515 238L479 260L491 226L461 204H498L515 170Z" fill="url(#gold)"/>
+    <circle cx="461" cy="204" r="6" fill="url(#gold)"/>
+    <circle cx="569" cy="204" r="6" fill="url(#gold)"/>
+    <circle cx="515" cy="170" r="6" fill="url(#gold)"/>
+  </g>
+</svg>

@@ -9,7 +9,7 @@
   --x-border: #2f3336;
   --x-text: #e7e9ea;
   --x-muted: #71767b;
-  --x-brand: #1d9bf0;
+  --x-brand: #c9a75c;
   --global-header-height: 72px;
 }
 
@@ -21,8 +21,8 @@ body {
 body {
   color: var(--x-text);
   background: var(--x-bg);
-  background-image: radial-gradient(circle at 14% 8%, rgba(29, 155, 240, 0.15), transparent 28%),
-    radial-gradient(circle at 88% 2%, rgba(120, 86, 255, 0.12), transparent 24%);
+  background-image: radial-gradient(circle at 14% 8%, rgba(201, 167, 92, 0.2), transparent 28%),
+    radial-gradient(circle at 88% 2%, rgba(244, 222, 154, 0.14), transparent 24%);
   letter-spacing: 0.01em;
 }
 
@@ -102,7 +102,7 @@ a {
 }
 
 .x-nav-item.is-active {
-  background: rgba(29, 155, 240, 0.22);
+  background: rgba(201, 167, 92, 0.24);
   color: #fff;
   font-weight: 700;
 }

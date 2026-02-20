@@ -7,7 +7,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { dict, useLang } from '../../lib/i18n';
-import logo from '../../../public/assets/img/logo.jpeg';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -95,7 +94,7 @@ export default function Header() {
   return (
     <header className="p-4 border-b border-white/10 flex items-center justify-between relative">
       <Link href="/" className="flex items-center gap-2" aria-label={t.site_title}>
-        <Image src={logo} alt="LordAi.Net" width={32} height={32} className="rounded" />
+        <Image src="/assets/img/logo-new.svg" alt="ELTX platform logo" width={32} height={32} className="rounded" />
       </Link>
       <nav className="hidden sm:flex items-center gap-4">
         <NavLinks />
