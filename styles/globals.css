@@ -6,12 +6,12 @@
 :root{
   --bg:#090c17; --bg2:#090e22; --line:rgba(255,255,255,.12);
   --text:#fff; --muted:#b8c4d7;
-  --brand1:#ff5a3c; --brand2:#ffc34d;
+  --brand1:#b89349; --brand2:#f4de9a;
 }
 
 html,body{height:100%}
 body{color:var(--text);background:
- radial-gradient(1200px 600px at 50% -200px,rgba(255,90,60,.18),transparent),
+ radial-gradient(1200px 600px at 50% -200px,rgba(212,176,95,.22),transparent),
  linear-gradient(180deg,var(--bg),var(--bg2));}
 
 .container{max-width:1040px;margin:0 auto;padding:0 14px}
@@ -29,7 +29,7 @@ a{color:inherit}
 .nav a{padding:10px;border-radius:10px}
 .nav a:hover{background:rgba(255,255,255,.06)}
 
-.hero .ring{width:190px;height:190px;border-radius:50%;background:linear-gradient(180deg,rgba(255,90,60,.28),rgba(255,195,77,.18));border:1px solid rgba(255,255,255,.18);display:grid;place-items:center;position:relative;box-shadow:0 30px 80px rgba(255,90,60,.25);animation:float 4s ease-in-out infinite, pulse 6s ease-in-out infinite}
+.hero .ring{width:190px;height:190px;border-radius:50%;background:linear-gradient(180deg,rgba(184,147,73,.35),rgba(244,222,154,.2));border:1px solid rgba(255,255,255,.18);display:grid;place-items:center;position:relative;box-shadow:0 30px 80px rgba(184,147,73,.28);animation:float 4s ease-in-out infinite, pulse 6s ease-in-out infinite}
 .hero .ring img{width:68%;height:68%;border-radius:50%;border:2px solid rgba(255,255,255,.6);background:#fff}
 @keyframes pulse {0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
 @keyframes float {0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}

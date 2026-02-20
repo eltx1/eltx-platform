@@ -1,6 +1,6 @@
 'use client';
 const TOKENS=[
-  {k:'Team',p:15,c:'#ff5a3c'},{k:'Investment',p:10,c:'#ffc34d'},{k:'Community',p:25,c:'#9b87f5'},
+  {k:'Team',p:15,c:'#b89349'},{k:'Investment',p:10,c:'#f4de9a'},{k:'Community',p:25,c:'#d8bf79'},
   {k:'Staking',p:15,c:'#f25ba3'},{k:'Liquidity',p:10,c:'#f59e0b'},{k:'Development',p:10,c:'#34d399'},
   {k:'Marketing',p:10,c:'#38bdf8'},{k:'Reserve',p:5,c:'#ef4444'},
 ];

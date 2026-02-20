@@ -87,7 +87,7 @@ export default function NavBar() {
             {logoError ? (
               <span className="text-lg">LordAi.Net</span>
             ) : (
-              <Image src="/assets/img/logo.jpeg" alt="LordAi.Net Logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
+              <Image src="/assets/img/logo-new.svg" alt="ELTX platform logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
             )}
             <span className="hidden sm:inline text-sm text-white/70">X-style social trading platform</span>
           </Link>
@@ -111,7 +111,7 @@ export default function NavBar() {
               <Link href="/login" className="rounded-full px-3 py-2 hover:bg-white/10">{t.nav.login}</Link>
               <Link
                 href="/signup"
-                className="px-4 py-2 rounded-full bg-[#1d9bf0] text-white font-semibold hover:brightness-110"
+                className="px-4 py-2 rounded-full bg-[#c9a75c] text-white font-semibold hover:brightness-110"
               >
                 {t.nav.signup}
               </Link>

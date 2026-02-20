@@ -18,14 +18,14 @@ export default function Hero() {
       <div className="relative z-10 mx-auto grid max-w-6xl items-center gap-10 px-4 md:grid-cols-[1.1fr_0.9fr]">
         <div className="space-y-6 text-center md:text-left">
           <div className="inline-flex items-center gap-2 rounded-full border border-[#2f3336] bg-[#16181c] px-3 py-1 text-xs uppercase tracking-[0.24em]">
-            <span className="h-2 w-2 rounded-full bg-[#1d9bf0]" />
+            <span className="h-2 w-2 rounded-full bg-[#c9a75c]" />
             <span>Modern social trading</span>
           </div>
           <div className="flex flex-col items-center gap-3 md:items-start">
             {!logoError ? (
               <Image
-                src="/assets/img/logo.jpeg"
-                alt="LordAi.Net Logo"
+                src="/assets/img/logo-new.svg"
+                alt="ELTX platform logo"
                 width={88}
                 height={88}
                 className="rounded-2xl border border-[#2f3336]"
@@ -65,7 +65,7 @@ export default function Hero() {
             transition={{ duration: 0.5, delay: 0.2 }}
             className="flex flex-wrap justify-center gap-3 md:justify-start"
           >
-            <Link href={signupHref} className="inline-flex items-center gap-2 rounded-full bg-[#1d9bf0] px-6 py-3 text-base font-semibold hover:brightness-110">
+            <Link href={signupHref} className="inline-flex items-center gap-2 rounded-full bg-[#c9a75c] px-6 py-3 text-base font-semibold hover:brightness-110">
               <UserPlus className="h-4 w-4" />
               <span>{user ? 'Go to dashboard' : 'Create account'}</span>
               <Sparkles className="h-4 w-4" />

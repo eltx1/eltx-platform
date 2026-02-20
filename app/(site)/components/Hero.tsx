@@ -16,8 +16,8 @@ export default function Hero() {
       </div>
       <div className="flex items-center justify-center">
         <Image
-          src="/assets/img/logo.jpeg"
-          alt="LordAi.Net"
+          src="/assets/img/logo-new.svg"
+          alt="ELTX platform logo"
           width={80}
           height={80}
           className="w-20 h-20 rounded"

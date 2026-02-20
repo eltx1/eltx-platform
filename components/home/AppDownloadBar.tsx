@@ -17,8 +17,8 @@ export default function AppDownloadBar() {
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             {!logoError ? (
               <Image
-                src="/assets/img/logo.jpeg"
-                alt="LordAi.Net logo"
+                src="/assets/img/logo-new.svg"
+                alt="ELTX platform logo"
                 width={44}
                 height={44}
                 className="h-11 w-11 rounded-full border border-white/10 bg-black/40 object-cover shadow-inner shadow-purple-900/30"

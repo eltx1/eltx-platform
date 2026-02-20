@@ -25,7 +25,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
     <article className="rounded-2xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#16181c]">
       <div className="flex items-start gap-3">
         <div className="h-10 w-10 overflow-hidden rounded-full border border-[#2f3336] bg-[#111]">
-          <Image src={post.avatarUrl || '/assets/img/logo.jpeg'} alt={post.authorName} width={40} height={40} className="h-full w-full object-cover" />
+          <Image src={post.avatarUrl || '/assets/img/logo-new.svg'} alt={post.authorName} width={40} height={40} className="h-full w-full object-cover" />
         </div>
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -55,7 +55,7 @@ export default function PostCard({ post }: { post: SocialPost }) {
           <span>{likes}</span>
         </button>
         <button
-          className="inline-flex items-center gap-2 hover:text-[#1d9bf0] transition"
+          className="inline-flex items-center gap-2 hover:text-[#c9a75c] transition"
           onClick={() => {
             setComments((prev) => prev + 1);
             toast('Comment added (demo).');
