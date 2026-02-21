@@ -1,5 +1,7 @@
 'use client';
 
+import { imageRemotePatterns } from './image-remote-patterns.mjs';
+
 export type SocialPost = {
   id: string;
   authorName: string;
@@ -151,19 +153,36 @@ function safeSetItem(key: string, value: string): PersistResult {
   }
 }
 
+function matchesRemotePath(pathname: string, patternPath: string) {
+  if (!patternPath || patternPath === '/**') return true;
+  if (patternPath.endsWith('/**')) {
+    const prefix = patternPath.slice(0, -3);
+    return pathname.startsWith(prefix);
+  }
+  return pathname === patternPath;
+}
+
+function isAllowedRemoteAvatarUrl(rawUrl: string) {
+  try {
+    const parsed = new URL(rawUrl);
+    return imageRemotePatterns.some((pattern) => {
+      const protocol = `${pattern.protocol}:`;
+      return parsed.protocol === protocol
+        && parsed.hostname === pattern.hostname
+        && matchesRemotePath(parsed.pathname, pattern.pathname || '/**');
+    });
+  } catch {
+    return false;
+  }
+}
+
 export function normalizeAvatarUrl(rawUrl: string) {
   const value = rawUrl.trim();
   if (!value) return defaultProfile.avatarUrl;
   if (value.startsWith('/')) return value;
   if (value.startsWith('data:image/')) return value;
 
-  try {
-    const parsed = new URL(value);
-    const isAllowedHost = parsed.protocol === 'https:';
-    return isAllowedHost ? value : defaultProfile.avatarUrl;
-  } catch {
-    return defaultProfile.avatarUrl;
-  }
+  return isAllowedRemoteAvatarUrl(value) ? value : defaultProfile.avatarUrl;
 }
 
 export function isValidAvatarUrl(rawUrl: string) {

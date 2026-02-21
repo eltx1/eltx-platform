@@ -1,5 +1,6 @@
 // IMPORTANT: Env is loaded from /home/dash/.env via dotenv. Do NOT enable 'export' or 'standalone', and do NOT modify scripts to remove '-r dotenv/config'.
 import dotenv from 'dotenv';
+import { imageRemotePatterns } from './app/lib/image-remote-patterns.mjs';
 dotenv.config({ path: '/home/dash/.env' });
 
 const REQUIRED_ENV_KEYS = [
@@ -21,13 +22,7 @@ if (missingEnv.length) {
 const nextConfig = {
   reactStrictMode: true,
   images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'assets.coingecko.com',
-        pathname: '/coins/images/**',
-      },
-    ],
+    remotePatterns: imageRemotePatterns,
   },
 };
 

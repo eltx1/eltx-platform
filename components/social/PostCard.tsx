@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { Heart, MessageCircle, Repeat2, Send } from 'lucide-react';
 import type { SocialComment, SocialPost } from '../../app/lib/social-store';
@@ -30,6 +30,22 @@ export default function PostCard({
 }: PostCardProps) {
   const [openComposer, setOpenComposer] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
+  const [localLikeState, setLocalLikeState] = useState({ liked: false, likes: post.likes });
+  const [localRepostState, setLocalRepostState] = useState({ reposted: false, reposts: post.reposts });
+  const [localCommentsState, setLocalCommentsState] = useState<{ comments: number; commentsList: SocialComment[] }>({
+    comments: post.comments,
+    commentsList: [],
+  });
+
+  useEffect(() => {
+    setLocalLikeState({ liked: false, likes: post.likes });
+    setLocalRepostState({ reposted: false, reposts: post.reposts });
+    setLocalCommentsState({ comments: post.comments, commentsList: [] });
+  }, [post.id, post.likes, post.reposts, post.comments]);
+
+  const effectiveLikeState = likeState ?? localLikeState;
+  const effectiveRepostState = repostState ?? localRepostState;
+  const effectiveCommentsState = commentsState ?? localCommentsState;
 
   const dateLabel = useMemo(() => {
     try {
@@ -62,26 +78,44 @@ export default function PostCard({
       </div>
       <div className="flex flex-wrap items-center gap-6 text-xs text-white/60">
         <button
-          className={`inline-flex items-center gap-2 transition ${likeState?.liked ? 'text-rose-300' : 'hover:text-[#f91880]'}`}
-          onClick={() => onLike?.(post)}
-          aria-pressed={Boolean(likeState?.liked)}
+          className={`inline-flex items-center gap-2 transition ${effectiveLikeState.liked ? 'text-rose-300' : 'hover:text-[#f91880]'}`}
+          onClick={() => {
+            if (onLike) {
+              onLike(post);
+              return;
+            }
+            setLocalLikeState((prev) => ({
+              liked: !prev.liked,
+              likes: prev.likes + (prev.liked ? -1 : 1),
+            }));
+          }}
+          aria-pressed={Boolean(effectiveLikeState.liked)}
         >
           <Heart className="h-4 w-4" />
-          <span>{likeState?.likes ?? post.likes}</span>
+          <span>{effectiveLikeState.likes}</span>
         </button>
         <button
           className="inline-flex items-center gap-2 hover:text-[#c9a75c] transition"
           onClick={() => setOpenComposer((prev) => !prev)}
         >
           <MessageCircle className="h-4 w-4" />
-          <span>{commentsState?.comments ?? post.comments}</span>
+          <span>{effectiveCommentsState.comments}</span>
         </button>
         <button
-          className={`inline-flex items-center gap-2 transition ${repostState?.reposted ? 'text-emerald-400' : 'hover:text-[#00ba7c]'}`}
-          onClick={() => onRepost?.(post)}
+          className={`inline-flex items-center gap-2 transition ${effectiveRepostState.reposted ? 'text-emerald-400' : 'hover:text-[#00ba7c]'}`}
+          onClick={() => {
+            if (onRepost) {
+              onRepost(post);
+              return;
+            }
+            setLocalRepostState((prev) => ({
+              reposted: !prev.reposted,
+              reposts: prev.reposts + (prev.reposted ? -1 : 1),
+            }));
+          }}
         >
           <Repeat2 className="h-4 w-4" />
-          <span>{repostState?.reposts ?? post.reposts}</span>
+          <span>{effectiveRepostState.reposts}</span>
         </button>
       </div>
 
@@ -97,7 +131,27 @@ export default function PostCard({
             <button
               className="btn btn-primary px-3 py-2 text-xs"
               onClick={() => {
-                onComment?.(post, commentDraft);
+                const normalizedDraft = commentDraft.trim();
+                if (!normalizedDraft) return;
+
+                if (onComment) {
+                  onComment(post, normalizedDraft);
+                } else {
+                  setLocalCommentsState((prev) => ({
+                    comments: prev.comments + 1,
+                    commentsList: [
+                      {
+                        id: `local-comment-${Date.now()}`,
+                        postId: post.id,
+                        authorName: 'You',
+                        handle: '@you',
+                        content: normalizedDraft,
+                        createdAt: new Date().toISOString(),
+                      },
+                      ...prev.commentsList,
+                    ],
+                  }));
+                }
                 setCommentDraft('');
               }}
             >
@@ -107,7 +161,7 @@ export default function PostCard({
           </div>
 
           <div className="space-y-2">
-            {commentsState?.commentsList?.map((comment) => (
+            {effectiveCommentsState.commentsList?.map((comment) => (
               <div key={comment.id} className="rounded-xl border border-white/10 bg-black/30 px-3 py-2">
                 <p className="text-xs font-semibold text-white">{comment.authorName} <span className="text-white/50">{comment.handle}</span></p>
                 <p className="mt-1 text-xs text-white/80 whitespace-pre-wrap">{comment.content}</p>
