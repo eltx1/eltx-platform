@@ -1,26 +1,35 @@
 'use client';
 
-import { Shield, Zap, Network, Coins, MessageCircle } from 'lucide-react';
+import { Shield, Zap, Bot, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import SectionCta from './SectionCta';
+import { useLang } from '../../app/lib/i18n';
 
+const enData = [
+  { icon: MessageCircle, title: 'Social-first feed', desc: 'Publish updates, comment instantly, and connect like modern social apps.' },
+  { icon: Bot, title: 'AI assistant', desc: 'Generate ideas, rewrite captions, and get smart suggestions while posting.' },
+  { icon: Shield, title: 'Private by default', desc: 'Safe sign-in flows with account controls and reliable session protection.' },
+  { icon: Zap, title: 'Built for speed', desc: 'Fast timeline loading and responsive interactions on desktop and mobile.' },
+];
 
-const data = [
-  { icon: MessageCircle, title: 'Social-first', desc: 'Post, share, and chat with your Web3 community.' },
-  { icon: Shield, title: 'Secure', desc: 'Audited smart contracts keep your assets safe.' },
-  { icon: Zap, title: 'Fast', desc: 'Instant interactions and transactions with low fees.' },
-  { icon: Coins, title: 'Earn', desc: 'Monetize content and grow with staking rewards.' },
+const arData = [
+  { icon: MessageCircle, title: 'تجربة سوشيال أولاً', desc: 'انشر وتفاعل بسرعة زي منصات التواصل الحديثة.' },
+  { icon: Bot, title: 'مساعد ذكاء اصطناعي', desc: 'ساعدك في كتابة المحتوى وتحسينه أثناء النشر.' },
+  { icon: Shield, title: 'خصوصية وأمان', desc: 'تسجيل آمن وتحكم كامل في الحساب والجلسات.' },
+  { icon: Zap, title: 'سرعة عالية', desc: 'تحميل سريع وتجربة سلسة على الكمبيوتر والموبايل.' },
 ];
 
 export default function Features() {
+  const { lang } = useLang();
+  const data = lang === 'ar' ? arData : enData;
   return (
     <section className="py-16 px-4 bg-gradient-to-b from-neutral-950 via-fuchsia-950/20 to-neutral-950">
       <div className="max-w-6xl mx-auto space-y-6 text-center">
         <div className="space-y-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-200/80">Features</p>
-          <h2 className="text-3xl font-bold">Why LordAi.Net?</h2>
+          <p className="text-xs uppercase tracking-[0.3em] text-fuchsia-200/80">{lang === 'ar' ? 'المزايا' : 'Features'}</p>
+          <h2 className="text-3xl font-bold">{lang === 'ar' ? 'ليه LordAi.Net؟' : 'Why LordAi.Net?'}</h2>
           <p className="text-white/70 text-sm md:text-base">
-            Social experiences first, with powerful trading and wallet features right beside them.
+            {lang === 'ar' ? 'منصة سوشيال مدعومة بالذكاء الاصطناعي مع تجربة سريعة وتشجع المستخدم على التسجيل.' : 'A social media experience powered by AI and designed to convert visitors into active members.'}
           </p>
         </div>
       </div>
@@ -45,7 +54,7 @@ export default function Features() {
                   <h3 className="font-semibold text-lg">{d.title}</h3>
                 </div>
                 <p className="text-sm opacity-80 leading-relaxed flex-1">{d.desc}</p>
-                <div className="text-xs text-white/70">Social feed, trading, wallet, staking & swaps.</div>
+                <div className="text-xs text-white/70">{lang === 'ar' ? 'سوشيال + ذكاء اصطناعي + أدوات نمو المجتمع.' : 'Social feed + AI tools + audience growth workflows.'}</div>
               </div>
             </motion.div>
           );
@@ -53,9 +62,9 @@ export default function Features() {
       </div>
       <div className="max-w-6xl mx-auto px-4 mt-10">
         <SectionCta
-          eyebrow="Social onboarding"
-          title="Ready to try LordAi.Net?"
-          copy="Create your profile, publish your first post, and keep trading, staking, and payments all in one place."
+          eyebrow={lang === 'ar' ? 'ابدأ الآن' : 'Social onboarding'}
+          title={lang === 'ar' ? 'جاهز تبدأ على LordAi.Net؟' : 'Ready to try LordAi.Net?'}
+          copy={lang === 'ar' ? 'اعمل حسابك وابدأ أول منشورك في أقل من دقيقة.' : 'Create your profile and publish your first post in under a minute.'}
         />
       </div>
     </section>

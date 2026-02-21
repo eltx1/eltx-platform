@@ -69,13 +69,14 @@ export default function NavBar() {
     return null;
   }
 
-  const links: NavLink[] = [
-    { href: '/', label: t.nav.home },
-    { href: '/wallet', label: t.nav.wallet },
-    { href: '/trade', label: t.nav.trade },
-    { href: '/staking', label: t.nav.earn },
-    { href: '/faq', label: t.nav.faq },
-  ];
+  const links: NavLink[] = user
+    ? [
+      { href: '/', label: t.nav.home },
+      { href: '/dashboard', label: t.nav.dashboard },
+    ]
+    : [
+      { href: '/', label: t.nav.home },
+    ];
 
   const isActive = (href: string) => (pathname === href ? 'text-white font-semibold' : 'text-white/70');
 
@@ -89,7 +90,7 @@ export default function NavBar() {
             ) : (
               <Image src="/assets/img/logo-new.svg" alt="ELTX platform logo" width={32} height={32} onError={() => setLogoError(true)} className="rounded-lg" />
             )}
-            <span className="hidden sm:inline text-sm text-white/70">X-style social trading platform</span>
+            <span className="hidden sm:inline text-sm text-white/70">AI social media platform</span>
           </Link>
           {user && (
             <div className="hidden sm:flex flex-col rounded-xl border border-[#2f3336] bg-[#16181c] px-3 py-1.5 text-[10px] leading-tight text-white/70">
