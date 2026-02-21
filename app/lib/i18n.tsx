@@ -626,17 +626,36 @@ export const dict = {
       },
     },
     home: {
-      seoIntro: {
-        kicker: 'AI Web3 Social Network',
-        title: 'Share, chat, and earn on LordAi.Net with secure Web3 services.',
+      hero: {
+        badge: 'AI social platform',
+        title: 'Join conversations, create content, and grow your audience with AI.',
         description:
-          'LordAi.Net is a social-first network for creators and traders, combining AI assistance, secure wallets, and on-chain tools with bilingual English and Arabic support.',
+          'LordAi.Net is built like modern social networks: clear onboarding, instant feed discovery, and direct sign up or sign in from the first screen.',
+        cardTitle: 'Start in seconds',
+        cardSubtitle: 'Create your account to unlock your feed, AI assistant, and creator tools.',
+        createAccount: 'Create account',
+        signIn: 'Sign in',
+        goDashboard: 'Go to dashboard',
+        returnAccount: 'Return to account',
+        livePreviewLabel: 'What you can do',
+        feedPreview: ['Share your first post', 'Discover relevant communities', 'Use AI to improve every caption'],
+        highlights: [
+          { title: 'Instant onboarding', description: 'Sign up, personalize profile, start posting.' },
+          { title: 'AI for creators', description: 'Ideas, writing polish, and engagement prompts.' },
+          { title: 'Mobile-first UX', description: 'Fast timeline and clean cards on every device.' },
+        ],
+      },
+      seoIntro: {
+        kicker: 'AI Social Network',
+        title: 'A social platform designed for creators, communities, and meaningful engagement.',
+        description:
+          'LordAi.Net helps people publish, interact, and grow faster with AI-assisted social workflows and bilingual English/Arabic support.',
         secondary:
-          'The homepage is structured with concise headlines, descriptive copy, and metadata that reads naturally for humans while staying search-friendly.',
+          'The homepage uses clear structure, semantic headings, fast sections, and clean metadata to improve discoverability in search engines.',
         highlights: {
           title: 'Search-friendly experience',
           items: [
-            'Human-first headlines and meta tags tuned for crypto discovery.',
+            'Human-first headlines and metadata tuned for social media discovery.',
             'Clear calls to action without keyword stuffing or repetition.',
             'Fast loading sections that keep engagement strong on mobile.',
           ],
@@ -645,8 +664,8 @@ export const dict = {
           title: 'User-first trust signals',
           items: [
             'Multilingual support for English and Arabic across key flows.',
-            'Audited smart contracts, monitored sessions, and active support.',
-            'Transparent fees and P2P protections to keep trades smooth.',
+            'Secure sessions, monitored uptime, and responsive support.',
+            'Clear account flows that reduce friction from landing to signup.',
           ],
         },
         why: {
@@ -655,15 +674,15 @@ export const dict = {
         },
         keywords: {
           title: 'Key phrases we target',
-          list: 'AI social media network, LordAi.Net, Web3 social platform, crypto trading platform, Web3 wallet, staking, P2P crypto marketplace, Arabic and English support.',
+          list: 'AI social media platform, LordAi.Net, creator community network, bilingual social app, English and Arabic support, mobile-first social experience.',
         },
         value: {
           title: 'Transparent value',
           items: [
-            'Cross-chain support for BSC and Ethereum',
-            'Instant swaps with optimized slippage controls',
-            'In-app AI assistant for market answers',
-            'Guided Arabic/English flows from signup to trading',
+            'AI assistant for writing and engagement ideas',
+            'Mobile-friendly timeline built for modern social behavior',
+            'Bilingual UX for English and Arabic audiences',
+            'Direct conversion path from homepage to signup/login',
           ],
         },
       },
@@ -1669,16 +1688,35 @@ export const dict = {
       },
     },
     home: {
-      seoIntro: {
-        kicker: 'شبكة سوشيال Web3',
-        title: 'شارك، شات، واربح على LordAi.Net مع خدمات Web3 آمنة.',
+      hero: {
+        badge: 'منصة تواصل اجتماعي بالذكاء الاصطناعي',
+        title: 'ابدأ المحادثة، اصنع محتوى، وكبّر جمهورك بمساعدة الذكاء الاصطناعي.',
         description:
-          'LordAi.Net منصة سوشيال ميديا للمبدعين والمتداولين، مع مساعد ذكي ومحافظ آمنة وخدمات تداول ثنائية اللغة بالعربي والإنجليزي.',
-        secondary: 'الصفحة الرئيسية متقسمة بعناوين واضحة ونصوص طبيعية وبيانات وصفية محسّنة للبحث بدون حشو كلمات مفتاحية.',
+          'LordAi.Net متصممة بنفس فكرة منصات التواصل الحديثة: بداية واضحة، اكتشاف سريع للمحتوى، وتسجيل مباشر من أول شاشة.',
+        cardTitle: 'ابدأ في ثواني',
+        cardSubtitle: 'أنشئ حسابك وفعّل الصفحة الرئيسية والمساعد الذكي وأدوات صناع المحتوى.',
+        createAccount: 'إنشاء حساب',
+        signIn: 'تسجيل الدخول',
+        goDashboard: 'اذهب للوحة التحكم',
+        returnAccount: 'الرجوع للحساب',
+        livePreviewLabel: 'ماذا يمكنك أن تفعل',
+        feedPreview: ['انشر أول منشور', 'اكتشف المجتمعات المناسبة', 'حسّن المحتوى بالمساعد الذكي'],
+        highlights: [
+          { title: 'بداية سريعة', description: 'سجّل، جهّز بروفايلك، وابدأ النشر.' },
+          { title: 'ذكاء اصطناعي للمبدعين', description: 'أفكار جاهزة وصياغة أفضل وزيادة التفاعل.' },
+          { title: 'تجربة موبايل ممتازة', description: 'واجهة خفيفة وسريعة على كل الأجهزة.' },
+        ],
+      },
+      seoIntro: {
+        kicker: 'شبكة سوشيال بالذكاء الاصطناعي',
+        title: 'منصة تواصل اجتماعي مصممة للمبدعين والمجتمعات وزيادة التفاعل الحقيقي.',
+        description:
+          'LordAi.Net تساعد المستخدمين على النشر والتفاعل والنمو أسرع من خلال أدوات سوشيال مدعومة بالذكاء الاصطناعي مع دعم عربي وإنجليزي.',
+        secondary: 'الصفحة الرئيسية مبنية بعناوين واضحة وتهيئة SEO قوية وسرعة تحميل عالية لنتائج بحث أفضل.',
         highlights: {
           title: 'تجربة جاهزة للبحث',
           items: [
-            'عناوين ووصف موجه للبشر ومحسّن لاكتشاف منصات الكريبتو.',
+            'عناوين ووصف موجه للبشر ومحسّن لاكتشاف منصات التواصل.',
             'دعوات إجراء واضحة بدون تكرار أو حشو للكلمات المفتاحية.',
             'أقسام خفيفة التحميل تحافظ على التفاعل خصوصًا على الموبايل.',
           ],
@@ -1687,8 +1725,8 @@ export const dict = {
           title: 'مؤشرات ثقة تركز على المستخدم',
           items: [
             'دعم كامل للإنجليزي والعربي في الخطوات الأساسية.',
-            'عقود ذكية متراجعة، جلسات مراقَبة، ودعم سريع.',
-            'رسوم واضحة وحماية P2P علشان التداول يبقى سلس.',
+            'جلسات آمنة، مراقبة استقرار مستمرة، ودعم سريع.',
+            'تجربة تسجيل دخول وإنشاء حساب واضحة وسهلة.',
           ],
         },
         why: {
@@ -1697,15 +1735,15 @@ export const dict = {
         },
         keywords: {
           title: 'العبارات الأساسية اللي بنستهدفها',
-          list: 'منصة سوشيال ميديا Web3، LordAi.Net، شبكة اجتماعية بالذكاء الاصطناعي، منصة تداول كريبتو، محفظة Web3، استاكينج، سوق كريبتو P2P، دعم عربي وإنجليزي.',
+          list: 'منصة تواصل اجتماعي بالذكاء الاصطناعي، LordAi.Net، منصة للمبدعين، تطبيق سوشيال ثنائي اللغة، دعم عربي وإنجليزي، تجربة سوشيال للموبايل.',
         },
         value: {
           title: 'قيمة واضحة',
           items: [
-            'دعم عبر الشبكات لـ BSC و Ethereum',
-            'سواب فوري بانزلاق محسوب بدقة',
-            'مساعد ذكي داخل التطبيق لأسئلة السوق',
-            'خطوات موجهة بالعربي والإنجليزي من التسجيل للتداول',
+            'مساعد ذكي للكتابة وتحسين التفاعل',
+            'تجربة موبايل سريعة مشابهة لتطبيقات السوشيال الشهيرة',
+            'واجهة ثنائية اللغة عربي/إنجليزي',
+            'مسار مباشر من الصفحة الرئيسية للتسجيل والدخول',
           ],
         },
       },
