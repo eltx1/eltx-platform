@@ -22,11 +22,29 @@ export type SocialProfile = {
   avatarUrl: string;
 };
 
+export type SocialComment = {
+  id: string;
+  postId: string;
+  authorName: string;
+  handle: string;
+  content: string;
+  createdAt: string;
+};
+
 const POSTS_KEY = 'lordai.social.posts';
 const PROFILE_KEY = 'lordai.social.profile';
 const WORD_LIMIT_KEY = 'lordai.social.postWordLimit';
+const INTERACTIONS_KEY = 'lordai.social.interactions';
 const USER_SCOPE_KEY = 'guest';
 const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
+
+type PostInteractionState = {
+  liked: boolean;
+  reposted: boolean;
+  comments: SocialComment[];
+};
+
+type InteractionMap = Record<string, PostInteractionState>;
 
 type UserScopeId = string | number | null | undefined;
 
@@ -137,10 +155,11 @@ export function normalizeAvatarUrl(rawUrl: string) {
   const value = rawUrl.trim();
   if (!value) return defaultProfile.avatarUrl;
   if (value.startsWith('/')) return value;
+  if (value.startsWith('data:image/')) return value;
 
   try {
     const parsed = new URL(value);
-    const isAllowedHost = parsed.protocol === 'https:' && parsed.hostname === 'assets.coingecko.com';
+    const isAllowedHost = parsed.protocol === 'https:';
     return isAllowedHost ? value : defaultProfile.avatarUrl;
   } catch {
     return defaultProfile.avatarUrl;
@@ -148,7 +167,85 @@ export function normalizeAvatarUrl(rawUrl: string) {
 }
 
 export function isValidAvatarUrl(rawUrl: string) {
-  return normalizeAvatarUrl(rawUrl) === rawUrl.trim();
+  const value = rawUrl.trim();
+  if (!value) return true;
+  return normalizeAvatarUrl(value) === value;
+}
+
+function getInteractions(userId?: UserScopeId): InteractionMap {
+  if (typeof window === 'undefined') return {};
+  return safeParse<InteractionMap>(window.localStorage.getItem(getScopedKey(INTERACTIONS_KEY, userId)), {});
+}
+
+function saveInteractions(map: InteractionMap, userId?: UserScopeId): PersistResult {
+  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
+  return safeSetItem(getScopedKey(INTERACTIONS_KEY, userId), JSON.stringify(map));
+}
+
+function getPostState(postId: string, userId?: UserScopeId): PostInteractionState {
+  const interactions = getInteractions(userId);
+  return interactions[postId] || { liked: false, reposted: false, comments: [] };
+}
+
+export function getPostInteractionSummary(post: SocialPost, userId?: UserScopeId) {
+  const state = getPostState(post.id, userId);
+  return {
+    liked: state.liked,
+    reposted: state.reposted,
+    commentsList: state.comments,
+    likes: post.likes + (state.liked ? 1 : 0),
+    reposts: post.reposts + (state.reposted ? 1 : 0),
+    comments: post.comments + state.comments.length,
+  };
+}
+
+export function togglePostLike(post: SocialPost, userId?: UserScopeId) {
+  const interactions = getInteractions(userId);
+  const state = interactions[post.id] || { liked: false, reposted: false, comments: [] };
+  state.liked = !state.liked;
+  interactions[post.id] = state;
+  const persist = saveInteractions(interactions, userId);
+  return {
+    ...persist,
+    liked: state.liked,
+    likes: post.likes + (state.liked ? 1 : 0),
+  };
+}
+
+export function togglePostRepost(post: SocialPost, userId?: UserScopeId) {
+  const interactions = getInteractions(userId);
+  const state = interactions[post.id] || { liked: false, reposted: false, comments: [] };
+  state.reposted = !state.reposted;
+  interactions[post.id] = state;
+  const persist = saveInteractions(interactions, userId);
+  return {
+    ...persist,
+    reposted: state.reposted,
+    reposts: post.reposts + (state.reposted ? 1 : 0),
+  };
+}
+
+export function addPostComment(post: SocialPost, content: string, profile: SocialProfile, userId?: UserScopeId) {
+  if (!content.trim()) return { ok: false as const, reason: 'unknown' as const };
+  const interactions = getInteractions(userId);
+  const state = interactions[post.id] || { liked: false, reposted: false, comments: [] };
+  const comment: SocialComment = {
+    id: createLocalPostId(),
+    postId: post.id,
+    authorName: profile.publicName,
+    handle: profile.handle,
+    content: content.trim(),
+    createdAt: new Date().toISOString(),
+  };
+  state.comments = [comment, ...state.comments];
+  interactions[post.id] = state;
+  const persist = saveInteractions(interactions, userId);
+  return {
+    ...persist,
+    comment,
+    comments: post.comments + state.comments.length,
+    commentsList: state.comments,
+  };
 }
 
 export function validatePostImage(file?: File | null) {

@@ -81,14 +81,6 @@ export default function Hero() {
             {hero.description}
           </motion.p>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            {hero.highlights.map((item) => (
-              <div key={item.title} className="rounded-2xl border border-[#2f3336] bg-[#101215] p-4">
-                <p className="text-sm font-semibold">{item.title}</p>
-                <p className="mt-1 text-xs text-white/70">{item.description}</p>
-              </div>
-            ))}
-          </div>
         </div>
 
         <motion.aside
