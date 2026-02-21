@@ -3,10 +3,13 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { Upload } from 'lucide-react';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
 import { useAuth } from '../../../lib/auth';
 import { getProfile, isValidAvatarUrl, saveProfile, type SocialProfile } from '../../../lib/social-store';
+
+const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
 
 export default function EditProfilePage() {
   const { lang } = useLang();
@@ -21,9 +24,26 @@ export default function EditProfilePage() {
     setProfile(getProfile(user.id));
   }, [user?.id]);
 
-  if (!profile) {
-    return null;
-  }
+  const handleAvatarUpload = (file?: File | null) => {
+    if (!file || !profile) return;
+    if (!file.type.startsWith('image/')) {
+      toast(t.dashboard.social.profileAvatarInvalid);
+      return;
+    }
+    if (file.size > MAX_AVATAR_SIZE) {
+      toast(t.dashboard.social.avatarTooLarge);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setProfile({ ...profile, avatarUrl: String(reader.result || '') });
+      toast(t.dashboard.social.avatarUploaded);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  if (!profile) return null;
 
   return (
     <div className="p-3 sm:p-4 space-y-4 max-w-3xl">
@@ -42,6 +62,12 @@ export default function EditProfilePage() {
             <p className="text-base font-semibold">{profile.publicName}</p>
           </div>
         </div>
+
+        <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-white/20 bg-black/20 px-4 py-3 text-xs text-white/80 hover:bg-black/35">
+          <Upload className="h-4 w-4" />
+          {t.dashboard.social.uploadAvatarCta}
+          <input type="file" accept="image/*" className="hidden" onChange={(event) => handleAvatarUpload(event.target.files?.[0])} />
+        </label>
 
         <div className="space-y-2">
           <label className="text-sm text-white/70">{t.dashboard.social.profilePublicName}</label>
@@ -87,29 +113,17 @@ export default function EditProfilePage() {
           <button
             className="btn btn-primary px-4 py-2 text-xs"
             onClick={() => {
-              if (!user?.id) {
-                toast(t.dashboard.social.sessionMissing);
-                return;
-              }
-              if (!isValidAvatarUrl(profile.avatarUrl)) {
-                toast(t.dashboard.social.profileAvatarInvalid);
-                return;
-              }
+              if (!user?.id) return toast(t.dashboard.social.sessionMissing);
+              if (!isValidAvatarUrl(profile.avatarUrl)) return toast(t.dashboard.social.profileAvatarInvalid);
               const saveResult = saveProfile(profile, user.id);
-              if (!saveResult.ok) {
-                toast(t.dashboard.social.quickPostStorageError);
-                return;
-              }
+              if (!saveResult.ok) return toast(t.dashboard.social.quickPostStorageError);
               toast(t.dashboard.social.profileUpdated);
               router.push('/profile');
             }}
           >
             {t.common.save || 'Save'}
           </button>
-          <button
-            className="rounded-full border border-white/10 px-4 py-2 text-xs text-white/70 hover:bg-white/10"
-            onClick={() => router.back()}
-          >
+          <button className="rounded-full border border-white/10 px-4 py-2 text-xs text-white/70 hover:bg-white/10" onClick={() => router.back()}>
             {t.common.back}
           </button>
         </div>
