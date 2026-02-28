@@ -1121,7 +1121,9 @@ const ELTX_DECIMALS = (() => {
   return normalizeDecimals(raw, DEFAULT_ELTX_DECIMALS);
 })();
 const AI_DAILY_FREE_SETTING = 'ai_daily_free_messages';
-const AI_PRICE_SETTING = 'ai_message_price_eltx';
+const AI_PRICE_SETTING = 'ai_message_price_usdt';
+const AI_PRICE_SETTING_LEGACY = 'ai_message_price_eltx';
+const AI_BILLING_SYMBOL = 'USDT';
 const DEFAULT_AI_DAILY_FREE = 10;
 const DEFAULT_AI_PRICE = '1';
 const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
@@ -2440,11 +2442,13 @@ async function queueAnnouncementEmails(payload, requestId, initiatedBy) {
 
 async function readAiSettings(conn = pool) {
   const dailyVal = await getPlatformSettingValue(AI_DAILY_FREE_SETTING, DEFAULT_AI_DAILY_FREE.toString(), conn);
-  const priceVal = await getPlatformSettingValue(AI_PRICE_SETTING, DEFAULT_AI_PRICE, conn);
+  const configuredPrice = await getPlatformSettingValue(AI_PRICE_SETTING, null, conn);
+  const legacyPrice = await getPlatformSettingValue(AI_PRICE_SETTING_LEGACY, DEFAULT_AI_PRICE, conn);
+  const priceVal = configuredPrice ?? legacyPrice;
   const dailyParsed = Number.parseInt(dailyVal, 10);
   const dailyFree = Number.isFinite(dailyParsed) && dailyParsed >= 0 ? dailyParsed : DEFAULT_AI_DAILY_FREE;
   const normalizedPrice = normalizePositiveDecimal(priceVal, 18) || '0';
-  return { daily_free_messages: dailyFree, message_price_eltx: normalizedPrice };
+  return { daily_free_messages: dailyFree, message_price_usdt: normalizedPrice };
 }
 
 async function getAiUsageRow(conn, userId, usageDate, { forUpdate = false } = {}) {
@@ -2475,8 +2479,8 @@ function presentAiUsageRow(usage, settings, decimals) {
     messages_used: used,
     paid_messages: paid,
     free_remaining: Math.max(settings.daily_free_messages - used, 0),
-    eltx_spent_wei: spentWei.toString(),
-    eltx_spent: trimDecimal(formatUnitsStr(spentWei.toString(), decimals)),
+    usdt_spent_wei: spentWei.toString(),
+    usdt_spent: trimDecimal(formatUnitsStr(spentWei.toString(), decimals)),
     last_message_at: usage?.last_message_at || null,
   };
 }
@@ -2490,21 +2494,21 @@ async function readAiUsageSummary(date, conn = pool) {
   const [rows] = await executor.query(
     `SELECT COALESCE(SUM(messages_used),0) AS messages_used,
             COALESCE(SUM(paid_messages),0) AS paid_messages,
-            COALESCE(SUM(eltx_spent_wei),0) AS eltx_spent_wei
+            COALESCE(SUM(eltx_spent_wei),0) AS spent_wei
        FROM ai_daily_usage WHERE usage_date=?`,
     [date]
   );
   const row = rows[0] || {};
-  const decimals = getSymbolDecimals(ELTX_SYMBOL);
-  const spentWei = bigIntFromValue(row.eltx_spent_wei || 0);
+  const decimals = getSymbolDecimals(AI_BILLING_SYMBOL);
+  const spentWei = bigIntFromValue(row.spent_wei || 0);
   const total = Number(row.messages_used || 0);
   const paid = Number(row.paid_messages || 0);
   return {
     messages_used: total,
     paid_messages: paid,
     free_messages: Math.max(total - paid, 0),
-    eltx_spent_wei: spentWei.toString(),
-    eltx_spent: trimDecimal(formatUnitsStr(spentWei.toString(), decimals)),
+    usdt_spent_wei: spentWei.toString(),
+    usdt_spent: trimDecimal(formatUnitsStr(spentWei.toString(), decimals)),
   };
 }
 
@@ -3315,7 +3319,8 @@ const AiChatSchema = z.object({
 
 const AiSettingsSchema = z.object({
   daily_free_messages: z.number().int().min(0),
-  message_price_eltx: z.union([z.string(), z.number()]),
+  message_price_usdt: z.union([z.string(), z.number()]).optional(),
+  message_price_eltx: z.union([z.string(), z.number()]).optional(),
 });
 
 const ReferralSettingsSchema = z.object({
@@ -5644,12 +5649,14 @@ app.patch('/admin/ai/settings', async (req, res, next) => {
   try {
     await requireAdmin(req);
     const payload = AiSettingsSchema.parse(req.body || {});
-    const price = normalizePositiveDecimal(payload.message_price_eltx, 18);
+    const requestedPrice = payload.message_price_usdt ?? payload.message_price_eltx;
+    const price = normalizePositiveDecimal(requestedPrice, 18);
     if (price === null)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid AI message price' });
     await Promise.all([
       setPlatformSettingValue(AI_DAILY_FREE_SETTING, payload.daily_free_messages.toString()),
       setPlatformSettingValue(AI_PRICE_SETTING, price),
+      setPlatformSettingValue(AI_PRICE_SETTING_LEGACY, price),
     ]);
     const today = getTodayDateString();
     const [settings, stats] = await Promise.all([readAiSettings(), readAiUsageSummary(today)]);
@@ -7113,12 +7120,12 @@ app.get('/ai/status', walletLimiter, async (req, res, next) => {
     const [settings, usageRow, balanceRows] = await Promise.all([
       readAiSettings(),
       getAiUsageRow(pool, userId, today),
-      pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, ELTX_SYMBOL]),
+      pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, AI_BILLING_SYMBOL]),
     ]);
-    const decimals = getSymbolDecimals(ELTX_SYMBOL);
+    const decimals = getSymbolDecimals(AI_BILLING_SYMBOL);
     const [[balanceRaw]] = balanceRows;
     const balanceWei = bigIntFromValue(balanceRaw?.balance_wei || 0);
-    const priceWei = bigIntFromValue(decimalToWeiString(settings.message_price_eltx, decimals) || 0);
+    const priceWei = bigIntFromValue(decimalToWeiString(settings.message_price_usdt, decimals) || 0);
     const usage = presentAiUsageRow(usageRow, settings, decimals);
     const balance = trimDecimal(formatUnitsStr(balanceWei.toString(), decimals));
     const canAffordPaid = priceWei > 0n && balanceWei >= priceWei;
@@ -7127,8 +7134,8 @@ app.get('/ai/status', walletLimiter, async (req, res, next) => {
       ok: true,
       settings,
       usage,
-      balance: { eltx_balance_wei: balanceWei.toString(), eltx_balance: balance },
-      pricing: { message_price_eltx: settings.message_price_eltx, message_price_wei: priceWei.toString() },
+      balance: { usdt_balance_wei: balanceWei.toString(), usdt_balance: balance },
+      pricing: { message_price_usdt: settings.message_price_usdt, message_price_wei: priceWei.toString() },
       can_message: canMessage,
       can_afford_paid: canAffordPaid,
     });
@@ -7149,8 +7156,8 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
 
     const today = getTodayDateString();
     const settings = await readAiSettings(conn);
-    const decimals = getSymbolDecimals(ELTX_SYMBOL);
-    const priceWei = bigIntFromValue(decimalToWeiString(settings.message_price_eltx, decimals) || 0);
+    const decimals = getSymbolDecimals(AI_BILLING_SYMBOL);
+    const priceWei = bigIntFromValue(decimalToWeiString(settings.message_price_usdt, decimals) || 0);
     let usageRow = await getAiUsageRow(conn, userId, today, { forUpdate: true });
     if (!usageRow) {
       await conn.query('INSERT INTO ai_daily_usage (user_id, usage_date) VALUES (?, ?) ON DUPLICATE KEY UPDATE usage_date=usage_date', [
@@ -7169,22 +7176,22 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
       }
       const [[balanceRaw]] = await conn.query(
         'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
-        [userId, ELTX_SYMBOL]
+        [userId, AI_BILLING_SYMBOL]
       );
       balanceWei = bigIntFromValue(balanceRaw?.balance_wei || 0);
       if (balanceWei < priceWei) {
         await conn.rollback();
         return next({
           status: 402,
-          code: 'INSUFFICIENT_ELTX',
-          message: 'Insufficient ELTX balance for AI message',
+          code: 'INSUFFICIENT_USDT',
+          message: 'Insufficient USDT balance for AI message',
           details: {
             balance: trimDecimal(formatUnitsStr(balanceWei.toString(), decimals)),
             required: trimDecimal(formatUnitsStr(priceWei.toString(), decimals)),
           },
         });
       }
-      chargeType = 'eltx';
+      chargeType = 'usdt';
     }
 
     const completion = await openaiClient.chat.completions.create({
@@ -7206,7 +7213,7 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
         userId,
         today,
         'free',
-        ELTX_SYMBOL,
+        AI_BILLING_SYMBOL,
         0,
       ]);
     } else {
@@ -7214,7 +7221,7 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
       await conn.query('UPDATE user_balances SET balance_wei = ? WHERE user_id=? AND UPPER(asset)=?', [
         newBalanceWei.toString(),
         userId,
-        ELTX_SYMBOL,
+        AI_BILLING_SYMBOL,
       ]);
       await conn.query(
         'UPDATE ai_daily_usage SET messages_used = messages_used + 1, paid_messages = paid_messages + 1, eltx_spent_wei = eltx_spent_wei + ?, last_message_at = NOW() WHERE user_id=? AND usage_date=?',
@@ -7223,8 +7230,8 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
       await conn.query('INSERT INTO ai_message_ledger (user_id, usage_date, charge_type, asset, amount_wei) VALUES (?,?,?,?,?)', [
         userId,
         today,
-        'eltx',
-        ELTX_SYMBOL,
+        'usdt',
+        AI_BILLING_SYMBOL,
         priceWei.toString(),
       ]);
     }
@@ -7233,7 +7240,7 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
 
     const [usageRowUpdated, balanceRows] = await Promise.all([
       getAiUsageRow(pool, userId, today),
-      pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, ELTX_SYMBOL]),
+      pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, AI_BILLING_SYMBOL]),
     ]);
     const [[balanceRaw]] = balanceRows;
     const balanceUpdatedWei = bigIntFromValue(balanceRaw?.balance_wei || 0);
@@ -7243,10 +7250,10 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
       message,
       usage,
       charge_type: chargeType,
-      pricing: { message_price_eltx: settings.message_price_eltx, message_price_wei: priceWei.toString() },
+      pricing: { message_price_usdt: settings.message_price_usdt, message_price_wei: priceWei.toString() },
       balance: {
-        eltx_balance_wei: balanceUpdatedWei.toString(),
-        eltx_balance: trimDecimal(formatUnitsStr(balanceUpdatedWei.toString(), decimals)),
+        usdt_balance_wei: balanceUpdatedWei.toString(),
+        usdt_balance: trimDecimal(formatUnitsStr(balanceUpdatedWei.toString(), decimals)),
       },
     });
   } catch (err) {

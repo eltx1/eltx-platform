@@ -163,12 +163,12 @@ export const dict = {
         title: 'Chat with your AI co-pilot',
         description: 'Start in English by default. Switch your language anytime from Settings.',
         dailyUsage: (remaining: number, total: number) => `Free messages left today: ${remaining}/${total}`,
-        pricedUsage: (price: string) => `After free messages, each reply costs ${price || '0'} ELTX`,
+        pricedUsage: (price: string) => `After free messages, each reply costs ${price || '0'} USDT`,
         loadingBalance: 'Calculating message balance…',
         stats: {
           free: 'Free quota',
           price: 'Per-message price',
-          balance: 'ELTX balance',
+          balance: 'USDT balance',
         },
         conversation: 'Conversation',
         empty: 'Ask anything about LordAI and we will answer instantly.',
@@ -179,7 +179,7 @@ export const dict = {
         errors: {
           status: 'Could not load your AI balance right now.',
           send: 'Something went wrong while sending your message.',
-          insufficient: 'You are out of free messages and ELTX. Please top up to continue.',
+          insufficient: 'You are out of free messages and USDT. Please top up to continue.',
         },
       },
       cards: {
@@ -1234,12 +1234,12 @@ export const dict = {
         title: 'اتكلم مع المساعد الذكي بتاعك',
         description: 'اللغة الافتراضية إنجليزي. تقدر تغيّرها من الإعدادات في أي وقت.',
         dailyUsage: (remaining: number, total: number) => `المتاح المجاني اليوم: ${remaining}/${total}`,
-        pricedUsage: (price: string) => `بعد المجاني، كل رد يكلف ${price || '0'} ELTX`,
+        pricedUsage: (price: string) => `بعد المجاني، كل رد يكلف ${price || '0'} USDT`,
         loadingBalance: 'بنحسب رصيد الرسائل...',
         stats: {
           free: 'الرصيد المجاني',
           price: 'سعر الرسالة',
-          balance: 'رصيد ELTX',
+          balance: 'رصيد USDT',
         },
         conversation: 'المحادثة',
         empty: 'اسأل عن السوشيال أو التداول وإحنا هنرد فورًا.',
@@ -1250,7 +1250,7 @@ export const dict = {
         errors: {
           status: 'تعذر تحميل حالة رصيد الذكاء الاصطناعي.',
           send: 'حصلت مشكلة أثناء إرسال الرسالة.',
-          insufficient: 'رصيد المجاني و ELTX غير كافي. زوّد رصيدك علشان تكمل.',
+          insufficient: 'رصيد المجاني و USDT غير كافي. زوّد رصيدك علشان تكمل.',
         },
       },
       cards: {
