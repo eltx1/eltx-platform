@@ -119,8 +119,8 @@ type FeeSettings = {
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
 
-type AiSettings = { daily_free_messages: number; message_price_eltx: string };
-type AiStats = { messages_used: number; paid_messages: number; free_messages: number; eltx_spent: string; eltx_spent_wei: string };
+type AiSettings = { daily_free_messages: number; message_price_usdt: string };
+type AiStats = { messages_used: number; paid_messages: number; free_messages: number; usdt_spent: string; usdt_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
 type ReferralSettings = { reward_eltx: string; fee_share_bps: string };
@@ -380,7 +380,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
   const [settings, setSettings] = useState<AiSettings | null>(null);
   const [stats, setStats] = useState<AiStats | null>(null);
   const [today, setToday] = useState<string>('');
-  const [form, setForm] = useState<AiSettings>({ daily_free_messages: 10, message_price_eltx: '1' });
+  const [form, setForm] = useState<AiSettings>({ daily_free_messages: 10, message_price_usdt: '1' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -454,11 +454,11 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
             />
           </label>
           <label className="space-y-2 text-sm text-white/70">
-            <span>Price per extra message (ELTX)</span>
+            <span>Price per extra message (USDT)</span>
             <input
               type="text"
-              value={form.message_price_eltx}
-              onChange={(e) => setForm({ ...form, message_price_eltx: e.target.value })}
+              value={form.message_price_usdt}
+              onChange={(e) => setForm({ ...form, message_price_usdt: e.target.value })}
               className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-white focus:border-blue-300 focus:outline-none"
             />
           </label>
@@ -466,7 +466,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
         <div className="flex items-center justify-between text-xs text-white/60">
           <div className="space-y-1">
             <p>اضبط الكريدت اليومي المجاني وسعر الرسالة بعد نفاد المجاني.</p>
-            <p>الأسعار تقبل أرقام عشرية (مثال 0.5 ELTX).</p>
+            <p>الأسعار تقبل أرقام عشرية (مثال 0.5 USDT).</p>
           </div>
           <button
             type="submit"
@@ -493,8 +493,8 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
           <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : stats.free_messages}</p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-          <p className="text-xs uppercase text-white/60">ELTX spent today</p>
-          <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : `${stats.eltx_spent} ELTX`}</p>
+          <p className="text-xs uppercase text-white/60">USDT spent today</p>
+          <p className="mt-2 text-2xl font-semibold">{loading || !stats ? '...' : `${stats.usdt_spent} USDT`}</p>
         </div>
       </div>
     </div>

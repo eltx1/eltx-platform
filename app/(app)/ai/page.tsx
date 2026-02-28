@@ -15,16 +15,16 @@ type AiUsage = {
   messages_used: number;
   paid_messages: number;
   free_remaining: number;
-  eltx_spent: string;
-  eltx_spent_wei: string;
+  usdt_spent: string;
+  usdt_spent_wei: string;
   last_message_at?: string | null;
 };
 
 type AiStatus = {
-  settings: { daily_free_messages: number; message_price_eltx: string };
+  settings: { daily_free_messages: number; message_price_usdt: string };
   usage: AiUsage;
-  balance: { eltx_balance: string; eltx_balance_wei: string };
-  pricing: { message_price_eltx: string; message_price_wei: string };
+  balance: { usdt_balance: string; usdt_balance_wei: string };
+  pricing: { message_price_usdt: string; message_price_wei: string };
   can_message: boolean;
   can_afford_paid: boolean;
 };
@@ -34,7 +34,7 @@ type ChatResponse = {
   usage: AiUsage;
   balance: AiStatus['balance'];
   pricing: AiStatus['pricing'];
-  charge_type: 'free' | 'eltx';
+  charge_type: 'free' | 'usdt';
 };
 
 const toBigIntSafe = (value: string | number | null | undefined) => {
@@ -81,7 +81,7 @@ function AIPageInner() {
 
   const computeCanAfford = useCallback((usage: AiUsage, pricing: AiStatus['pricing'], balance: AiStatus['balance']) => {
     const price = toBigIntSafe(pricing.message_price_wei);
-    const bal = toBigIntSafe(balance.eltx_balance_wei);
+    const bal = toBigIntSafe(balance.usdt_balance_wei);
     const canAffordPaid = price > 0n && bal >= price;
     return { canAffordPaid, canMessage: usage.free_remaining > 0 || canAffordPaid };
   }, []);
@@ -120,7 +120,7 @@ function AIPageInner() {
       if (status && res.data.usage && res.data.balance && res.data.pricing) {
         const { canAffordPaid, canMessage } = computeCanAfford(res.data.usage, res.data.pricing, res.data.balance);
         setStatus({
-          settings: { ...status.settings, message_price_eltx: res.data.pricing.message_price_eltx },
+          settings: { ...status.settings, message_price_usdt: res.data.pricing.message_price_usdt },
           usage: res.data.usage,
           balance: res.data.balance,
           pricing: res.data.pricing,
@@ -163,7 +163,7 @@ function AIPageInner() {
 
   const priceLine = useMemo(() => {
     if (!status) return '...';
-    return t.pricedUsage(status.pricing.message_price_eltx || '0');
+    return t.pricedUsage(status.pricing.message_price_usdt || '0');
   }, [status, t]);
 
   return (
@@ -191,8 +191,8 @@ function AIPageInner() {
               value={status ? `${status.usage.free_remaining} / ${status.settings.daily_free_messages}` : '...'}
               icon={ShieldCheck}
             />
-            <StatPill label={t.stats.price} value={status ? `${status.pricing.message_price_eltx} ELTX` : '...'} icon={Sparkles} />
-            <StatPill label={t.stats.balance} value={status ? `${status.balance.eltx_balance} ELTX` : '...'} icon={Wallet} />
+            <StatPill label={t.stats.price} value={status ? `${status.pricing.message_price_usdt} USDT` : '...'} icon={Sparkles} />
+            <StatPill label={t.stats.balance} value={status ? `${status.balance.usdt_balance} USDT` : '...'} icon={Wallet} />
           </div>
         </div>
 
@@ -297,25 +297,6 @@ function AIPageInner() {
             </div>
           </div>
 
-          <div className="lg:w-80 lg:flex-none">
-            <div className="space-y-4 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-xl shadow-black/30 backdrop-blur">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-white/60">{t.badge}</p>
-                  <p className="text-lg font-semibold text-white">{t.title}</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <StatPill
-                  label={t.stats.free}
-                  value={status ? `${status.usage.free_remaining} / ${status.settings.daily_free_messages}` : '...'}
-                  icon={ShieldCheck}
-                />
-                <StatPill label={t.stats.price} value={status ? `${status.pricing.message_price_eltx} ELTX` : '...'} icon={Sparkles} />
-                <StatPill label={t.stats.balance} value={status ? `${status.balance.eltx_balance} ELTX` : '...'} icon={Wallet} />
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

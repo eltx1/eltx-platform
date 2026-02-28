@@ -49,9 +49,9 @@ export default function SignupContent() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-indigo-900 via-black to-emerald-900 text-white flex items-center justify-center px-4 py-12">
+    <main className="x-shell min-h-screen text-white flex items-center justify-center px-4 py-12">
       <div className="relative w-full max-w-5xl">
-        <div className="absolute inset-0 blur-3xl bg-emerald-500/20 rounded-full" aria-hidden />
+        <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,rgba(201,167,92,0.24),transparent_70%)] blur-3xl" aria-hidden />
         <div className="relative grid gap-10 md:grid-cols-[1fr_1.1fr] items-center">
           <section className="space-y-4 order-2 md:order-1">
             <div className="inline-flex items-center gap-2 rounded-full bg-white/5 border border-white/10 px-3 py-1 text-sm text-emerald-100">
@@ -87,7 +87,7 @@ export default function SignupContent() {
 
           <form
             onSubmit={handleSubmit}
-            className="bg-white/5 border border-white/10 rounded-2xl p-8 shadow-2xl backdrop-blur w-full max-w-lg mx-auto space-y-4 order-1 md:order-2"
+            className="x-card w-full max-w-lg mx-auto space-y-4 p-8 shadow-2xl order-1 md:order-2"
           >
             <div className="flex items-center justify-between gap-2">
               <div>
@@ -120,7 +120,7 @@ export default function SignupContent() {
               </label>
               <input
                 id="email"
-                className={`p-3 rounded-xl bg-black/40 border focus:outline-none focus:ring-2 focus:ring-emerald-500/80 transition ${
+                className={`x-input p-3 border focus:outline-none focus:ring-2 focus:ring-emerald-500/80 transition ${
                   error ? 'border-red-500' : 'border-white/20'
                 }`}
                 placeholder={t.auth.common.emailPlaceholder}
@@ -136,7 +136,7 @@ export default function SignupContent() {
               </label>
               <input
                 id="password"
-                className={`p-3 rounded-xl bg-black/40 border focus:outline-none focus:ring-2 focus:ring-emerald-500/80 transition ${
+                className={`x-input p-3 border focus:outline-none focus:ring-2 focus:ring-emerald-500/80 transition ${
                   error ? 'border-red-500' : 'border-white/20'
                 }`}
                 type="password"
