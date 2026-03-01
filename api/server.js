@@ -614,6 +614,11 @@ const supportLimiter = createSessionLimiter({
   max: 20,
 });
 
+const messagingLimiter = createSessionLimiter({
+  windowMs: 60 * 1000,
+  max: 80,
+});
+
 const spotLimiter = createSessionLimiter({
   windowMs: 60 * 1000,
   max: 300,
@@ -3344,6 +3349,22 @@ const SupportStatusUpdateSchema = z.object({
   status: z.enum(['open', 'answered', 'closed']),
 });
 
+const MessageRequestCreateSchema = z
+  .object({
+    recipient_id: z.coerce.number().int().positive().optional(),
+    recipient_username: z.string().trim().min(3).max(60).optional(),
+    message: z.string().trim().min(1).max(2000),
+  })
+  .refine((val) => !!val.recipient_id || !!val.recipient_username, { message: 'Recipient is required' });
+
+const MessageRequestActionSchema = z.object({
+  action: z.enum(['accept', 'reject']),
+});
+
+const MessageReplySchema = z.object({
+  message: z.string().trim().min(1).max(2000),
+});
+
 const CANDLE_INTERVALS = {
   '5m': { seconds: 300 },
   '1h': { seconds: 3600 },
@@ -3963,6 +3984,411 @@ app.post('/kyc/submit', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: err.errors[0]?.message || 'Invalid input', details: { missing } });
     }
     next(err);
+  }
+});
+
+
+function presentMessageUser(row, prefix = '') {
+  return {
+    id: Number(row[`${prefix}id`]),
+    username: row[`${prefix}username`] || null,
+  };
+}
+
+function presentMessageThread(row, userId) {
+  const requester = presentMessageUser(row, 'requester_');
+  const recipient = presentMessageUser(row, 'recipient_');
+  const counterpart = requester.id === Number(userId) ? recipient : requester;
+  return {
+    id: Number(row.id),
+    status: row.status,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    accepted_at: row.accepted_at || null,
+    rejected_at: row.rejected_at || null,
+    last_message_at: row.last_message_at || null,
+    last_message_preview: row.last_message_preview || null,
+    last_message_sender_id: row.last_message_sender_id ? Number(row.last_message_sender_id) : null,
+    unread_count: Number(row.unread_count || 0),
+    requester,
+    recipient,
+    counterpart,
+    is_recipient: recipient.id === Number(userId),
+    is_requester: requester.id === Number(userId),
+  };
+}
+
+function presentMessageEntry(row) {
+  return {
+    id: Number(row.id),
+    thread_id: Number(row.thread_id),
+    sender_id: Number(row.sender_id),
+    sender_username: row.sender_username || null,
+    body: row.body,
+    created_at: row.created_at,
+  };
+}
+
+const messageSocketUsers = new Map();
+
+function registerMessageSocket(userId, socket) {
+  const key = String(userId);
+  const bucket = messageSocketUsers.get(key) || new Set();
+  bucket.add(socket);
+  messageSocketUsers.set(key, bucket);
+}
+
+function unregisterMessageSocket(userId, socket) {
+  const key = String(userId);
+  const bucket = messageSocketUsers.get(key);
+  if (!bucket) return;
+  bucket.delete(socket);
+  if (!bucket.size) messageSocketUsers.delete(key);
+}
+
+function notifyMessageUsers(userIds, event, payload) {
+  const unique = [...new Set((userIds || []).map((id) => String(id)).filter(Boolean))];
+  unique.forEach((uid) => {
+    const bucket = messageSocketUsers.get(uid);
+    if (!bucket?.size) return;
+    const body = JSON.stringify({ type: event, payload });
+    bucket.forEach((socket) => {
+      if (socket.readyState !== WebSocket.OPEN) return;
+      try {
+        socket.send(body);
+      } catch {
+        // ignore noisy ws failures
+      }
+    });
+  });
+}
+
+async function readMessageThreadForUser(conn, threadId, userId) {
+  const [rows] = await conn.query(
+    `SELECT mt.*,
+            rq.id AS requester_id,
+            rq.username AS requester_username,
+            rc.id AS recipient_id,
+            rc.username AS recipient_username
+       FROM message_threads mt
+       JOIN users rq ON rq.id = mt.requester_id
+       JOIN users rc ON rc.id = mt.recipient_id
+      WHERE mt.id=? AND (mt.requester_id=? OR mt.recipient_id=?)
+      LIMIT 1`,
+    [threadId, userId, userId]
+  );
+  return rows.length ? rows[0] : null;
+}
+
+app.get('/messages/inbox', messagingLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query(
+      `SELECT mt.*,
+              rq.id AS requester_id,
+              rq.username AS requester_username,
+              rc.id AS recipient_id,
+              rc.username AS recipient_username,
+              COALESCE((
+                SELECT COUNT(*)
+                  FROM message_entries me
+                 WHERE me.thread_id = mt.id
+                   AND me.id > COALESCE(mtr.last_read_message_id, 0)
+                   AND me.sender_id <> ?
+              ), 0) AS unread_count
+         FROM message_threads mt
+         JOIN users rq ON rq.id = mt.requester_id
+         JOIN users rc ON rc.id = mt.recipient_id
+         LEFT JOIN message_thread_reads mtr ON mtr.thread_id = mt.id AND mtr.user_id = ?
+        WHERE mt.status='accepted' AND (mt.requester_id=? OR mt.recipient_id=?)
+        ORDER BY COALESCE(mt.last_message_at, mt.updated_at) DESC
+        LIMIT 200`,
+      [userId, userId, userId, userId]
+    );
+    res.json({ ok: true, threads: rows.map((row) => presentMessageThread(row, userId)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/messages/requests', messagingLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [incoming, outgoing] = await Promise.all([
+      pool.query(
+        `SELECT mt.*, rq.id AS requester_id, rq.username AS requester_username, rc.id AS recipient_id, rc.username AS recipient_username
+           FROM message_threads mt
+           JOIN users rq ON rq.id = mt.requester_id
+           JOIN users rc ON rc.id = mt.recipient_id
+          WHERE mt.status='pending' AND mt.recipient_id=?
+          ORDER BY mt.updated_at DESC
+          LIMIT 200`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT mt.*, rq.id AS requester_id, rq.username AS requester_username, rc.id AS recipient_id, rc.username AS recipient_username
+           FROM message_threads mt
+           JOIN users rq ON rq.id = mt.requester_id
+           JOIN users rc ON rc.id = mt.recipient_id
+          WHERE mt.status='pending' AND mt.requester_id=?
+          ORDER BY mt.updated_at DESC
+          LIMIT 200`,
+        [userId]
+      ),
+    ]);
+
+    res.json({
+      ok: true,
+      incoming: incoming[0].map((row) => presentMessageThread(row, userId)),
+      outgoing: outgoing[0].map((row) => presentMessageThread(row, userId)),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/messages/requests', messagingLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = MessageRequestCreateSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    let recipientId = payload.recipient_id ? Number(payload.recipient_id) : null;
+    if (!recipientId && payload.recipient_username) {
+      const [[row]] = await conn.query('SELECT id FROM users WHERE username=? LIMIT 1', [payload.recipient_username]);
+      recipientId = row?.id ? Number(row.id) : null;
+    }
+    if (!recipientId) return next({ status: 404, code: 'USER_NOT_FOUND', message: 'Recipient not found' });
+    if (recipientId === Number(userId)) return next({ status: 400, code: 'BAD_INPUT', message: 'Cannot message yourself' });
+
+    const [[existing]] = await conn.query(
+      `SELECT id, status, requester_id, recipient_id
+         FROM message_threads
+        WHERE (requester_id=? AND recipient_id=?) OR (requester_id=? AND recipient_id=?)
+        LIMIT 1
+        FOR UPDATE`,
+      [userId, recipientId, recipientId, userId]
+    );
+
+    if (existing && existing.status === 'accepted') {
+      await conn.rollback();
+      return next({ status: 409, code: 'THREAD_EXISTS', message: 'Conversation already exists' });
+    }
+
+    let threadId;
+    if (existing && existing.status === 'pending') {
+      await conn.rollback();
+      return next({ status: 409, code: 'REQUEST_EXISTS', message: 'Request already pending' });
+    }
+
+    const [threadInsert] = await conn.query(
+      `INSERT INTO message_threads (requester_id, recipient_id, status, created_at, updated_at)
+       VALUES (?, ?, 'pending', NOW(), NOW())`,
+      [userId, recipientId]
+    );
+    threadId = Number(threadInsert.insertId);
+
+    const body = payload.message.trim();
+    const [msgInsert] = await conn.query('INSERT INTO message_entries (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, NOW())', [
+      threadId,
+      userId,
+      body,
+    ]);
+
+    await conn.query(
+      `UPDATE message_threads
+          SET last_message_at=NOW(),
+              last_message_preview=?,
+              last_message_sender_id=?,
+              updated_at=NOW()
+        WHERE id=?`,
+      [body.slice(0, 280), userId, threadId]
+    );
+
+    await conn.query(
+      `INSERT INTO message_thread_reads (thread_id, user_id, last_read_message_id, last_read_at)
+       VALUES (?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE last_read_message_id=VALUES(last_read_message_id), last_read_at=VALUES(last_read_at)`,
+      [threadId, userId, Number(msgInsert.insertId)]
+    );
+
+    const threadRow = await readMessageThreadForUser(conn, threadId, userId);
+    await conn.commit();
+
+    notifyMessageUsers([userId, recipientId], 'message:request', {
+      thread_id: threadId,
+      from_user_id: userId,
+      to_user_id: recipientId,
+      status: 'pending',
+    });
+
+    res.json({ ok: true, thread: presentMessageThread(threadRow, userId) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/messages/requests/:threadId/respond', messagingLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const threadId = Number(req.params.threadId);
+    if (!threadId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid thread id' });
+    const { action } = MessageRequestActionSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query('SELECT * FROM message_threads WHERE id=? FOR UPDATE', [threadId]);
+    if (!rows.length) return next({ status: 404, code: 'NOT_FOUND', message: 'Request not found' });
+    const thread = rows[0];
+    if (Number(thread.recipient_id) !== Number(userId)) {
+      return next({ status: 403, code: 'FORBIDDEN', message: 'Only recipient can respond' });
+    }
+    if (thread.status !== 'pending') {
+      return next({ status: 409, code: 'BAD_STATE', message: 'Request already processed' });
+    }
+
+    if (action === 'accept') {
+      await conn.query("UPDATE message_threads SET status='accepted', accepted_at=NOW(), updated_at=NOW() WHERE id=?", [threadId]);
+    } else {
+      await conn.query("UPDATE message_threads SET status='rejected', rejected_at=NOW(), updated_at=NOW() WHERE id=?", [threadId]);
+    }
+
+    const threadRow = await readMessageThreadForUser(conn, threadId, userId);
+    await conn.commit();
+
+    notifyMessageUsers([thread.requester_id, thread.recipient_id], 'message:request:update', {
+      thread_id: threadId,
+      status: action === 'accept' ? 'accepted' : 'rejected',
+    });
+
+    res.json({ ok: true, thread: presentMessageThread(threadRow, userId) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/messages/threads/:threadId', messagingLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const threadId = Number(req.params.threadId);
+    if (!threadId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid thread id' });
+    conn = await pool.getConnection();
+
+    const threadRow = await readMessageThreadForUser(conn, threadId, userId);
+    if (!threadRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Thread not found' });
+
+    const [messages] = await conn.query(
+      `SELECT me.*, u.username AS sender_username
+         FROM message_entries me
+         JOIN users u ON u.id = me.sender_id
+        WHERE me.thread_id=?
+        ORDER BY me.id ASC
+        LIMIT 500`,
+      [threadId]
+    );
+
+    const lastMessageId = messages.length ? Number(messages[messages.length - 1].id) : null;
+    if (lastMessageId) {
+      await conn.query(
+        `INSERT INTO message_thread_reads (thread_id, user_id, last_read_message_id, last_read_at)
+         VALUES (?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE last_read_message_id=VALUES(last_read_message_id), last_read_at=VALUES(last_read_at)`,
+        [threadId, userId, lastMessageId]
+      );
+    }
+
+    res.json({ ok: true, thread: presentMessageThread(threadRow, userId), messages: messages.map(presentMessageEntry) });
+  } catch (err) {
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.post('/messages/threads/:threadId/messages', messagingLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const threadId = Number(req.params.threadId);
+    if (!threadId) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid thread id' });
+    const payload = MessageReplySchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query('SELECT * FROM message_threads WHERE id=? FOR UPDATE', [threadId]);
+    if (!rows.length) return next({ status: 404, code: 'NOT_FOUND', message: 'Thread not found' });
+    const thread = rows[0];
+    const isParticipant = Number(thread.requester_id) === Number(userId) || Number(thread.recipient_id) === Number(userId);
+    if (!isParticipant) return next({ status: 403, code: 'FORBIDDEN', message: 'Not allowed' });
+    if (thread.status !== 'accepted') return next({ status: 409, code: 'BAD_STATE', message: 'Request not accepted yet' });
+
+    const body = payload.message.trim();
+    const [insert] = await conn.query('INSERT INTO message_entries (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, NOW())', [
+      threadId,
+      userId,
+      body,
+    ]);
+
+    await conn.query(
+      `UPDATE message_threads
+          SET last_message_at=NOW(),
+              last_message_preview=?,
+              last_message_sender_id=?,
+              updated_at=NOW()
+        WHERE id=?`,
+      [body.slice(0, 280), userId, threadId]
+    );
+
+    await conn.query(
+      `INSERT INTO message_thread_reads (thread_id, user_id, last_read_message_id, last_read_at)
+       VALUES (?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE last_read_message_id=VALUES(last_read_message_id), last_read_at=VALUES(last_read_at)`,
+      [threadId, userId, Number(insert.insertId)]
+    );
+
+    const [[messageRow]] = await conn.query(
+      `SELECT me.*, u.username AS sender_username
+         FROM message_entries me
+         JOIN users u ON u.id = me.sender_id
+        WHERE me.id=?`,
+      [Number(insert.insertId)]
+    );
+
+    await conn.commit();
+
+    notifyMessageUsers([thread.requester_id, thread.recipient_id], 'message:new', {
+      thread_id: threadId,
+      message: presentMessageEntry(messageRow),
+    });
+
+    res.json({ ok: true, message: presentMessageEntry(messageRow) });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
   }
 });
 
@@ -9827,6 +10253,68 @@ app.use((err, req, res, next) => {
   res.status(status).json(body);
 });
 
+
+const messageWsServer = new WebSocketServer({ noServer: true });
+messageWsServer.on('connection', (socket, req) => {
+  handleMessagesWebsocketConnection(socket, req).catch((err) => {
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'error', payload: { message: err?.message || 'Stream error' } }));
+    }
+    try {
+      socket.close(1011, 'STREAM_ERROR');
+    } catch {
+      // ignore
+    }
+  });
+});
+
+async function handleMessagesWebsocketConnection(socket, req) {
+  let userId = null;
+  let heartbeatTimer;
+  const cleanup = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (userId !== null) unregisterMessageSocket(userId, socket);
+  };
+
+  try {
+    req.cookies = { ...(req.cookies || {}), ...parseCookies(req.headers.cookie || '') };
+    userId = await requireUser(req);
+    registerMessageSocket(userId, socket);
+
+    socket.on('close', cleanup);
+    socket.on('error', cleanup);
+    socket.on('message', (raw) => {
+      try {
+        const data = JSON.parse(raw.toString());
+        if (data?.type === 'ping' && socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'pong', payload: { ts: Date.now() } }));
+        }
+      } catch {
+        // ignore malformed message
+      }
+    });
+
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'connected', payload: { user_id: Number(userId), ts: Date.now() } }));
+    }
+    heartbeatTimer = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'ping', payload: { ts: Date.now() } }));
+      }
+    }, 15000);
+  } catch (err) {
+    cleanup();
+    if (socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'error', payload: { message: err?.message || 'Stream error' } }));
+    }
+    try {
+      socket.close(4401, 'UNAUTHENTICATED');
+    } catch {
+      // ignore
+    }
+  }
+}
+
 const spotWsServer = new WebSocketServer({ noServer: true });
 spotWsServer.on('connection', (socket, req) => {
   handleSpotWebsocketConnection(socket, req).catch((err) => {
@@ -9848,6 +10336,10 @@ server.on('upgrade', (req, socket, head) => {
     if (pathname === '/spot/ws') {
       spotWsServer.handleUpgrade(req, socket, head, (ws) => {
         spotWsServer.emit('connection', ws, req);
+      });
+    } else if (pathname === '/messages/ws') {
+      messageWsServer.handleUpgrade(req, socket, head, (ws) => {
+        messageWsServer.emit('connection', ws, req);
       });
     } else {
       socket.destroy();
