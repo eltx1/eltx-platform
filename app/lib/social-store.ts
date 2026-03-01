@@ -217,6 +217,22 @@ function getPostState(postId: string, userId?: UserScopeId): PostInteractionStat
   return interactions[postId] || { liked: false, reposted: false, comments: [] };
 }
 
+function getPostStateFromMap(postId: string, interactions: InteractionMap): PostInteractionState {
+  return interactions[postId] || { liked: false, reposted: false, comments: [] };
+}
+
+function getPostInteractionSummaryFromMap(post: SocialPost, interactions: InteractionMap) {
+  const state = getPostStateFromMap(post.id, interactions);
+  return {
+    liked: state.liked,
+    reposted: state.reposted,
+    commentsList: state.comments,
+    likes: post.likes + (state.liked ? 1 : 0),
+    reposts: post.reposts + (state.reposted ? 1 : 0),
+    comments: post.comments + state.comments.length,
+  };
+}
+
 export function getPostInteractionSummary(post: SocialPost, userId?: UserScopeId) {
   const state = getPostState(post.id, userId);
   return {
@@ -332,8 +348,11 @@ function estimateTrustSignal(post: SocialPost) {
   return Math.log10(followers + 1);
 }
 
-function buildScore(post: SocialPost, settings: FeedAlgorithmSettings, userId?: UserScopeId) {
-  const interaction = getPostInteractionSummary(post, userId);
+function buildScoreFromSummary(
+  post: SocialPost,
+  settings: FeedAlgorithmSettings,
+  interaction: ReturnType<typeof getPostInteractionSummaryFromMap>,
+) {
   const threadScore = interaction.commentsList.length;
   return (
     interaction.likes * settings.likeWeight
@@ -349,8 +368,16 @@ export function getForYouFeed(posts: SocialPost[], options?: { userId?: UserScop
   const settings = normalizeFeedAlgorithmSettings(options?.settings ?? DEFAULT_FEED_ALGORITHM_SETTINGS);
   const followed = posts.filter((post) => post.isFollowed);
   const discover = posts.filter((post) => !post.isFollowed);
+  const interactions = getInteractions(options?.userId);
+  const scoreByPostId = new Map<string, number>();
+
+  posts.forEach((post) => {
+    const summary = getPostInteractionSummaryFromMap(post, interactions);
+    scoreByPostId.set(post.id, buildScoreFromSummary(post, settings, summary));
+  });
+
   const sortFn = (a: SocialPost, b: SocialPost) =>
-    buildScore(b, settings, options?.userId) - buildScore(a, settings, options?.userId)
+    (scoreByPostId.get(b.id) ?? 0) - (scoreByPostId.get(a.id) ?? 0)
     || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   const followedSorted = [...followed].sort(sortFn);
   const discoverSorted = [...discover].sort(sortFn);
