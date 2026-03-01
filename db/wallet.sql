@@ -741,7 +741,7 @@ CREATE TABLE IF NOT EXISTS ai_message_ledger (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
   usage_date DATE NOT NULL,
-  charge_type ENUM('free','eltx') NOT NULL,
+  charge_type ENUM('free','usdt','eltx') NOT NULL,
   asset VARCHAR(32) NOT NULL,
   amount_wei DECIMAL(65,0) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -752,7 +752,7 @@ CREATE TABLE IF NOT EXISTS ai_message_ledger (
 ALTER TABLE ai_message_ledger
   ADD COLUMN IF NOT EXISTS user_id INT NOT NULL AFTER id,
   ADD COLUMN IF NOT EXISTS usage_date DATE NOT NULL AFTER user_id,
-  ADD COLUMN IF NOT EXISTS charge_type ENUM('free','eltx') NOT NULL AFTER usage_date,
+  ADD COLUMN IF NOT EXISTS charge_type ENUM('free','usdt','eltx') NOT NULL AFTER usage_date,
   ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL AFTER charge_type,
   ADD COLUMN IF NOT EXISTS amount_wei DECIMAL(65,0) NOT NULL AFTER asset,
   ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER amount_wei,
@@ -760,6 +760,7 @@ ALTER TABLE ai_message_ledger
   ADD INDEX IF NOT EXISTS idx_ai_ledger_type (charge_type);
 
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('ai_daily_free_messages', '10');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('ai_message_price_usdt', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('ai_message_price_eltx', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_enabled', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_spread_bps', '200');
