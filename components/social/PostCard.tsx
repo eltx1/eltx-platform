@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { Heart, MessageCircle, Repeat2, Send } from 'lucide-react';
+import { Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
 import type { SocialComment, SocialPost } from '../../app/lib/social-store';
+import { dict, useLang } from '../../app/lib/i18n';
 
 type PostCardProps = {
   post: SocialPost;
@@ -28,6 +29,8 @@ export default function PostCard({
   commentPlaceholder = 'Write a comment',
   commentSubmitLabel = 'Reply',
 }: PostCardProps) {
+  const { lang } = useLang();
+  const t = dict[lang];
   const [openComposer, setOpenComposer] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [localLikeState, setLocalLikeState] = useState({ liked: false, likes: post.likes });
@@ -46,6 +49,15 @@ export default function PostCard({
   const effectiveLikeState = likeState ?? localLikeState;
   const effectiveRepostState = repostState ?? localRepostState;
   const effectiveCommentsState = commentsState ?? localCommentsState;
+
+
+  const trustLevel = useMemo(() => {
+    const followers = post.authorFollowers || 0;
+    if (followers >= 5000) return t.dashboard.social.trustHigh;
+    if (followers >= 1000) return t.dashboard.social.trustTrusted;
+    if (followers >= 200) return t.dashboard.social.trustGrowing;
+    return t.dashboard.social.trustNew;
+  }, [post.authorFollowers, t.dashboard.social.trustGrowing, t.dashboard.social.trustHigh, t.dashboard.social.trustNew, t.dashboard.social.trustTrusted]);
 
   const dateLabel = useMemo(() => {
     try {
@@ -76,7 +88,7 @@ export default function PostCard({
           )}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-6 text-xs text-white/60">
+      <div className="flex flex-wrap items-center gap-4 text-xs text-white/60">
         <button
           className={`inline-flex items-center gap-2 transition ${effectiveLikeState.liked ? 'text-rose-300' : 'hover:text-[#f91880]'}`}
           onClick={() => {
@@ -117,6 +129,13 @@ export default function PostCard({
           <Repeat2 className="h-4 w-4" />
           <span>{effectiveRepostState.reposts}</span>
         </button>
+      </div>
+
+
+      <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-[#0d0f12] px-3 py-2 text-[11px] text-white/65">
+        <span className="inline-flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" />{t.dashboard.social.viewsLabel}: {post.views}</span>
+        <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />{trustLevel}</span>
+        <span>{(post.authorFollowers || 0).toLocaleString()} {t.dashboard.social.followersLabel}</span>
       </div>
 
       {openComposer && (

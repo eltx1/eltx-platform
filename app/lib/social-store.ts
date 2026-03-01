@@ -1,6 +1,7 @@
 'use client';
 
 import { imageRemotePatterns } from './image-remote-patterns.mjs';
+import { DEFAULT_FEED_ALGORITHM_SETTINGS, normalizeFeedAlgorithmSettings, type FeedAlgorithmSettings } from './feed-algorithm';
 
 export type SocialPost = {
   id: string;
@@ -14,6 +15,8 @@ export type SocialPost = {
   likes: number;
   comments: number;
   reposts: number;
+  views: number;
+  authorFollowers?: number;
   isFollowed?: boolean;
 };
 
@@ -74,6 +77,8 @@ const seedPosts: SocialPost[] = [
     likes: 128,
     comments: 24,
     reposts: 18,
+    views: 2250,
+    authorFollowers: 3900,
     isFollowed: true,
   },
   {
@@ -88,6 +93,8 @@ const seedPosts: SocialPost[] = [
     likes: 86,
     comments: 12,
     reposts: 7,
+    views: 980,
+    authorFollowers: 1100,
     isFollowed: false,
   },
   {
@@ -101,6 +108,8 @@ const seedPosts: SocialPost[] = [
     likes: 42,
     comments: 8,
     reposts: 4,
+    views: 720,
+    authorFollowers: 610,
     isFollowed: true,
   },
   {
@@ -114,6 +123,8 @@ const seedPosts: SocialPost[] = [
     likes: 210,
     comments: 31,
     reposts: 26,
+    views: 4120,
+    authorFollowers: 5300,
     isFollowed: false,
   },
 ];
@@ -315,20 +326,56 @@ export function getAllPosts(userId?: UserScopeId): SocialPost[] {
   return Array.from(byId.values());
 }
 
-export function getForYouFeed(posts: SocialPost[]) {
+function estimateTrustSignal(post: SocialPost) {
+  const followers = post.authorFollowers || 0;
+  if (!followers) return 0;
+  return Math.log10(followers + 1);
+}
+
+function buildScore(post: SocialPost, settings: FeedAlgorithmSettings, userId?: UserScopeId) {
+  const interaction = getPostInteractionSummary(post, userId);
+  const threadScore = interaction.commentsList.length;
+  return (
+    interaction.likes * settings.likeWeight
+    + interaction.comments * settings.commentWeight
+    + interaction.reposts * settings.repostWeight
+    + Number(post.views || 0) * settings.viewWeight
+    + estimateTrustSignal(post) * settings.trustWeight
+    + threadScore * settings.threadBoostWeight
+  );
+}
+
+export function getForYouFeed(posts: SocialPost[], options?: { userId?: UserScopeId; settings?: Partial<FeedAlgorithmSettings> | null }) {
+  const settings = normalizeFeedAlgorithmSettings(options?.settings ?? DEFAULT_FEED_ALGORITHM_SETTINGS);
   const followed = posts.filter((post) => post.isFollowed);
   const discover = posts.filter((post) => !post.isFollowed);
-  const score = (post: SocialPost) => post.likes * 2 + post.comments * 3 + post.reposts * 4;
   const sortFn = (a: SocialPost, b: SocialPost) =>
-    score(b) - score(a) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    buildScore(b, settings, options?.userId) - buildScore(a, settings, options?.userId)
+    || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   const followedSorted = [...followed].sort(sortFn);
   const discoverSorted = [...discover].sort(sortFn);
   const feed: SocialPost[] = [];
-  const max = 30;
-  const half = Math.ceil(max / 2);
-  feed.push(...followedSorted.slice(0, half));
+  const max = settings.maxFeedItems;
+  const followingTarget = Math.round(max * (settings.followingRatio / 100));
+  feed.push(...followedSorted.slice(0, followingTarget));
   feed.push(...discoverSorted.slice(0, max - feed.length));
+  if (feed.length < max) {
+    const leftovers = [...followedSorted.slice(followingTarget), ...discoverSorted.slice(max - followingTarget)];
+    leftovers
+      .sort(sortFn)
+      .forEach((post) => {
+        if (feed.length < max && !feed.find((item) => item.id === post.id)) {
+          feed.push(post);
+        }
+      });
+  }
   return feed;
+}
+
+export function getFollowingFeed(posts: SocialPost[]) {
+  return [...posts]
+    .filter((post) => post.isFollowed)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 export function createPost({
@@ -352,6 +399,8 @@ export function createPost({
     likes: 0,
     comments: 0,
     reposts: 0,
+    views: 0,
+    authorFollowers: 15,
     isFollowed: true,
   };
 }

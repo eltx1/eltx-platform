@@ -33,6 +33,7 @@ import {
   addPostComment,
   createPost,
   getAllPosts,
+  getFollowingFeed,
   getForYouFeed,
   getPostInteractionSummary,
   getPostWordLimit,
@@ -42,6 +43,10 @@ import {
   togglePostRepost,
   type SocialPost,
 } from '../../lib/social-store';
+import { apiFetch } from '../../lib/api';
+import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../../lib/feed-algorithm';
+
+type FeedTab = 'for-you' | 'following';
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -53,6 +58,8 @@ export default function DashboardPage() {
   const [quickPost, setQuickPost] = useState('');
   const [aiQuestion, setAiQuestion] = useState('');
   const [wordLimit, setWordLimit] = useState(1000);
+  const [activeFeedTab, setActiveFeedTab] = useState<FeedTab>('for-you');
+  const [feedSettings, setFeedSettings] = useState<FeedAlgorithmSettings>(DEFAULT_FEED_ALGORITHM_SETTINGS);
 
   useEffect(() => {
     if (user === undefined) return;
@@ -67,12 +74,28 @@ export default function DashboardPage() {
     setWordLimit(getPostWordLimit());
   }, [user?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadSettings = async () => {
+      const res = await apiFetch<{ settings: FeedAlgorithmSettings }>('/api/admin/feed-algorithm');
+      if (!cancelled && res.ok && res.data?.settings) {
+        setFeedSettings(res.data.settings);
+      }
+    };
+    loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const wordCount = useMemo(() => {
     if (!quickPost.trim()) return 0;
     return quickPost.trim().split(/\s+/).length;
   }, [quickPost]);
 
-  const forYouFeed = useMemo(() => getForYouFeed(posts), [posts]);
+  const forYouFeed = useMemo(() => getForYouFeed(posts, { userId: user?.id, settings: feedSettings }), [posts, user?.id, feedSettings]);
+  const followingFeed = useMemo(() => getFollowingFeed(posts), [posts]);
+  const activeFeed = activeFeedTab === 'for-you' ? forYouFeed : followingFeed;
 
   return (
     <div className="space-y-4">
@@ -141,8 +164,22 @@ export default function DashboardPage() {
               </div>
               <span className="text-xs text-white/50">{t.dashboard.social.forYouSubtitle}</span>
             </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                className={`rounded-full border px-3 py-1.5 text-xs ${activeFeedTab === 'for-you' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
+                onClick={() => setActiveFeedTab('for-you')}
+              >
+                {t.dashboard.social.forYouTitle}
+              </button>
+              <button
+                className={`rounded-full border px-3 py-1.5 text-xs ${activeFeedTab === 'following' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
+                onClick={() => setActiveFeedTab('following')}
+              >
+                {t.dashboard.social.followingTitle}
+              </button>
+            </div>
             <div className="space-y-3">
-              {forYouFeed.map((post) => {
+              {activeFeed.map((post) => {
                 const summary = getPostInteractionSummary(post, user?.id);
                 return (
                   <PostCard

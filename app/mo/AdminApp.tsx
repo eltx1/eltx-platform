@@ -22,6 +22,7 @@ import {
   Send,
   ShieldCheck,
   Sparkles,
+  SlidersHorizontal,
   Trash2,
   UserPlus,
   Users,
@@ -59,7 +60,8 @@ type Section =
   | 'support'
   | 'faq'
   | 'p2p'
-  | 'withdrawals';
+  | 'withdrawals'
+  | 'feed';
 
 interface SummaryResponse {
   summary: {
@@ -120,6 +122,17 @@ type FeeSettings = {
 type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
 
 type AiSettings = { daily_free_messages: number; message_price_usdt: string };
+type FeedAlgorithmSettings = {
+  followingRatio: number;
+  forYouRatio: number;
+  likeWeight: number;
+  commentWeight: number;
+  repostWeight: number;
+  viewWeight: number;
+  trustWeight: number;
+  threadBoostWeight: number;
+  maxFeedItems: number;
+};
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; usdt_spent: string; usdt_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
 
@@ -317,6 +330,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'staking', label: 'Staking', icon: Layers },
   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'ai', label: 'AI', icon: Sparkles },
+  { id: 'feed', label: 'Feed Algorithm', icon: SlidersHorizontal },
   { id: 'referrals', label: 'Referrals', icon: UserPlus },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'support', label: 'Support', icon: LifeBuoy },
@@ -1909,6 +1923,108 @@ function StatCard({ title, value, subtitle, icon: Icon }: { title: string; value
         <Icon className="h-10 w-10 text-blue-400" />
       </div>
     </div>
+  );
+}
+
+
+function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<FeedAlgorithmSettings | null>(null);
+  const [source, setSource] = useState<'db' | 'file'>('file');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<{ settings: FeedAlgorithmSettings; source?: 'db' | 'file' }>('/api/admin/feed-algorithm');
+    if (!res.ok || !res.data?.settings) {
+      onNotify(res.error || 'Failed to load feed settings', 'error');
+      setLoading(false);
+      return;
+    }
+    setSettings(res.data.settings);
+    setSource(res.data.source || 'file');
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const update = (key: keyof FeedAlgorithmSettings, value: number) => {
+    setSettings((prev) => {
+      if (!prev) return prev;
+      if (key === 'followingRatio') {
+        const nextFollowing = Math.max(0, Math.min(100, value));
+        return { ...prev, followingRatio: nextFollowing, forYouRatio: 100 - nextFollowing };
+      }
+      if (key === 'forYouRatio') {
+        const nextForYou = Math.max(0, Math.min(100, value));
+        return { ...prev, forYouRatio: nextForYou, followingRatio: 100 - nextForYou };
+      }
+      return { ...prev, [key]: value };
+    });
+  };
+
+  const save = async () => {
+    if (!settings) return;
+    setSaving(true);
+    const res = await apiFetch<{ settings: FeedAlgorithmSettings; source?: 'db' | 'file' }>('/api/admin/feed-algorithm', {
+      method: 'PUT',
+      body: JSON.stringify({ settings }),
+    });
+    setSaving(false);
+    if (!res.ok || !res.data?.settings) {
+      onNotify(res.error || 'Failed to save feed settings', 'error');
+      return;
+    }
+    setSettings(res.data.settings);
+    setSource(res.data.source || 'file');
+    onNotify('Feed algorithm settings saved', 'success');
+  };
+
+  if (loading || !settings) {
+    return <div className="x-card p-4 text-sm text-white/70">Loading feed settings...</div>;
+  }
+
+  const row = (label: string, key: keyof FeedAlgorithmSettings, min = 0, max = 100, step = 1) => (
+    <label className="space-y-2">
+      <div className="flex items-center justify-between text-xs text-white/70"><span>{label}</span><span>{settings[key]}</span></div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={settings[key]}
+        onChange={(event) => update(key, Number(event.target.value))}
+        className="w-full"
+      />
+    </label>
+  );
+
+  return (
+    <section className="x-card space-y-4 p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Feed Algorithm Control</h2>
+          <p className="text-xs text-white/60">Admin can tune For You ranking, trust signal impact, and Following/For You split.</p>
+          <p className="text-[11px] text-white/45">Persistence source: {source === 'db' ? 'Database (platform_settings)' : 'Local file fallback'}</p>
+        </div>
+        <button className="btn btn-primary px-4 py-2 text-xs" onClick={save} disabled={saving}>
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {row('Following ratio (%)', 'followingRatio', 0, 100)}
+        {row('For You ratio (%)', 'forYouRatio', 0, 100)}
+        {row('Likes weight', 'likeWeight', 0, 20)}
+        {row('Comments weight', 'commentWeight', 0, 20)}
+        {row('Reposts weight', 'repostWeight', 0, 20)}
+        {row('Views weight', 'viewWeight', 0, 20)}
+        {row('Profile trust weight', 'trustWeight', 0, 20)}
+        {row('Thread boost weight', 'threadBoostWeight', 0, 20)}
+        {row('Max feed items', 'maxFeedItems', 5, 100)}
+      </div>
+    </section>
   );
 }
 
@@ -4627,6 +4743,7 @@ export default function AdminApp() {
         <SectionTabs active={active} onSelect={setActive} />
         <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-xl shadow-blue-900/20 backdrop-blur">
           {active === 'overview' && <OverviewPanel onError={(msg) => notify(msg, 'error')} />}
+          {active === 'feed' && <FeedAlgorithmPanel onNotify={notify} />}
           {active === 'admins' && <AdminUsersPanel admin={admin} onNotify={notify} />}
           {active === 'users' && <UsersPanel onNotify={notify} />}
           {active === 'kyc' && <KycPanel onNotify={notify} />}
