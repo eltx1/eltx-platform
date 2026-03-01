@@ -1931,18 +1931,16 @@ function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<FeedAlgorithmSettings | null>(null);
-  const [source, setSource] = useState<'db' | 'file'>('file');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await apiFetch<{ settings: FeedAlgorithmSettings; source?: 'db' | 'file' }>('/api/admin/feed-algorithm');
+    const res = await apiFetch<{ settings: FeedAlgorithmSettings }>('/api/admin/feed-algorithm');
     if (!res.ok || !res.data?.settings) {
       onNotify(res.error || 'Failed to load feed settings', 'error');
       setLoading(false);
       return;
     }
     setSettings(res.data.settings);
-    setSource(res.data.source || 'file');
     setLoading(false);
   }, [onNotify]);
 
@@ -1951,24 +1949,13 @@ function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?
   }, [load]);
 
   const update = (key: keyof FeedAlgorithmSettings, value: number) => {
-    setSettings((prev) => {
-      if (!prev) return prev;
-      if (key === 'followingRatio') {
-        const nextFollowing = Math.max(0, Math.min(100, value));
-        return { ...prev, followingRatio: nextFollowing, forYouRatio: 100 - nextFollowing };
-      }
-      if (key === 'forYouRatio') {
-        const nextForYou = Math.max(0, Math.min(100, value));
-        return { ...prev, forYouRatio: nextForYou, followingRatio: 100 - nextForYou };
-      }
-      return { ...prev, [key]: value };
-    });
+    setSettings((prev) => (prev ? { ...prev, [key]: value } : prev));
   };
 
   const save = async () => {
     if (!settings) return;
     setSaving(true);
-    const res = await apiFetch<{ settings: FeedAlgorithmSettings; source?: 'db' | 'file' }>('/api/admin/feed-algorithm', {
+    const res = await apiFetch<{ settings: FeedAlgorithmSettings }>('/api/admin/feed-algorithm', {
       method: 'PUT',
       body: JSON.stringify({ settings }),
     });
@@ -1978,7 +1965,6 @@ function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?
       return;
     }
     setSettings(res.data.settings);
-    setSource(res.data.source || 'file');
     onNotify('Feed algorithm settings saved', 'success');
   };
 
@@ -2007,7 +1993,6 @@ function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?
         <div>
           <h2 className="text-base font-semibold">Feed Algorithm Control</h2>
           <p className="text-xs text-white/60">Admin can tune For You ranking, trust signal impact, and Following/For You split.</p>
-          <p className="text-[11px] text-white/45">Persistence source: {source === 'db' ? 'Database (platform_settings)' : 'Local file fallback'}</p>
         </div>
         <button className="btn btn-primary px-4 py-2 text-xs" onClick={save} disabled={saving}>
           {saving ? 'Saving...' : 'Save'}

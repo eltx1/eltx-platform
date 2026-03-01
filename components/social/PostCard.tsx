@@ -53,11 +53,11 @@ export default function PostCard({
 
   const trustLevel = useMemo(() => {
     const followers = post.authorFollowers || 0;
-    if (followers >= 5000) return t.dashboard.social.trustHigh;
-    if (followers >= 1000) return t.dashboard.social.trustTrusted;
-    if (followers >= 200) return t.dashboard.social.trustGrowing;
-    return t.dashboard.social.trustNew;
-  }, [post.authorFollowers, t.dashboard.social.trustGrowing, t.dashboard.social.trustHigh, t.dashboard.social.trustNew, t.dashboard.social.trustTrusted]);
+    if (followers >= 5000) return 'High trust';
+    if (followers >= 1000) return 'Trusted';
+    if (followers >= 200) return 'Growing';
+    return 'New creator';
+  }, [post.authorFollowers]);
 
   const dateLabel = useMemo(() => {
     try {
@@ -133,9 +133,9 @@ export default function PostCard({
 
 
       <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-[#0d0f12] px-3 py-2 text-[11px] text-white/65">
-        <span className="inline-flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" />{t.dashboard.social.viewsLabel}: {post.views}</span>
+        <span className="inline-flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" />{post.views}</span>
         <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />{trustLevel}</span>
-        <span>{(post.authorFollowers || 0).toLocaleString()} {t.dashboard.social.followersLabel}</span>
+        <span>{(post.authorFollowers || 0).toLocaleString()} followers</span>
       </div>
 
       {openComposer && (
