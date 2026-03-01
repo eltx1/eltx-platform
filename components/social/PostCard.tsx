@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import { Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
 import type { SocialComment, SocialPost } from '../../app/lib/social-store';
+import { dict, useLang } from '../../app/lib/i18n';
 
 type PostCardProps = {
   post: SocialPost;
@@ -28,6 +29,8 @@ export default function PostCard({
   commentPlaceholder = 'Write a comment',
   commentSubmitLabel = 'Reply',
 }: PostCardProps) {
+  const { lang } = useLang();
+  const t = dict[lang];
   const [openComposer, setOpenComposer] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [localLikeState, setLocalLikeState] = useState({ liked: false, likes: post.likes });
