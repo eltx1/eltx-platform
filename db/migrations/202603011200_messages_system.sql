@@ -1,15 +1,14 @@
 -- Messaging system: requests + inbox + read tracking
--- Note: user reference columns use signed INT to match existing users.id schema in this project.
 CREATE TABLE IF NOT EXISTS message_threads (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  requester_id INT NOT NULL,
-  recipient_id INT NOT NULL,
+  requester_id INT UNSIGNED NOT NULL,
+  recipient_id INT UNSIGNED NOT NULL,
   status ENUM('pending','accepted','rejected') NOT NULL DEFAULT 'pending',
   accepted_at DATETIME NULL,
   rejected_at DATETIME NULL,
   last_message_at DATETIME NULL,
   last_message_preview VARCHAR(280) NULL,
-  last_message_sender_id INT NULL,
+  last_message_sender_id INT UNSIGNED NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -25,7 +24,7 @@ CREATE TABLE IF NOT EXISTS message_threads (
 CREATE TABLE IF NOT EXISTS message_entries (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   thread_id BIGINT UNSIGNED NOT NULL,
-  sender_id INT NOT NULL,
+  sender_id INT UNSIGNED NOT NULL,
   body TEXT NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
@@ -37,7 +36,7 @@ CREATE TABLE IF NOT EXISTS message_entries (
 
 CREATE TABLE IF NOT EXISTS message_thread_reads (
   thread_id BIGINT UNSIGNED NOT NULL,
-  user_id INT NOT NULL,
+  user_id INT UNSIGNED NOT NULL,
   last_read_message_id BIGINT UNSIGNED NULL,
   last_read_at DATETIME NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
