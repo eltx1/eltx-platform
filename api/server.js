@@ -4160,8 +4160,14 @@ app.post('/messages/requests', messagingLimiter, async (req, res, next) => {
       const [[row]] = await conn.query('SELECT id FROM users WHERE username=? LIMIT 1', [payload.recipient_username]);
       recipientId = row?.id ? Number(row.id) : null;
     }
-    if (!recipientId) return next({ status: 404, code: 'USER_NOT_FOUND', message: 'Recipient not found' });
-    if (recipientId === Number(userId)) return next({ status: 400, code: 'BAD_INPUT', message: 'Cannot message yourself' });
+    if (!recipientId) {
+      await conn.rollback();
+      return next({ status: 404, code: 'USER_NOT_FOUND', message: 'Recipient not found' });
+    }
+    if (recipientId === Number(userId)) {
+      await conn.rollback();
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Cannot message yourself' });
+    }
 
     const [[existing]] = await conn.query(
       `SELECT id, status, requester_id, recipient_id
@@ -4183,12 +4189,25 @@ app.post('/messages/requests', messagingLimiter, async (req, res, next) => {
       return next({ status: 409, code: 'REQUEST_EXISTS', message: 'Request already pending' });
     }
 
-    const [threadInsert] = await conn.query(
-      `INSERT INTO message_threads (requester_id, recipient_id, status, created_at, updated_at)
-       VALUES (?, ?, 'pending', NOW(), NOW())`,
-      [userId, recipientId]
-    );
-    threadId = Number(threadInsert.insertId);
+    if (existing && existing.status === 'rejected') {
+      await conn.query(
+        `UPDATE message_threads
+            SET status='pending', accepted_at=NULL, rejected_at=NULL, updated_at=NOW(), last_message_at=NULL,
+                last_message_preview=NULL, last_message_sender_id=NULL
+          WHERE id=?`,
+        [Number(existing.id)]
+      );
+      await conn.query('DELETE FROM message_entries WHERE thread_id=?', [Number(existing.id)]);
+      await conn.query('DELETE FROM message_thread_reads WHERE thread_id=?', [Number(existing.id)]);
+      threadId = Number(existing.id);
+    } else {
+      const [threadInsert] = await conn.query(
+        `INSERT INTO message_threads (requester_id, recipient_id, status, created_at, updated_at)
+         VALUES (?, ?, 'pending', NOW(), NOW())`,
+        [userId, recipientId]
+      );
+      threadId = Number(threadInsert.insertId);
+    }
 
     const body = payload.message.trim();
     const [msgInsert] = await conn.query('INSERT INTO message_entries (thread_id, sender_id, body, created_at) VALUES (?, ?, ?, NOW())', [
@@ -4248,12 +4267,17 @@ app.post('/messages/requests/:threadId/respond', messagingLimiter, async (req, r
     await conn.beginTransaction();
 
     const [rows] = await conn.query('SELECT * FROM message_threads WHERE id=? FOR UPDATE', [threadId]);
-    if (!rows.length) return next({ status: 404, code: 'NOT_FOUND', message: 'Request not found' });
+    if (!rows.length) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'Request not found' });
+    }
     const thread = rows[0];
     if (Number(thread.recipient_id) !== Number(userId)) {
+      await conn.rollback();
       return next({ status: 403, code: 'FORBIDDEN', message: 'Only recipient can respond' });
     }
     if (thread.status !== 'pending') {
+      await conn.rollback();
       return next({ status: 409, code: 'BAD_STATE', message: 'Request already processed' });
     }
 
