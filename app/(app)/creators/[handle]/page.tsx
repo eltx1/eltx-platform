@@ -12,15 +12,20 @@ type CreatorProfilePageProps = {
   params: { handle: string };
 };
 
+function normalizeHandle(value: string) {
+  return value.trim().replace(/^@+/, '').toLowerCase();
+}
+
 export default function CreatorProfilePage({ params }: CreatorProfilePageProps) {
   const { user } = useAuth();
   const { lang } = useLang();
   const t = dict[lang];
-  const normalizedHandle = `@${decodeURIComponent(params.handle || '').replace(/^@/, '')}`;
+  const decodedRouteHandle = decodeURIComponent(params.handle || '');
+  const normalizedRouteHandle = normalizeHandle(decodedRouteHandle);
 
   const creatorData = useMemo(() => {
     const posts = getAllPosts(user?.id);
-    const byCreator = posts.filter((post) => post.handle.toLowerCase() === normalizedHandle.toLowerCase());
+    const byCreator = posts.filter((post) => normalizeHandle(post.handle) === normalizedRouteHandle);
     const latestPost = byCreator[0] || null;
 
     if (!latestPost) return null;
@@ -45,10 +50,10 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
       postsCount: byCreator.length,
       ...aggregate,
     };
-  }, [lang, normalizedHandle, user?.id]);
+  }, [lang, normalizedRouteHandle, user?.id]);
 
   const selfProfile = getProfile(user?.id);
-  const isOwnProfile = selfProfile.handle.toLowerCase() === normalizedHandle.toLowerCase();
+  const isOwnProfile = normalizeHandle(selfProfile.handle) === normalizedRouteHandle;
 
   if (!creatorData) {
     return (

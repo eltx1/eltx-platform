@@ -68,7 +68,7 @@ export default function PostCard({
     }
   }, [post.createdAt]);
 
-  const profileHref = `/creators/${post.handle.replace(/^@/, '')}`;
+  const profileHref = `/creators/${encodeURIComponent(post.handle.replace(/^@/, '').trim())}`;
 
   return (
     <article className="rounded-3xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#121417]">
