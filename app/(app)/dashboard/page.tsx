@@ -21,7 +21,7 @@ import {
   PencilLine,
   Plus,
   Send,
-  BarChart3,
+  Bot,
   Clock3,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
@@ -110,10 +110,14 @@ export default function DashboardPage() {
             <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} />
             <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} />
           </div>
-          <div className="rounded-2xl border border-[#2f3336] bg-black/30 p-3 text-xs text-white/70">
-            <p className="flex items-center gap-2 text-white"><BarChart3 className="h-4 w-4 text-[#c9a75c]" /> Live modules</p>
-            <p className="mt-2">Social feed, market board, AI shortcuts, and profile actions are now active in one modern layout.</p>
-          </div>
+          <button
+            type="button"
+            onClick={() => router.push('/ai')}
+            className="w-full rounded-2xl border border-[#c9a75c]/40 bg-gradient-to-r from-[#0e1528] to-[#10161f] p-3 text-left transition hover:border-[#c9a75c]/70 hover:brightness-110"
+          >
+            <p className="flex items-center gap-2 text-sm font-semibold text-[#f4deae]"><Bot className="h-4 w-4" /> {lang === 'ar' ? 'اسأل LordAI 🤖' : 'Ask LordAI 🤖'}</p>
+            <p className="mt-1 text-xs text-white/70">{lang === 'ar' ? 'مساعد ذكي سريع للأفكار، الإجابات، وتحسين محتواك.' : 'Get instant help, ideas, and smart answers for your next move.'}</p>
+          </button>
         </aside>
 
         <main className="space-y-4">
