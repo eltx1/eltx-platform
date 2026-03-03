@@ -93,12 +93,17 @@ export default function NavBar() {
             <span className="hidden sm:inline text-sm text-white/70">AI social media platform</span>
           </Link>
           {user && (
-            <div className="hidden sm:flex flex-col rounded-xl border border-[#2f3336] bg-[#16181c] px-3 py-1.5 text-[10px] leading-tight text-white/70">
-              <span className="uppercase tracking-[0.2em]">{t.nav.balance}</span>
-              <span className="text-xs font-semibold text-white">
+            <>
+              <div className="hidden sm:flex flex-col rounded-xl border border-[#2f3336] bg-[#16181c] px-3 py-1.5 text-[10px] leading-tight text-white/70">
+                <span className="uppercase tracking-[0.2em]">{t.nav.balance}</span>
+                <span className="text-xs font-semibold text-white">
+                  {loadingBalance ? '...' : `${balance ?? '0'} USDT`}
+                </span>
+              </div>
+              <div className="sm:hidden rounded-full border border-[#c9a75c]/40 bg-[#16181c] px-2.5 py-1 text-[10px] font-semibold text-[#f4deae]">
                 {loadingBalance ? '...' : `${balance ?? '0'} USDT`}
-              </span>
-            </div>
+              </div>
+            </>
           )}
         </div>
         <nav className="hidden sm:flex items-center gap-2 text-sm">

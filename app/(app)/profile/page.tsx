@@ -6,12 +6,14 @@ import Link from 'next/link';
 import { dict, useLang } from '../../lib/i18n';
 import { useAuth } from '../../lib/auth';
 import PostCard from '../../../components/social/PostCard';
-import { getAllPosts, getProfile, type SocialPost, type SocialProfile } from '../../lib/social-store';
+import { addPostComment, getAllPosts, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
+import { useToast } from '../../lib/toast';
 
 export default function ProfilePage() {
   const { lang } = useLang();
   const { user } = useAuth();
   const t = dict[lang];
+  const toast = useToast();
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [posts, setPosts] = useState<SocialPost[]>([]);
 
@@ -67,7 +69,38 @@ export default function ProfilePage() {
             {t.dashboard.social.profileEmpty}
           </div>
         ) : (
-          userPosts.map((post) => <PostCard key={post.id} post={post} />)
+          userPosts.map((post) => {
+            const summary = getPostInteractionSummary(post, user?.id);
+            return (
+              <PostCard
+                key={post.id}
+                post={post}
+                likeState={{ liked: summary.liked, likes: summary.likes }}
+                repostState={{ reposted: summary.reposted, reposts: summary.reposts }}
+                commentsState={{ comments: summary.comments, commentsList: summary.commentsList }}
+                commentPlaceholder={t.dashboard.social.commentPlaceholder}
+                commentSubmitLabel={t.dashboard.social.commentSubmit}
+                onLike={(targetPost) => {
+                  const result = togglePostLike(targetPost, user?.id);
+                  if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
+                  setPosts((prev) => [...prev]);
+                }}
+                onRepost={(targetPost) => {
+                  const result = togglePostRepost(targetPost, user?.id);
+                  if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
+                  setPosts((prev) => [...prev]);
+                }}
+                onComment={(targetPost, content) => {
+                  if (!user?.id) return toast(t.dashboard.social.sessionMissing);
+                  if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
+                  const result = addPostComment(targetPost, content, profile, user.id);
+                  if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
+                  setPosts((prev) => [...prev]);
+                  toast(t.dashboard.social.commentSuccess);
+                }}
+              />
+            );
+          })
         )}
       </div>
     </div>

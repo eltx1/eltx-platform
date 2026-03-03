@@ -98,6 +98,16 @@ export default function MessagesPage() {
     if (user) loadLists();
   }, [loadLists, router, user]);
 
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const composeTarget = new URLSearchParams(window.location.search).get('compose');
+    if (!composeTarget) return;
+    const normalized = composeTarget.startsWith('@') ? composeTarget.slice(1) : composeTarget;
+    if (!normalized) return;
+    setRecipientUsername(normalized);
+  }, []);
+
   useEffect(() => {
     if (!selectedThreadId) return;
     loadThread(selectedThreadId);

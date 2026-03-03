@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
 import type { SocialComment, SocialPost } from '../../app/lib/social-store';
 import { dict, useLang } from '../../app/lib/i18n';
@@ -67,16 +68,18 @@ export default function PostCard({
     }
   }, [post.createdAt]);
 
+  const profileHref = `/creators/${post.handle.replace(/^@/, '')}`;
+
   return (
     <article className="rounded-3xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#121417]">
       <div className="flex items-start gap-3">
-        <div className="h-10 w-10 overflow-hidden rounded-full border border-[#2f3336] bg-[#111]">
+        <Link href={profileHref} className="h-10 w-10 overflow-hidden rounded-full border border-[#2f3336] bg-[#111] transition hover:border-[#c9a75c]/60">
           <Image src={post.avatarUrl || '/assets/img/logo-new.svg'} alt={post.authorName} width={40} height={40} className="h-full w-full object-cover" />
-        </div>
+        </Link>
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-semibold text-white">{post.authorName}</span>
-            <span className="text-white/60">{post.handle}</span>
+            <Link href={profileHref} className="font-semibold text-white underline-offset-2 hover:underline">{post.authorName}</Link>
+            <Link href={profileHref} className="text-white/60 underline-offset-2 hover:text-white/80 hover:underline">{post.handle}</Link>
             <span className="text-white/40">•</span>
             <span className="text-white/50 text-xs">{dateLabel}</span>
           </div>
