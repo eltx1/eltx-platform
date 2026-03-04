@@ -41,9 +41,8 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
   const [activeTab, setActiveTab] = useState<'posts' | 'media'>('posts');
 
   useEffect(() => {
-    if (!user?.id) return;
-    setPosts(getAllPosts(user.id));
-    setProfile(getProfile(user.id));
+    setPosts(getAllPosts(user?.id));
+    setProfile(getProfile(user?.id));
   }, [user?.id]);
 
   const creatorPosts = useMemo(
