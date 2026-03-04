@@ -40,6 +40,7 @@ const POSTS_KEY = 'lordai.social.posts';
 const PROFILE_KEY = 'lordai.social.profile';
 const WORD_LIMIT_KEY = 'lordai.social.postWordLimit';
 const INTERACTIONS_KEY = 'lordai.social.interactions';
+const FOLLOWING_KEY = 'lordai.social.following';
 const USER_SCOPE_KEY = 'guest';
 const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
 
@@ -50,6 +51,7 @@ type PostInteractionState = {
 };
 
 type InteractionMap = Record<string, PostInteractionState>;
+type FollowingMap = Record<string, boolean>;
 
 type UserScopeId = string | number | null | undefined;
 
@@ -221,6 +223,44 @@ function getPostStateFromMap(postId: string, interactions: InteractionMap): Post
   return interactions[postId] || { liked: false, reposted: false, comments: [] };
 }
 
+function getFollowingMap(userId?: UserScopeId): FollowingMap {
+  if (typeof window === 'undefined') return {};
+  return safeParse<FollowingMap>(window.localStorage.getItem(getScopedKey(FOLLOWING_KEY, userId)), {});
+}
+
+function saveFollowingMap(map: FollowingMap, userId?: UserScopeId): PersistResult {
+  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
+  return safeSetItem(getScopedKey(FOLLOWING_KEY, userId), JSON.stringify(map));
+}
+
+function normalizeHandle(value: string) {
+  return value.trim().replace(/^@+/, '').toLowerCase();
+}
+
+export function isFollowingHandle(handle: string, fallback: boolean, userId?: UserScopeId) {
+  const normalized = normalizeHandle(handle);
+  if (!normalized) return fallback;
+  const map = getFollowingMap(userId);
+  if (typeof map[normalized] === 'boolean') return map[normalized];
+  return fallback;
+}
+
+export function toggleFollowHandle(handle: string, fallback: boolean, userId?: UserScopeId) {
+  const normalized = normalizeHandle(handle);
+  if (!normalized) {
+    return { ok: false as const, reason: 'unknown' as const, isFollowed: fallback };
+  }
+  const map = getFollowingMap(userId);
+  const current = typeof map[normalized] === 'boolean' ? map[normalized] : fallback;
+  const next = !current;
+  map[normalized] = next;
+  const persist = saveFollowingMap(map, userId);
+  return {
+    ...persist,
+    isFollowed: next,
+  };
+}
+
 function getPostInteractionSummaryFromMap(post: SocialPost, interactions: InteractionMap) {
   const state = getPostStateFromMap(post.id, interactions);
   return {
@@ -333,11 +373,16 @@ export function savePost(post: SocialPost, userId?: UserScopeId): PersistResult 
 }
 
 export function getAllPosts(userId?: UserScopeId): SocialPost[] {
+  const followingMap = getFollowingMap(userId);
   const stored = getStoredPosts(userId);
   const all = [...stored, ...seedPosts];
   const byId = new Map<string, SocialPost>();
   all.forEach((post) => {
-    if (!byId.has(post.id)) byId.set(post.id, post);
+    if (!byId.has(post.id)) {
+      const normalized = normalizeHandle(post.handle);
+      const isFollowed = typeof followingMap[normalized] === 'boolean' ? followingMap[normalized] : Boolean(post.isFollowed);
+      byId.set(post.id, { ...post, isFollowed });
+    }
   });
   return Array.from(byId.values());
 }
