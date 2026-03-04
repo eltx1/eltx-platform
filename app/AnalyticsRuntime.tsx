@@ -1,14 +1,18 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { dict, useLang } from './lib/i18n';
+import { useEffect, useMemo, useState } from 'react';
+import { useLang } from './lib/i18n';
 import { getAnalyticsSettings, getConsentState, setConsentState } from './lib/analytics';
 
 export default function AnalyticsRuntime() {
   const settings = useMemo(() => getAnalyticsSettings(), []);
   const { lang } = useLang();
-  const t = dict[lang];
   const [consent, setConsent] = useState<'granted' | 'denied' | null>(() => getConsentState());
+
+  useEffect(() => {
+    if (!settings?.enabled || !settings.consentModeEnabled || !consent) return;
+    setConsentState(consent);
+  }, [consent, settings]);
 
   if (!settings?.enabled || !settings.consentModeEnabled || consent) return null;
 

@@ -1,6 +1,7 @@
 'use client';
 
 const KEY = 'first_utm_payload_v1';
+const MAX_LANDING_PATH_LENGTH = 191;
 
 export type UtmPayload = {
   utm_source?: string;
@@ -11,25 +12,53 @@ export type UtmPayload = {
   utm_landing_path?: string;
 };
 
-export function getOrStoreFirstUtm(): UtmPayload {
-  if (typeof window === 'undefined') return {};
+function readStoredPayload(): UtmPayload | null {
   const stored = window.localStorage.getItem(KEY);
-  if (stored) {
-    try {
-      return JSON.parse(stored) || {};
-    } catch {
-      return {};
-    }
+  if (!stored) return null;
+
+  try {
+    return JSON.parse(stored) || {};
+  } catch {
+    return null;
   }
+}
+
+function buildPayloadFromLocation(): UtmPayload {
   const params = new URLSearchParams(window.location.search || '');
-  const payload: UtmPayload = {
+  const pathname = window.location.pathname || undefined;
+
+  return {
     utm_source: params.get('utm_source') || undefined,
     utm_medium: params.get('utm_medium') || undefined,
     utm_campaign: params.get('utm_campaign') || undefined,
     utm_term: params.get('utm_term') || undefined,
     utm_content: params.get('utm_content') || undefined,
-    utm_landing_path: window.location.pathname || undefined,
+    utm_landing_path: pathname ? pathname.slice(0, MAX_LANDING_PATH_LENGTH) : undefined,
   };
+}
+
+function hasAnyUtmParam(payload: UtmPayload): boolean {
+  return Boolean(payload.utm_source || payload.utm_medium || payload.utm_campaign || payload.utm_term || payload.utm_content);
+}
+
+export function captureFirstUtmFromLocation(): UtmPayload {
+  if (typeof window === 'undefined') return {};
+
+  const storedPayload = readStoredPayload();
+  if (storedPayload) return storedPayload;
+
+  const payload = buildPayloadFromLocation();
+  if (!hasAnyUtmParam(payload)) return {};
+
   window.localStorage.setItem(KEY, JSON.stringify(payload));
   return payload;
+}
+
+export function getOrStoreFirstUtm(): UtmPayload {
+  if (typeof window === 'undefined') return {};
+
+  const storedPayload = readStoredPayload();
+  if (storedPayload) return storedPayload;
+
+  return captureFirstUtmFromLocation();
 }
