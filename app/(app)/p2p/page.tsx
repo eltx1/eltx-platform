@@ -8,6 +8,7 @@ import { Filter, Loader2, MessageCircle, PlusCircle, ShieldCheck, Star, Timer } 
 import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
+import { trackEvent } from '../../lib/analytics';
 
 type OfferPaymentMethod = { id: number; name: string };
 
@@ -183,6 +184,7 @@ export default function P2PPage() {
     });
     setTradeLoading(false);
     if (res.ok) {
+      if (tradeSide === 'buy') trackEvent('trade_buy', { asset: selectedOffer.asset, amount: normalized });
       toast({ message: t.p2p.toasts.tradeCreated, variant: 'success' });
       closeTrade();
       if (res.data?.trade?.id) {

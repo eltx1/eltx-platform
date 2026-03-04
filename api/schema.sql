@@ -4,6 +4,13 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) NOT NULL UNIQUE,
   username VARCHAR(255) NOT NULL UNIQUE,
   language VARCHAR(5) NOT NULL DEFAULT 'en',
+  first_utm_source VARCHAR(191) NULL,
+  first_utm_medium VARCHAR(191) NULL,
+  first_utm_campaign VARCHAR(191) NULL,
+  first_utm_term VARCHAR(191) NULL,
+  first_utm_content VARCHAR(191) NULL,
+  first_utm_landing_path VARCHAR(191) NULL,
+  first_utm_captured_at DATETIME NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );

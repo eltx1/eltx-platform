@@ -648,6 +648,14 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('referral_fee_share_b
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_google_tag_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_google_tag_id', 'G-QXTV3S098V');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_google_tag_custom_head_script', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_event_catalog', '{"signup":true,"login":true,"kyc_submit":true,"trade_buy":true}');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_consent_mode_enabled', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_ads_conversion_preset', 'none');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_ads_conversion_id', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_ads_label_signup', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_ads_label_login', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_ads_label_kyc_submit', '');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_ads_label_trade_buy', '');
 
 -- referral codes and rewards
 CREATE TABLE IF NOT EXISTS referral_codes (

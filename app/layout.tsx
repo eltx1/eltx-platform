@@ -8,6 +8,7 @@ import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
 import ServiceWorkerManager from '../components/ServiceWorkerManager';
 import GoogleTag from './GoogleTag';
+import AnalyticsRuntime from './AnalyticsRuntime';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://lordai.net';
 
@@ -61,6 +62,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AuthProvider>
             <ToastProvider>
               <ServiceWorkerManager />
+              <AnalyticsRuntime />
               <NavBar />
               <main className="flex-1">{children}</main>
               <Footer />
