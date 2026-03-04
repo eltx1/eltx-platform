@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { apiFetch } from '../lib/api';
 import { dict, useLang } from '../lib/i18n';
 import { useToast } from '../lib/toast';
+import { getOrStoreFirstUtm } from '../lib/utm';
+import { trackEvent } from '../lib/analytics';
 
 export default function SignupContent() {
   const [email, setEmail] = useState('');
@@ -29,7 +31,7 @@ export default function SignupContent() {
     const cleanedUsername = rawUsername.replace(/[^a-zA-Z0-9._-]/g, '') || 'user';
     const username = cleanedUsername.length >= 3 ? cleanedUsername.slice(0, 32) : `${cleanedUsername}123`;
 
-    const payload: Record<string, string> = { email: sanitizedEmail, password, language: lang, username };
+    const payload: Record<string, string> = { email: sanitizedEmail, password, language: lang, username, ...getOrStoreFirstUtm() };
     if (referralCode) payload.referral_code = referralCode;
 
     const res = await apiFetch<any>('/auth/signup', {
@@ -42,6 +44,7 @@ export default function SignupContent() {
       else if (err?.details?.missing) setError(err.details.missing.join(', '));
       else setError(res.error || t.auth.signup.genericError);
     } else {
+      trackEvent('signup', { method: 'email' });
       toast(t.auth.signup.success);
       router.push('/login?registered=1');
     }

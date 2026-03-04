@@ -7,6 +7,7 @@ import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
+import { trackEvent } from '../../lib/analytics';
 
 interface KycRequest {
   id: number;
@@ -128,6 +129,7 @@ export default function KycPage() {
     });
     setSubmitting(false);
     if (res.ok) {
+      trackEvent('kyc_submit');
       toast({ message: t.kyc.toast.submitted, variant: 'success' });
       setState(res.data);
       setFilePayload(null);

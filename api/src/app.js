@@ -493,16 +493,28 @@ async function fetchAssetLogos(symbols) {
   }
 }
 
+
+const UtmSchemaFields = {
+  utm_source: z.string().trim().max(191).optional(),
+  utm_medium: z.string().trim().max(191).optional(),
+  utm_campaign: z.string().trim().max(191).optional(),
+  utm_term: z.string().trim().max(191).optional(),
+  utm_content: z.string().trim().max(191).optional(),
+  utm_landing_path: z.string().trim().max(191).optional(),
+};
+
 const SignupSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
   language: z.string().trim().optional(),
   referral_code: z.string().trim().max(32).optional(),
+  ...UtmSchemaFields,
 });
 
 const LoginSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
   password: z.string().min(8),
+  ...UtmSchemaFields,
 });
 
 const AdminLoginSchema = z.object({
@@ -1673,6 +1685,14 @@ const ANALYTICS_SETTING_KEYS = {
   enabled: 'analytics_google_tag_enabled',
   measurementId: 'analytics_google_tag_id',
   customHeadScript: 'analytics_google_tag_custom_head_script',
+  eventCatalog: 'analytics_event_catalog',
+  consentModeEnabled: 'analytics_consent_mode_enabled',
+  adsPreset: 'analytics_ads_conversion_preset',
+  adsConversionId: 'analytics_ads_conversion_id',
+  adsLabelSignup: 'analytics_ads_label_signup',
+  adsLabelLogin: 'analytics_ads_label_login',
+  adsLabelKycSubmit: 'analytics_ads_label_kyc_submit',
+  adsLabelTradeBuy: 'analytics_ads_label_trade_buy',
 };
 
 const EMAIL_SETTINGS_CACHE_MS = 60 * 1000;
@@ -1799,11 +1819,77 @@ async function readAnalyticsSettings(conn = pool) {
     await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.measurementId, 'G-QXTV3S098V', conn)
   );
   const customHeadScript = await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.customHeadScript, '', conn);
+  const eventCatalogRaw = await getPlatformSettingValue(
+    ANALYTICS_SETTING_KEYS.eventCatalog,
+    '{"signup":true,"login":true,"kyc_submit":true,"trade_buy":true}',
+    conn
+  );
+  let eventCatalog = { signup: true, login: true, kyc_submit: true, trade_buy: true };
+  try {
+    const parsed = JSON.parse(eventCatalogRaw || '{}');
+    eventCatalog = {
+      signup: parsed?.signup !== false,
+      login: parsed?.login !== false,
+      kyc_submit: parsed?.kyc_submit !== false,
+      trade_buy: parsed?.trade_buy !== false,
+    };
+  } catch {}
+  const consentModeEnabled = parseBooleanSetting(
+    await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.consentModeEnabled, '0', conn),
+    false
+  );
+  const adsPreset = normalizeSettingValue(await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsPreset, 'none', conn)) || 'none';
+  const adsConversionId = normalizeSettingValue(await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsConversionId, '', conn)) || '';
   return {
     enabled,
     measurement_id: measurementId || 'G-QXTV3S098V',
     custom_head_script: (customHeadScript || '').toString(),
+    event_catalog: eventCatalog,
+    consent_mode_enabled: consentModeEnabled,
+    ads_conversion_preset: adsPreset,
+    ads_conversion_id: adsConversionId,
+    ads_labels: {
+      signup: (await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelSignup, '', conn) || '').toString(),
+      login: (await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelLogin, '', conn) || '').toString(),
+      kyc_submit: (await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelKycSubmit, '', conn) || '').toString(),
+      trade_buy: (await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelTradeBuy, '', conn) || '').toString(),
+    },
   };
+}
+
+function normalizeUtm(value) {
+  if (value === null || value === undefined) return null;
+  const cleaned = String(value).trim();
+  if (!cleaned) return null;
+  return cleaned.slice(0, 191);
+}
+
+function parseUtmPayload(payload = {}) {
+  return {
+    source: normalizeUtm(payload.utm_source),
+    medium: normalizeUtm(payload.utm_medium),
+    campaign: normalizeUtm(payload.utm_campaign),
+    term: normalizeUtm(payload.utm_term),
+    content: normalizeUtm(payload.utm_content),
+    landingPath: normalizeUtm(payload.utm_landing_path),
+  };
+}
+
+async function storeFirstUtmSession(conn, userId, utm) {
+  const hasAny = Object.values(utm).some((v) => !!v);
+  if (!hasAny) return;
+  await conn.query(
+    `UPDATE users
+        SET first_utm_source = COALESCE(first_utm_source, ?),
+            first_utm_medium = COALESCE(first_utm_medium, ?),
+            first_utm_campaign = COALESCE(first_utm_campaign, ?),
+            first_utm_term = COALESCE(first_utm_term, ?),
+            first_utm_content = COALESCE(first_utm_content, ?),
+            first_utm_landing_path = COALESCE(first_utm_landing_path, ?),
+            first_utm_captured_at = COALESCE(first_utm_captured_at, NOW())
+      WHERE id = ?`,
+    [utm.source, utm.medium, utm.campaign, utm.term, utm.content, utm.landingPath, userId]
+  );
 }
 
 const PLATFORM_URL = 'https://lordai.net';
@@ -3208,6 +3294,30 @@ const AnalyticsSettingsSchema = z.object({
     .regex(/^G-[A-Z0-9]+$/i, 'Measurement ID must look like G-XXXXXXXXXX')
     .optional(),
   custom_head_script: z.string().max(5000).optional(),
+  event_catalog: z
+    .object({
+      signup: z.boolean().optional(),
+      login: z.boolean().optional(),
+      kyc_submit: z.boolean().optional(),
+      trade_buy: z.boolean().optional(),
+    })
+    .optional(),
+  consent_mode_enabled: z.boolean().optional(),
+  ads_conversion_preset: z.enum(['none', 'lead_gen', 'kyc_qualified', 'trade_purchase']).optional(),
+  ads_conversion_id: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^$|^AW-\d+$/i, 'Google Ads conversion id must look like AW-123456789')
+    .optional(),
+  ads_labels: z
+    .object({
+      signup: z.string().trim().max(100).optional(),
+      login: z.string().trim().max(100).optional(),
+      kyc_submit: z.string().trim().max(100).optional(),
+      trade_buy: z.string().trim().max(100).optional(),
+    })
+    .optional(),
 });
 
 const ReferralSettingsSchema = z.object({
@@ -3582,6 +3692,7 @@ app.post('/auth/signup', async (req, res, next) => {
   let conn;
   try {
     const { email, password, language, referral_code: referralCodeRaw } = SignupSchema.parse(req.body);
+    const utm = parseUtmPayload(req.body || {});
     conn = await pool.getConnection();
     await conn.beginTransaction();
     const username = await generateUsernameFromEmail(conn, email);
@@ -3592,6 +3703,7 @@ app.post('/auth/signup', async (req, res, next) => {
     const hash = await argon2.hash(password, { type: argon2.argon2id });
     await conn.query('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)', [u.insertId, hash]);
     await ensureReferralCode(conn, u.insertId);
+    await storeFirstUtmSession(conn, u.insertId, utm);
     const referralCode = referralCodeRaw ? referralCodeRaw.trim().toUpperCase() : null;
     if (referralCode) {
       const [[referrer]] = await conn.query('SELECT user_id FROM referral_codes WHERE code=? LIMIT 1', [referralCode]);
@@ -3648,6 +3760,7 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
   let userId = null;
   try {
     const { email, password } = LoginSchema.parse(req.body);
+    const utm = parseUtmPayload(req.body || {});
     const [rows] = await pool.query(
       'SELECT users.id, uc.password_hash FROM users JOIN user_credentials uc ON users.id=uc.user_id WHERE users.email=?',
       [email]
@@ -3662,6 +3775,7 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
           [token, userId, USER_SESSION_TTL_SECONDS]
         );
         await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 1)', [userId, req.ip]);
+        await storeFirstUtmSession(pool, userId, utm);
         const wallets = [];
         for (const cid of SUPPORTED_CHAINS) {
           wallets.push(await provisionUserAddress(pool, userId, cid));
@@ -6130,6 +6244,24 @@ app.patch('/admin/analytics/settings', async (req, res, next) => {
       tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.measurementId, payload.measurement_id.toUpperCase()));
     if (payload.custom_head_script !== undefined)
       tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.customHeadScript, payload.custom_head_script));
+    if (payload.event_catalog !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.eventCatalog, JSON.stringify(payload.event_catalog)));
+    if (payload.consent_mode_enabled !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.consentModeEnabled, payload.consent_mode_enabled ? '1' : '0'));
+    if (payload.ads_conversion_preset !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsPreset, payload.ads_conversion_preset));
+    if (payload.ads_conversion_id !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsConversionId, payload.ads_conversion_id.toUpperCase()));
+    if (payload.ads_labels !== undefined) {
+      if (payload.ads_labels.signup !== undefined)
+        tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelSignup, payload.ads_labels.signup));
+      if (payload.ads_labels.login !== undefined)
+        tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelLogin, payload.ads_labels.login));
+      if (payload.ads_labels.kyc_submit !== undefined)
+        tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelKycSubmit, payload.ads_labels.kyc_submit));
+      if (payload.ads_labels.trade_buy !== undefined)
+        tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.adsLabelTradeBuy, payload.ads_labels.trade_buy));
+    }
     await Promise.all(tasks);
     const settings = await readAnalyticsSettings();
     res.json({ ok: true, settings });

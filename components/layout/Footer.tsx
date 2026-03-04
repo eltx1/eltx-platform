@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import Script from 'next/script';
 import { dict, useLang } from '../../app/lib/i18n';
 
 export default function Footer() {
@@ -14,16 +13,6 @@ export default function Footer() {
   }
   return (
     <>
-      <Script src="https://www.googletagmanager.com/gtag/js?id=G-N82B7F9S45" strategy="afterInteractive" />
-      <Script id="gtag-init" strategy="afterInteractive">
-        {`
-          window.dataLayer = window.dataLayer || [];
-          function gtag(){dataLayer.push(arguments);}
-          gtag('js', new Date());
-
-          gtag('config', 'G-N82B7F9S45');
-        `}
-      </Script>
       <footer className="border-t border-white/10 bg-neutral-950/80 backdrop-blur-xl">
         <div className="max-w-6xl mx-auto px-4 py-10 grid gap-6 md:grid-cols-3 text-sm text-white/80">
           <div className="space-y-2">

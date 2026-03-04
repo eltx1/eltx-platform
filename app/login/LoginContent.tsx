@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { apiFetch } from '../lib/api';
 import { dict, useLang } from '../lib/i18n';
 import { useToast } from '../lib/toast';
+import { getOrStoreFirstUtm } from '../lib/utm';
+import { trackEvent } from '../lib/analytics';
 import { useAuth } from '../lib/auth';
 
 export default function LoginContent() {
@@ -37,7 +39,7 @@ export default function LoginContent() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const res = await apiFetch<any>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
+    const res = await apiFetch<any>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, ...getOrStoreFirstUtm() }) });
     if (!res.ok) {
       const err = (res.data as any)?.error;
       if (err?.code === 'INVALID_CREDENTIALS') {
@@ -49,6 +51,7 @@ export default function LoginContent() {
       }
     } else {
       await refresh();
+      trackEvent('login', { method: 'email' });
       toast(t.auth.login.success);
       router.push('/dashboard');
     }
