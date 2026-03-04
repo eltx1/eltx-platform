@@ -169,6 +169,11 @@ type AnalyticsSettings = {
   enabled: boolean;
   measurement_id: string;
   custom_head_script: string;
+  event_catalog: { signup: boolean; login: boolean; kyc_submit: boolean; trade_buy: boolean };
+  consent_mode_enabled: boolean;
+  ads_conversion_preset: 'none' | 'lead_gen' | 'kyc_qualified' | 'trade_purchase';
+  ads_conversion_id: string;
+  ads_labels: { signup: string; login: string; kyc_submit: string; trade_buy: string };
 };
 
 type AnalyticsSettingsResponse = { settings: AnalyticsSettings };
@@ -423,6 +428,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
   useEffect(() => {
     load();
   }, [load]);
+
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -1566,6 +1572,11 @@ function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 's
     enabled: true,
     measurement_id: 'G-QXTV3S098V',
     custom_head_script: '',
+    event_catalog: { signup: true, login: true, kyc_submit: true, trade_buy: true },
+    consent_mode_enabled: false,
+    ads_conversion_preset: 'none',
+    ads_conversion_id: '',
+    ads_labels: { signup: '', login: '', kyc_submit: '', trade_buy: '' },
   });
 
   const load = useCallback(async () => {
@@ -1583,6 +1594,34 @@ function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 's
     load();
   }, [load]);
 
+  const presets: Array<{ value: AnalyticsSettings['ads_conversion_preset']; label: string; labels: AnalyticsSettings['ads_labels'] }> = [
+    { value: 'none', label: 'No preset', labels: { signup: '', login: '', kyc_submit: '', trade_buy: '' } },
+    {
+      value: 'lead_gen',
+      label: 'Lead generation',
+      labels: { signup: 'signup_conversion', login: 'login_conversion', kyc_submit: '', trade_buy: '' },
+    },
+    {
+      value: 'kyc_qualified',
+      label: 'KYC qualified lead',
+      labels: { signup: '', login: '', kyc_submit: 'kyc_submit_conversion', trade_buy: '' },
+    },
+    {
+      value: 'trade_purchase',
+      label: 'Trade / purchase',
+      labels: { signup: '', login: '', kyc_submit: '', trade_buy: 'trade_buy_conversion' },
+    },
+  ];
+
+  const applyPreset = (preset: AnalyticsSettings['ads_conversion_preset']) => {
+    const match = presets.find((p) => p.value === preset);
+    setForm((prev) => ({
+      ...prev,
+      ads_conversion_preset: preset,
+      ads_labels: match ? { ...prev.ads_labels, ...match.labels } : prev.ads_labels,
+    }));
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -1598,6 +1637,9 @@ function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 's
       onNotify(res.error || 'Failed to update analytics settings', 'error');
     }
   };
+
+
+
 
   if (loading) {
     return (
@@ -1643,6 +1685,78 @@ function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 's
             placeholder="G-XXXXXXXXXX"
             className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
           />
+        </label>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <label className="block text-sm text-white/70">
+            Google Ads preset
+            <select
+              value={form.ads_conversion_preset}
+              onChange={(e) => applyPreset(e.target.value as AnalyticsSettings['ads_conversion_preset'])}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+            >
+              {presets.map((preset) => (
+                <option key={preset.value} value={preset.value}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm text-white/70">
+            Google Ads conversion ID
+            <input
+              type="text"
+              value={form.ads_conversion_id}
+              onChange={(e) => setForm((prev) => ({ ...prev, ads_conversion_id: e.target.value.trim().toUpperCase() }))}
+              placeholder="AW-123456789"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {(['signup', 'login', 'kyc_submit', 'trade_buy'] as const).map((key) => (
+            <label className="block text-sm text-white/70" key={key}>
+              {key} event label
+              <input
+                type="text"
+                value={form.ads_labels[key]}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, ads_labels: { ...prev.ads_labels, [key]: e.target.value.trim() } }))
+                }
+                placeholder={`${key}_conversion`}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-sm">
+          <p className="mb-2 font-semibold text-white/80">Event catalog</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(['signup', 'login', 'kyc_submit', 'trade_buy'] as const).map((key) => (
+              <label key={key} className="flex items-center gap-2 text-white/75">
+                <input
+                  type="checkbox"
+                  checked={form.event_catalog[key]}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, event_catalog: { ...prev.event_catalog, [key]: e.target.checked } }))
+                  }
+                />
+                <span>{key}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <label className="flex items-center gap-3 text-sm text-white/80">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-white/20 bg-black/40"
+            checked={form.consent_mode_enabled}
+            onChange={(e) => setForm((prev) => ({ ...prev, consent_mode_enabled: e.target.checked }))}
+          />
+          <span>Enable consent mode (EN/AR banner)</span>
         </label>
 
         <label className="block text-sm text-white/70">
@@ -2153,6 +2267,7 @@ function OverviewPanel({ onError }: { onError: (message: string) => void }) {
   useEffect(() => {
     load();
   }, [load]);
+
 
   if (loading) {
     return (
