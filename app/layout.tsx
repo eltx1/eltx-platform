@@ -7,6 +7,7 @@ import { AuthProvider } from './lib/auth';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
 import ServiceWorkerManager from '../components/ServiceWorkerManager';
+import GoogleTag from './GoogleTag';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://lordai.net';
 
@@ -52,6 +53,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <GoogleTag />
+      </head>
       <body className="min-h-screen flex flex-col overflow-x-hidden bg-neutral-950 text-white">
         <LangProvider>
           <AuthProvider>

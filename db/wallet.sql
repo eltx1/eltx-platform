@@ -645,6 +645,9 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_user_support_e
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('email_admin_support_enabled', '1');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('referral_reward_eltx', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('referral_fee_share_bps', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_google_tag_enabled', '1');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_google_tag_id', 'G-QXTV3S098V');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('analytics_google_tag_custom_head_script', '');
 
 -- referral codes and rewards
 CREATE TABLE IF NOT EXISTS referral_codes (
