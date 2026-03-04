@@ -11,19 +11,18 @@ export type UtmPayload = {
   utm_landing_path?: string;
 };
 
-function safeParse(raw: string | null): UtmPayload | null {
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch {
-    return null;
+export function getOrStoreFirstUtm(): UtmPayload {
+  if (typeof window === 'undefined') return {};
+  const stored = window.localStorage.getItem(KEY);
+  if (stored) {
+    try {
+      return JSON.parse(stored) || {};
+    } catch {
+      return {};
+    }
   }
-}
-
-function readCurrentUtm(): UtmPayload {
   const params = new URLSearchParams(window.location.search || '');
-  return {
+  const payload: UtmPayload = {
     utm_source: params.get('utm_source') || undefined,
     utm_medium: params.get('utm_medium') || undefined,
     utm_campaign: params.get('utm_campaign') || undefined,
@@ -31,20 +30,6 @@ function readCurrentUtm(): UtmPayload {
     utm_content: params.get('utm_content') || undefined,
     utm_landing_path: window.location.pathname || undefined,
   };
-}
-
-export function captureFirstUtmFromLocation(): UtmPayload {
-  if (typeof window === 'undefined') return {};
-  const existing = safeParse(window.localStorage.getItem(KEY));
-  if (existing) return existing;
-  const payload = readCurrentUtm();
   window.localStorage.setItem(KEY, JSON.stringify(payload));
   return payload;
-}
-
-export function getOrStoreFirstUtm(): UtmPayload {
-  if (typeof window === 'undefined') return {};
-  const existing = safeParse(window.localStorage.getItem(KEY));
-  if (existing) return existing;
-  return captureFirstUtmFromLocation();
 }
