@@ -1669,6 +1669,12 @@ const EMAIL_SETTING_KEYS = {
   adminSupport: 'email_admin_support_enabled',
 };
 
+const ANALYTICS_SETTING_KEYS = {
+  enabled: 'analytics_google_tag_enabled',
+  measurementId: 'analytics_google_tag_id',
+  customHeadScript: 'analytics_google_tag_custom_head_script',
+};
+
 const EMAIL_SETTINGS_CACHE_MS = 60 * 1000;
 let cachedEmailSettings = null;
 let cachedEmailLoadedAt = 0;
@@ -1784,6 +1790,19 @@ function presentEmailSettings(settings) {
     admin_withdrawal_enabled: !!settings.adminWithdrawalEnabled,
     user_support_enabled: !!settings.userSupportEnabled,
     admin_support_enabled: !!settings.adminSupportEnabled,
+  };
+}
+
+async function readAnalyticsSettings(conn = pool) {
+  const enabled = parseBooleanSetting(await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.enabled, '1', conn), true);
+  const measurementId = normalizeSettingValue(
+    await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.measurementId, 'G-QXTV3S098V', conn)
+  );
+  const customHeadScript = await getPlatformSettingValue(ANALYTICS_SETTING_KEYS.customHeadScript, '', conn);
+  return {
+    enabled,
+    measurement_id: measurementId || 'G-QXTV3S098V',
+    custom_head_script: (customHeadScript || '').toString(),
   };
 }
 
@@ -3178,6 +3197,17 @@ const AiSettingsSchema = z.object({
   daily_free_messages: z.number().int().min(0),
   message_price_usdt: z.union([z.string(), z.number()]).optional(),
   message_price_eltx: z.union([z.string(), z.number()]).optional(),
+});
+
+const AnalyticsSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  measurement_id: z
+    .string()
+    .trim()
+    .max(64)
+    .regex(/^G-[A-Z0-9]+$/i, 'Measurement ID must look like G-XXXXXXXXXX')
+    .optional(),
+  custom_head_script: z.string().max(5000).optional(),
 });
 
 const ReferralSettingsSchema = z.object({
@@ -6075,6 +6105,37 @@ app.patch('/admin/email/settings', async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid email settings', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.get('/admin/analytics/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const settings = await readAnalyticsSettings();
+    res.json({ ok: true, settings });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch('/admin/analytics/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = AnalyticsSettingsSchema.parse(req.body || {});
+    const tasks = [];
+    if (payload.enabled !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.enabled, payload.enabled ? '1' : '0'));
+    if (payload.measurement_id !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.measurementId, payload.measurement_id.toUpperCase()));
+    if (payload.custom_head_script !== undefined)
+      tasks.push(setPlatformSettingValue(ANALYTICS_SETTING_KEYS.customHeadScript, payload.custom_head_script));
+    await Promise.all(tasks);
+    const settings = await readAnalyticsSettings();
+    res.json({ ok: true, settings });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid analytics settings', details: err.flatten() });
     next(err);
   }
 });
@@ -10225,4 +10286,3 @@ function startServer() {
 }
 
 module.exports = { app, server, startServer };
-

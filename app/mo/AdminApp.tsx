@@ -61,7 +61,8 @@ type Section =
   | 'faq'
   | 'p2p'
   | 'withdrawals'
-  | 'feed';
+  | 'feed'
+  | 'analytics';
 
 interface SummaryResponse {
   summary: {
@@ -163,6 +164,14 @@ type EmailSettingsResponse = {
 type EmailAnnouncementResponse = {
   queued: number;
 };
+
+type AnalyticsSettings = {
+  enabled: boolean;
+  measurement_id: string;
+  custom_head_script: string;
+};
+
+type AnalyticsSettingsResponse = { settings: AnalyticsSettings };
 
 type AdminKycRequest = {
   id: number;
@@ -333,6 +342,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'feed', label: 'Feed Algorithm', icon: SlidersHorizontal },
   { id: 'referrals', label: 'Referrals', icon: UserPlus },
   { id: 'notifications', label: 'Notifications', icon: Bell },
+  { id: 'analytics', label: 'Analytics', icon: LineChart },
   { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
@@ -1545,6 +1555,118 @@ function P2PPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<AnalyticsSettings>({
+    enabled: true,
+    measurement_id: 'G-QXTV3S098V',
+    custom_head_script: '',
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<AnalyticsSettingsResponse>('/admin/analytics/settings');
+    if (res.ok) {
+      setForm(res.data.settings);
+    } else {
+      onNotify(res.error || 'Failed to load analytics settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const res = await apiFetch<AnalyticsSettingsResponse>('/admin/analytics/settings', {
+      method: 'PATCH',
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setForm(res.data.settings);
+      onNotify('Analytics settings updated');
+    } else {
+      onNotify(res.error || 'Failed to update analytics settings', 'error');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex h-40 items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-white/60">Tracking</p>
+          <h2 className="text-xl font-semibold">Google Analytics (gtag)</h2>
+        </div>
+        <button
+          onClick={load}
+          className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+        >
+          <RefreshCw className="h-3 w-3" />
+          Sync
+        </button>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5">
+        <label className="flex items-center gap-3 text-sm text-white/80">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-white/20 bg-black/40"
+            checked={form.enabled}
+            onChange={(e) => setForm((prev) => ({ ...prev, enabled: e.target.checked }))}
+          />
+          <span>Enable Google tag in all pages</span>
+        </label>
+
+        <label className="block text-sm text-white/70">
+          Measurement ID
+          <input
+            type="text"
+            value={form.measurement_id}
+            onChange={(e) => setForm((prev) => ({ ...prev, measurement_id: e.target.value.trim() }))}
+            placeholder="G-XXXXXXXXXX"
+            className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+          />
+        </label>
+
+        <label className="block text-sm text-white/70">
+          Optional custom script (head)
+          <textarea
+            value={form.custom_head_script}
+            onChange={(e) => setForm((prev) => ({ ...prev, custom_head_script: e.target.value }))}
+            placeholder="gtag('config', 'AW-XXXXXXX');"
+            rows={6}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+          />
+        </label>
+
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={saving}
+            className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-60"
+          >
+            {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+            Save analytics settings
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -4739,6 +4861,7 @@ export default function AdminApp() {
           {active === 'ai' && <AiPanel onNotify={notify} />}
           {active === 'referrals' && <ReferralPanel onNotify={notify} />}
           {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
+          {active === 'analytics' && <AnalyticsPanel onNotify={notify} />}
           {active === 'support' && <SupportPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
