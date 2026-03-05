@@ -27,6 +27,7 @@ export default function Footer() {
               <Link href="/docs" className="hover:text-white">{t.footer.docs}</Link>
               <Link href="/terms" className="hover:text-white">{t.footer.terms}</Link>
               <Link href="/privacy" className="hover:text-white">{t.footer.privacy}</Link>
+              <Link href="/child-safety" className="hover:text-white">{t.footer.childSafety}</Link>
               <Link href="/status" className="hover:text-white">{t.footer.status}</Link>
               <Link href="/contact" className="hover:text-white">{t.footer.contact}</Link>
             </div>
@@ -36,6 +37,7 @@ export default function Footer() {
             <div className="flex flex-wrap gap-3">
               <Link href="/docs" className="rounded-full border border-white/10 px-3 py-2 hover:bg-white/10">Docs</Link>
               <Link href="/status" className="rounded-full border border-white/10 px-3 py-2 hover:bg-white/10">Status</Link>
+              <Link href="/child-safety" className="rounded-full border border-white/10 px-3 py-2 hover:bg-white/10">Child Safety</Link>
               <Link href="/contact" className="rounded-full border border-white/10 px-3 py-2 hover:bg-white/10">Support</Link>
             </div>
             <div className="text-xs text-white/60">© {new Date().getFullYear()} LordAi.Net. All rights reserved.</div>
