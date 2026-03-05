@@ -62,6 +62,13 @@ test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {
   assert.equal(res.body?.error?.code, 'UNAUTHENTICATED');
 });
 
+
+test('POST /auth/delete-account blocks unauthenticated requests', async () => {
+  const res = await request.post('/auth/delete-account').send({ password: 'password123' });
+  assert.equal(res.status, 401);
+  assert.equal(res.body?.error?.code, 'UNAUTHENTICATED');
+});
+
 test('POST /trade/quote blocks unauthenticated requests', async () => {
   const res = await request.post('/trade/quote').send({ from_asset: 'USDT', to_asset: 'ELTX', from_amount: '10' });
   assert.equal(res.status, 401);

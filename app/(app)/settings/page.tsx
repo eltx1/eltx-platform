@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Copy } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
+import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { getDefaultSpotSlippageBps, setDefaultSpotSlippageBps, subscribeSpotSlippage } from '../../lib/settings';
@@ -15,6 +16,9 @@ export default function SettingsPage() {
   const t = dict[lang];
   const toast = useToast();
   const [slippagePercent, setSlippagePercent] = useState(() => getDefaultSpotSlippageBps() / 100);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (user === null) router.replace('/login');
@@ -44,6 +48,31 @@ export default function SettingsPage() {
   const handleLogout = async () => {
     await logout();
     router.push('/');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword || isDeleting) return;
+    setIsDeleting(true);
+    const res = await apiFetch('/auth/delete-account', {
+      method: 'POST',
+      body: JSON.stringify({ password: deletePassword }),
+    });
+    setIsDeleting(false);
+
+    if (!res.ok) {
+      const isPasswordError = res.status === 401;
+      toast({
+        message: isPasswordError ? t.settings.accountDeletion.invalidPassword : (res.error || t.common.genericError),
+        variant: 'error',
+      });
+      return;
+    }
+
+    toast({ message: t.settings.accountDeletion.success, variant: 'success' });
+    setDeletePassword('');
+    setShowDeleteConfirm(false);
+    await logout();
+    router.push('/login');
   };
 
   return (
@@ -103,6 +132,53 @@ export default function SettingsPage() {
           {lang === 'en' ? 'العربية' : 'English'}
         </button>
       </div>
+      <div className="mt-8 rounded-lg border border-red-500/40 bg-red-500/5 p-4 space-y-3">
+        <div className="text-sm font-semibold text-red-300">{t.settings.accountDeletion.title}</div>
+        <p className="text-xs text-red-100/80">{t.settings.accountDeletion.description}</p>
+        {!showDeleteConfirm && (
+          <button
+            className="px-3 py-2 rounded bg-red-500/20 text-red-200 border border-red-500/40 text-sm"
+            onClick={() => setShowDeleteConfirm(true)}
+          >
+            {t.settings.accountDeletion.startButton}
+          </button>
+        )}
+
+        {showDeleteConfirm && (
+          <div className="space-y-3 rounded-md border border-red-500/40 bg-black/20 p-3">
+            <p className="text-xs text-red-200">{t.settings.accountDeletion.warning}</p>
+            <label className="space-y-1 block">
+              <span className="text-xs opacity-80">{t.settings.accountDeletion.passwordLabel}</span>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                placeholder={t.settings.accountDeletion.passwordPlaceholder}
+                className="w-full p-2 rounded bg-black/30 border border-white/20 text-sm"
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                className="px-3 py-2 rounded bg-red-600 text-white text-sm disabled:opacity-60"
+                disabled={!deletePassword || isDeleting}
+                onClick={handleDeleteAccount}
+              >
+                {isDeleting ? '...' : t.settings.accountDeletion.confirmButton}
+              </button>
+              <button
+                className="px-3 py-2 rounded bg-white/10 text-sm"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeletePassword('');
+                }}
+              >
+                {t.settings.accountDeletion.cancelButton}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <button
         className="px-3 py-1 bg-white/5 rounded"
         onClick={handleLogout}
