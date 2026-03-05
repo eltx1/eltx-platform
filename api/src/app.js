@@ -517,6 +517,10 @@ const LoginSchema = z.object({
   ...UtmSchemaFields,
 });
 
+const DeleteAccountSchema = z.object({
+  password: z.string().min(8),
+});
+
 const AdminLoginSchema = z.object({
   identifier: z.string().min(3),
   password: z.string().min(8),
@@ -3804,6 +3808,62 @@ app.post('/auth/logout', async (req, res) => {
   }
   res.clearCookie(COOKIE_NAME);
   res.json({ ok: true });
+});
+
+app.post('/auth/delete-account', async (req, res, next) => {
+  const token = req.cookies[COOKIE_NAME];
+  if (!token) return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
+
+  let conn;
+  try {
+    const { password } = DeleteAccountSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [rows] = await conn.query(
+      `SELECT s.user_id, uc.password_hash
+         FROM sessions s
+         JOIN user_credentials uc ON uc.user_id = s.user_id
+        WHERE s.id = ?
+          AND s.expires_at > NOW()
+        LIMIT 1`,
+      [token]
+    );
+
+    if (!rows.length) {
+      await conn.rollback();
+      return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
+    }
+
+    const { user_id: userId, password_hash: passwordHash } = rows[0];
+    const valid = await argon2.verify(passwordHash, password);
+    if (!valid) {
+      await conn.rollback();
+      return next({ status: 401, code: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
+    }
+
+    await conn.query('DELETE FROM sessions WHERE user_id = ?', [userId]);
+    await conn.query('DELETE FROM users WHERE id = ?', [userId]);
+
+    await conn.commit();
+    res.clearCookie(COOKIE_NAME);
+    return res.json({ ok: true });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input' });
+    }
+    if (err?.code === 'ER_ROW_IS_REFERENCED_2' || err?.code === 'ER_ROW_IS_REFERENCED') {
+      return next({ status: 409, code: 'ACCOUNT_DELETE_BLOCKED', message: 'Unable to delete account at this time' });
+    }
+    return next(err);
+  } finally {
+    if (conn) conn.release();
+  }
 });
 
 app.get('/auth/me', async (req, res, next) => {
