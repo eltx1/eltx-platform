@@ -21,7 +21,6 @@ import {
   Plus,
   Send,
   Bot,
-  Clock3,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { dict, useLang } from '../../lib/i18n';
@@ -96,12 +95,9 @@ export default function DashboardPage() {
   const activeFeed = activeFeedTab === 'for-you' ? forYouFeed : followingFeed;
 
   return (
-    <div className="space-y-3.5">
-      <h1 className="text-lg font-semibold sm:text-xl">{t.dashboard.title}</h1>
-
-      <div className="grid gap-3.5 lg:grid-cols-[230px,minmax(0,1fr),300px] lg:items-start">
-        <aside className="x-card space-y-2.5 p-3 lg:sticky lg:top-20">
-          <p className="text-xs uppercase tracking-[0.3em] text-white/60">Workspace</p>
+    <div className="space-y-2.5">
+      <div className="grid gap-2.5 lg:grid-cols-[230px,minmax(0,1fr),300px] lg:items-start">
+        <aside className="x-card space-y-2 p-2.5 lg:sticky lg:top-20">
           <div className="grid grid-cols-2 gap-1.5">
             <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} />
             <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} />
@@ -118,12 +114,9 @@ export default function DashboardPage() {
           </button>
         </aside>
 
-        <main className="space-y-3.5">
-          <section className="x-card space-y-2.5 p-3">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">{t.dashboard.social.askAiKicker}</p>
-              <h2 className="text-sm font-semibold">{t.dashboard.social.askAiTitle}</h2>
-            </div>
+        <main className="space-y-2.5">
+          <section className="x-card space-y-2 p-2.5">
+            <h2 className="text-sm font-semibold">{t.dashboard.social.askAiTitle}</h2>
             <div className="flex flex-col gap-2.5">
               <input
                 className="x-input px-3 py-2.5 text-sm placeholder:text-white/40"
@@ -142,10 +135,9 @@ export default function DashboardPage() {
                 {t.dashboard.social.askAiCta}
               </button>
             </div>
-            <div className="flex items-center gap-2 text-[11px] text-white/60"><Clock3 className="h-3 w-3" /> {t.dashboard.social.askAiHint}</div>
           </section>
 
-          <section className="x-card space-y-3 p-3">
+          <section className="x-card space-y-2.5 p-2.5">
             <div className="flex flex-wrap items-center justify-between gap-2.5">
               <div>
                 <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">{t.dashboard.social.quickPostKicker}</p>
@@ -184,14 +176,7 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="space-y-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">{t.dashboard.social.forYouKicker}</p>
-                <h2 className="text-sm font-semibold">{t.dashboard.social.forYouTitle}</h2>
-              </div>
-              <span className="text-[11px] text-white/50">{t.dashboard.social.forYouSubtitle}</span>
-            </div>
+          <section className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <button
                 className={`rounded-full border px-3 py-1 text-[11px] ${activeFeedTab === 'for-you' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
@@ -206,7 +191,7 @@ export default function DashboardPage() {
                 {t.dashboard.social.followingTitle}
               </button>
             </div>
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {activeFeed.map((post) => {
                 const summary = getPostInteractionSummary(post, user?.id);
                 return (
@@ -245,8 +230,8 @@ export default function DashboardPage() {
           </section>
         </main>
 
-        <aside className="space-y-3.5 lg:sticky lg:top-20">
-          <section className="x-card p-3 space-y-2.5">
+        <aside className="space-y-2.5 lg:sticky lg:top-20">
+          <section className="x-card p-2.5 space-y-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
             <div className="grid grid-cols-2 gap-1.5">
               <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} />
