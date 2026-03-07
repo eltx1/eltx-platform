@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
+import { BadgeCheck, Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
 import type { SocialComment, SocialPost } from '../../app/lib/social-store';
 import { dict, useLang } from '../../app/lib/i18n';
 
@@ -79,6 +79,7 @@ export default function PostCard({
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Link href={profileHref} className="font-semibold text-white underline-offset-2 hover:underline">{post.authorName}</Link>
+            {post.isPremium && <BadgeCheck className="h-4 w-4 text-sky-400" aria-label={lang === 'ar' ? 'عضو موثق' : 'Verified premium member'} />}
             <Link href={profileHref} className="text-white/60 underline-offset-2 hover:text-white/80 hover:underline">{post.handle}</Link>
             <span className="text-white/40">•</span>
             <span className="text-white/50 text-xs">{dateLabel}</span>

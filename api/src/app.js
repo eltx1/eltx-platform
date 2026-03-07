@@ -3380,6 +3380,10 @@ const AdminWithdrawalUpdateSchema = z.object({
   reason: z.string().trim().max(255).optional().nullable(),
 });
 
+const PremiumSubscribeSchema = z.object({
+  months: z.coerce.number().int().min(1).max(24).optional().default(1),
+});
+
 async function requireUser(req) {
   const token = req.cookies[COOKIE_NAME];
   if (!token) throw { status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' };
@@ -3871,11 +3875,193 @@ app.get('/auth/me', async (req, res, next) => {
   if (!token) return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
   try {
     const [rows] = await pool.query(
-      'SELECT users.id, users.email FROM sessions JOIN users ON sessions.user_id = users.id WHERE sessions.id = ? AND sessions.expires_at > NOW()',
+      'SELECT users.id, users.email, users.is_premium, users.premium_expires_at FROM sessions JOIN users ON sessions.user_id = users.id WHERE sessions.id = ? AND sessions.expires_at > NOW()',
       [token]
     );
     if (!rows.length) return next({ status: 401, code: 'UNAUTHENTICATED', message: 'Not authenticated' });
-    res.json(rows[0]);
+    const row = rows[0];
+    const expiresAt = row.premium_expires_at ? new Date(row.premium_expires_at) : null;
+    const premiumActive = Boolean(row.is_premium) && Boolean(expiresAt && expiresAt.getTime() > Date.now());
+    if (!premiumActive && row.is_premium) {
+      await pool.query('UPDATE users SET is_premium=0 WHERE id=?', [row.id]);
+    }
+    res.json({
+      id: row.id,
+      email: row.email,
+      is_premium: premiumActive,
+      premium_expires_at: premiumActive ? row.premium_expires_at : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+
+app.get('/premium/status', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [[user]] = await pool.query('SELECT id, is_premium, premium_expires_at FROM users WHERE id=? LIMIT 1', [userId]);
+    const [[priceRow]] = await pool.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
+    const monthlyPrice = Number.parseFloat(priceRow?.value || '1');
+    const expiresAt = user?.premium_expires_at ? new Date(user.premium_expires_at) : null;
+    const isPremium = Boolean(user?.is_premium) && Boolean(expiresAt && expiresAt.getTime() > Date.now());
+
+    if (!isPremium && user?.is_premium) {
+      await pool.query('UPDATE users SET is_premium=0 WHERE id=?', [userId]);
+    }
+
+    res.json({
+      ok: true,
+      status: {
+        is_premium: isPremium,
+        premium_expires_at: isPremium ? user?.premium_expires_at : null,
+        monthly_price_usdt: Number.isFinite(monthlyPrice) && monthlyPrice > 0 ? monthlyPrice : 1,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
+  let conn;
+  try {
+    const userId = await requireUser(req);
+    const payload = PremiumSubscribeSchema.parse(req.body || {});
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[user]] = await conn.query('SELECT id, is_premium, premium_expires_at FROM users WHERE id=? FOR UPDATE', [userId]);
+    if (!user) {
+      await conn.rollback();
+      return next({ status: 404, code: 'NOT_FOUND', message: 'User not found' });
+    }
+
+    const [[priceRow]] = await conn.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
+    const monthlyPrice = Number.parseFloat(priceRow?.value || '1');
+    const normalizedMonthlyPrice = Number.isFinite(monthlyPrice) && monthlyPrice > 0 ? monthlyPrice : 1;
+    const chargeUnits = normalizedMonthlyPrice * payload.months;
+    const chargeWei = parseUnits(String(chargeUnits), 18);
+
+    const [balanceRows] = await conn.query(
+      'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+      [userId, 'USDT']
+    );
+    const currentBalanceWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+    if (currentBalanceWei < chargeWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_USDT', message: 'Insufficient USDT balance for premium subscription' });
+    }
+
+    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+      chargeWei.toString(),
+      userId,
+      'USDT',
+    ]);
+
+    const currentExpiry = user.premium_expires_at ? new Date(user.premium_expires_at) : null;
+    const baseDate = currentExpiry && currentExpiry.getTime() > Date.now() ? currentExpiry : new Date();
+    const nextExpiry = new Date(baseDate);
+    nextExpiry.setMonth(nextExpiry.getMonth() + payload.months);
+
+    await conn.query('UPDATE users SET is_premium=1, premium_expires_at=? WHERE id=?', [nextExpiry, userId]);
+    await conn.query(
+      `INSERT INTO platform_fee_balances (fee_type, asset, amount_wei)
+       VALUES ('premium_subscription', 'USDT', ?)
+       ON DUPLICATE KEY UPDATE amount_wei = amount_wei + VALUES(amount_wei), updated_at = NOW()`,
+      [chargeWei.toString()]
+    );
+
+    await conn.commit();
+
+    res.json({
+      ok: true,
+      status: {
+        is_premium: true,
+        premium_expires_at: nextExpiry.toISOString(),
+        monthly_price_usdt: normalizedMonthlyPrice,
+      },
+      charged: {
+        months: payload.months,
+        amount_usdt: trimDecimal(formatUnitsStr(chargeWei.toString(), 18)),
+        amount_wei: chargeWei.toString(),
+      },
+    });
+  } catch (err) {
+    if (conn) {
+      try { await conn.rollback(); } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
+app.get('/admin/premium/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [[priceRow]] = await pool.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
+    const [[ratioRow]] = await pool.query("SELECT value FROM platform_settings WHERE name='social_feed_premium_ratio' LIMIT 1");
+    const [[regularRow]] = await pool.query("SELECT value FROM platform_settings WHERE name='social_feed_regular_ratio' LIMIT 1");
+    res.json({
+      ok: true,
+      settings: {
+        premium_monthly_price_usdt: priceRow?.value || '1',
+        social_feed_premium_ratio: ratioRow?.value || '80',
+        social_feed_regular_ratio: regularRow?.value || '20',
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.put('/admin/premium/settings', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const monthlyPrice = Number.parseFloat(String(req.body?.premium_monthly_price_usdt ?? '1'));
+    const premiumRatio = Number.parseInt(String(req.body?.social_feed_premium_ratio ?? '80'), 10);
+    const regularRatio = Number.parseInt(String(req.body?.social_feed_regular_ratio ?? '20'), 10);
+    if (!Number.isFinite(monthlyPrice) || monthlyPrice <= 0) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid premium monthly price' });
+    }
+    if (!Number.isFinite(premiumRatio) || !Number.isFinite(regularRatio) || premiumRatio < 0 || regularRatio < 0) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid feed premium ratios' });
+    }
+    const total = premiumRatio + regularRatio;
+    const normalizedPremiumRatio = total === 0 ? 80 : Math.round((premiumRatio / total) * 100);
+    const normalizedRegularRatio = 100 - normalizedPremiumRatio;
+
+    await pool.query(
+      `INSERT INTO platform_settings (name, value)
+       VALUES ('premium_monthly_price_usdt', ?)
+       ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+      [trimDecimal(monthlyPrice)]
+    );
+    await pool.query(
+      `INSERT INTO platform_settings (name, value)
+       VALUES ('social_feed_premium_ratio', ?)
+       ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+      [String(normalizedPremiumRatio)]
+    );
+    await pool.query(
+      `INSERT INTO platform_settings (name, value)
+       VALUES ('social_feed_regular_ratio', ?)
+       ON DUPLICATE KEY UPDATE value = VALUES(value)`,
+      [String(normalizedRegularRatio)]
+    );
+
+    res.json({
+      ok: true,
+      settings: {
+        premium_monthly_price_usdt: trimDecimal(monthlyPrice),
+        social_feed_premium_ratio: String(normalizedPremiumRatio),
+        social_feed_regular_ratio: String(normalizedRegularRatio),
+      },
+    });
   } catch (err) {
     next(err);
   }

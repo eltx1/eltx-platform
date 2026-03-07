@@ -62,6 +62,7 @@ type Section =
   | 'p2p'
   | 'withdrawals'
   | 'feed'
+  | 'premium'
   | 'analytics';
 
 interface SummaryResponse {
@@ -132,6 +133,9 @@ type FeedAlgorithmSettings = {
   viewWeight: number;
   trustWeight: number;
   threadBoostWeight: number;
+  premiumBoostWeight: number;
+  premiumContentRatio: number;
+  regularContentRatio: number;
   maxFeedItems: number;
 };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; usdt_spent: string; usdt_spent_wei: string };
@@ -177,6 +181,15 @@ type AnalyticsSettings = {
 };
 
 type AnalyticsSettingsResponse = { settings: AnalyticsSettings };
+
+type PremiumSettingsResponse = {
+  ok: boolean;
+  settings: {
+    premium_monthly_price_usdt: string;
+    social_feed_premium_ratio: string;
+    social_feed_regular_ratio: string;
+  };
+};
 
 type AdminKycRequest = {
   id: number;
@@ -345,6 +358,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'fees', label: 'Fees', icon: Coins },
   { id: 'ai', label: 'AI', icon: Sparkles },
   { id: 'feed', label: 'Feed Algorithm', icon: SlidersHorizontal },
+  { id: 'premium', label: 'Premium', icon: Sparkles },
   { id: 'referrals', label: 'Referrals', icon: UserPlus },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'analytics', label: 'Analytics', icon: LineChart },
@@ -2243,7 +2257,110 @@ function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?
         {row('Views weight', 'viewWeight', 0, 20)}
         {row('Profile trust weight', 'trustWeight', 0, 20)}
         {row('Thread boost weight', 'threadBoostWeight', 0, 20)}
+        {row('Premium boost weight', 'premiumBoostWeight', 0, 50)}
+        {row('Premium content ratio (%)', 'premiumContentRatio', 0, 100)}
+        {row('Regular content ratio (%)', 'regularContentRatio', 0, 100)}
         {row('Max feed items', 'maxFeedItems', 5, 100)}
+      </div>
+    </section>
+  );
+}
+
+
+function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    premium_monthly_price_usdt: '1',
+    social_feed_premium_ratio: '80',
+    social_feed_regular_ratio: '20',
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<PremiumSettingsResponse>('/admin/premium/settings');
+    if (!res.ok || !res.data?.settings) {
+      onNotify(res.error || 'Failed to load premium settings', 'error');
+      setLoading(false);
+      return;
+    }
+    setForm({
+      premium_monthly_price_usdt: String(res.data.settings.premium_monthly_price_usdt || '1'),
+      social_feed_premium_ratio: String(res.data.settings.social_feed_premium_ratio || '80'),
+      social_feed_regular_ratio: String(res.data.settings.social_feed_regular_ratio || '20'),
+    });
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const save = async () => {
+    setSaving(true);
+    const res = await apiFetch<PremiumSettingsResponse>('/admin/premium/settings', {
+      method: 'PUT',
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (!res.ok || !res.data?.settings) {
+      onNotify(res.error || 'Failed to save premium settings', 'error');
+      return;
+    }
+    setForm({
+      premium_monthly_price_usdt: String(res.data.settings.premium_monthly_price_usdt || '1'),
+      social_feed_premium_ratio: String(res.data.settings.social_feed_premium_ratio || '80'),
+      social_feed_regular_ratio: String(res.data.settings.social_feed_regular_ratio || '20'),
+    });
+    onNotify('Premium settings saved', 'success');
+  };
+
+  if (loading) {
+    return <div className="x-card p-4 text-sm text-white/70">Loading premium settings...</div>;
+  }
+
+  return (
+    <section className="x-card space-y-4 p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold">Premium Membership</h2>
+          <p className="text-xs text-white/60">Set monthly premium price and default For You premium visibility ratio.</p>
+        </div>
+        <button className="btn btn-primary px-4 py-2 text-xs" onClick={save} disabled={saving}>
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="space-y-2 text-xs text-white/70">
+          <span>Premium monthly price (USDT)</span>
+          <input
+            className="x-input w-full px-3 py-2 text-sm"
+            value={form.premium_monthly_price_usdt}
+            onChange={(event) => setForm((prev) => ({ ...prev, premium_monthly_price_usdt: event.target.value }))}
+          />
+        </label>
+        <label className="space-y-2 text-xs text-white/70">
+          <span>Premium posts ratio in For You (%)</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            className="x-input w-full px-3 py-2 text-sm"
+            value={form.social_feed_premium_ratio}
+            onChange={(event) => setForm((prev) => ({ ...prev, social_feed_premium_ratio: event.target.value }))}
+          />
+        </label>
+        <label className="space-y-2 text-xs text-white/70">
+          <span>Regular posts ratio in For You (%)</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            className="x-input w-full px-3 py-2 text-sm"
+            value={form.social_feed_regular_ratio}
+            onChange={(event) => setForm((prev) => ({ ...prev, social_feed_regular_ratio: event.target.value }))}
+          />
+        </label>
       </div>
     </section>
   );
@@ -4966,6 +5083,7 @@ export default function AdminApp() {
         <div className="rounded-3xl border border-white/10 bg-black/30 p-6 shadow-xl shadow-blue-900/20 backdrop-blur">
           {active === 'overview' && <OverviewPanel onError={(msg) => notify(msg, 'error')} />}
           {active === 'feed' && <FeedAlgorithmPanel onNotify={notify} />}
+          {active === 'premium' && <PremiumPanel onNotify={notify} />}
           {active === 'admins' && <AdminUsersPanel admin={admin} onNotify={notify} />}
           {active === 'users' && <UsersPanel onNotify={notify} />}
           {active === 'kyc' && <KycPanel onNotify={notify} />}
