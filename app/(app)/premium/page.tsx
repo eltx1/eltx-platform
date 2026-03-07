@@ -26,7 +26,7 @@ export default function PremiumPage() {
       lang === 'ar'
         ? {
             title: 'عضوية البريميم الفيريفايد',
-            subtitle: 'اشتراك شهري 1 USDT (الأدمن يقدر يغير السعر).',
+            subtitle: 'اشتراك شهري 1 USDT.',
             active: 'أنت مشترك بريميم ✅',
             inactive: 'أنت عضو عادي حاليًا.',
             expires: 'تاريخ انتهاء الاشتراك',
@@ -40,7 +40,7 @@ export default function PremiumPage() {
           }
         : {
             title: 'Premium Verified Membership',
-            subtitle: 'Monthly subscription is 1 USDT (admin can update this anytime).',
+            subtitle: 'Monthly subscription is 1 USDT.',
             active: 'You are a premium member ✅',
             inactive: 'You are currently a regular member.',
             expires: 'Subscription expiry',
