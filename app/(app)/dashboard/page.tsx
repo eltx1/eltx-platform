@@ -98,11 +98,12 @@ export default function DashboardPage() {
     <div className="space-y-2.5">
       <div className="grid gap-2.5 lg:grid-cols-[230px,minmax(0,1fr),300px] lg:items-start">
         <aside className="x-card space-y-2 p-2.5 lg:sticky lg:top-20">
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} />
             <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} />
             <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} />
             <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} />
+            <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} />
           </div>
           <button
             type="button"
@@ -162,7 +163,7 @@ export default function DashboardPage() {
                   if (wordCount > wordLimit) return toast(t.dashboard.social.quickPostLimit);
                   if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                   const profile = getProfile(user.id);
-                  const newPost = createPost({ content: quickPost.trim(), profile });
+                  const newPost = createPost({ content: quickPost.trim(), profile, isPremium: Boolean(user.is_premium) });
                   const saveResult = savePost(newPost, user.id);
                   if (!saveResult.ok) return toast(t.dashboard.social.quickPostStorageError);
                   setPosts((prev) => [newPost, ...prev]);
@@ -233,7 +234,7 @@ export default function DashboardPage() {
         <aside className="space-y-2.5 lg:sticky lg:top-20">
           <section className="x-card p-2.5 space-y-2">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
-            <div className="grid grid-cols-2 gap-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} />
               <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} />
               <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
@@ -241,6 +242,7 @@ export default function DashboardPage() {
               <SectionCard title="Staking" href="/staking" icon={Coins} />
               <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} />
               <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} />
+              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} />
               <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
               <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
               <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} />

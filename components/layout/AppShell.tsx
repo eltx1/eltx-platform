@@ -13,6 +13,7 @@ const items = [
   { href: '/wallet', key: 'wallet', icon: Wallet },
   { href: '/ai', key: 'ai', icon: Sparkles },
   { href: '/kyc', key: 'kyc', icon: ShieldCheck },
+  { href: '/premium', key: 'premium', icon: ShieldCheck },
   { href: '/profile', key: 'profile', icon: UserRound },
 ] as const;
 
@@ -29,6 +30,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     wallet: t.appNav.wallet,
     ai: lang === 'ar' ? 'الذكاء الاصطناعي' : 'AI',
     kyc: lang === 'ar' ? 'التحقق' : 'Verification',
+    premium: lang === 'ar' ? 'بريميم' : 'Premium',
     profile: lang === 'ar' ? 'الملف الشخصي' : 'Profile',
   };
 

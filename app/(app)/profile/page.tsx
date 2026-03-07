@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { dict, useLang } from '../../lib/i18n';
+import { BadgeCheck } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import PostCard from '../../../components/social/PostCard';
 import { addPostComment, getAllPosts, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
@@ -40,7 +41,7 @@ export default function ProfilePage() {
             <Image src={profile.avatarUrl} alt={profile.publicName} width={64} height={64} className="h-full w-full object-cover" />
           </div>
           <div className="space-y-1">
-            <h1 className="text-xl font-semibold">{profile.publicName}</h1>
+            <h1 className="text-xl font-semibold flex items-center gap-2">{profile.publicName}{user?.is_premium ? <BadgeCheck className="h-5 w-5 text-sky-400" /> : null}</h1>
             <p className="text-sm text-white/60">{profile.handle}</p>
           </div>
         </div>

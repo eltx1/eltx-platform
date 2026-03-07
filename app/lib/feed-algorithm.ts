@@ -7,6 +7,9 @@ export type FeedAlgorithmSettings = {
   viewWeight: number;
   trustWeight: number;
   threadBoostWeight: number;
+  premiumBoostWeight: number;
+  premiumContentRatio: number;
+  regularContentRatio: number;
   maxFeedItems: number;
 };
 
@@ -19,6 +22,9 @@ export const DEFAULT_FEED_ALGORITHM_SETTINGS: FeedAlgorithmSettings = {
   viewWeight: 1,
   trustWeight: 1,
   threadBoostWeight: 3,
+  premiumBoostWeight: 6,
+  premiumContentRatio: 80,
+  regularContentRatio: 20,
   maxFeedItems: 30,
 };
 
@@ -36,6 +42,9 @@ export function normalizeFeedAlgorithmSettings(input?: Partial<FeedAlgorithmSett
   const followingRatio = clamp(Math.round(merged.followingRatio), 0, 100);
   const forYouRatio = clamp(Math.round(merged.forYouRatio), 0, 100);
   const ratioTotal = followingRatio + forYouRatio;
+  const premiumContentRatio = clamp(Math.round(merged.premiumContentRatio), 0, 100);
+  const regularContentRatio = clamp(Math.round(merged.regularContentRatio), 0, 100);
+  const contentRatioTotal = premiumContentRatio + regularContentRatio;
 
   let normalizedFollowing = followingRatio;
   let normalizedForYou = forYouRatio;
@@ -48,6 +57,17 @@ export function normalizeFeedAlgorithmSettings(input?: Partial<FeedAlgorithmSett
     normalizedForYou = 100 - normalizedFollowing;
   }
 
+  let normalizedPremiumContent = premiumContentRatio;
+  let normalizedRegularContent = regularContentRatio;
+
+  if (contentRatioTotal === 0) {
+    normalizedPremiumContent = DEFAULT_FEED_ALGORITHM_SETTINGS.premiumContentRatio;
+    normalizedRegularContent = DEFAULT_FEED_ALGORITHM_SETTINGS.regularContentRatio;
+  } else if (contentRatioTotal !== 100) {
+    normalizedPremiumContent = Math.round((premiumContentRatio / contentRatioTotal) * 100);
+    normalizedRegularContent = 100 - normalizedPremiumContent;
+  }
+
   return {
     followingRatio: normalizedFollowing,
     forYouRatio: normalizedForYou,
@@ -57,6 +77,9 @@ export function normalizeFeedAlgorithmSettings(input?: Partial<FeedAlgorithmSett
     viewWeight: clamp(merged.viewWeight, 0, 20),
     trustWeight: clamp(merged.trustWeight, 0, 20),
     threadBoostWeight: clamp(merged.threadBoostWeight, 0, 20),
+    premiumBoostWeight: clamp(merged.premiumBoostWeight, 0, 50),
+    premiumContentRatio: normalizedPremiumContent,
+    regularContentRatio: normalizedRegularContent,
     maxFeedItems: clamp(Math.round(merged.maxFeedItems), 5, 100),
   };
 }

@@ -18,6 +18,7 @@ export type SocialPost = {
   views: number;
   authorFollowers?: number;
   isFollowed?: boolean;
+  isPremium?: boolean;
 };
 
 export type SocialProfile = {
@@ -82,6 +83,7 @@ const seedPosts: SocialPost[] = [
     views: 2250,
     authorFollowers: 3900,
     isFollowed: true,
+    isPremium: true,
   },
   {
     id: 'seed-2',
@@ -98,6 +100,7 @@ const seedPosts: SocialPost[] = [
     views: 980,
     authorFollowers: 1100,
     isFollowed: false,
+    isPremium: false,
   },
   {
     id: 'seed-3',
@@ -113,6 +116,7 @@ const seedPosts: SocialPost[] = [
     views: 720,
     authorFollowers: 610,
     isFollowed: true,
+    isPremium: false,
   },
   {
     id: 'seed-4',
@@ -128,6 +132,7 @@ const seedPosts: SocialPost[] = [
     views: 4120,
     authorFollowers: 5300,
     isFollowed: false,
+    isPremium: true,
   },
 ];
 
@@ -406,6 +411,7 @@ function buildScoreFromSummary(
     + Number(post.views || 0) * settings.viewWeight
     + estimateTrustSignal(post) * settings.trustWeight
     + threadScore * settings.threadBoostWeight
+    + (post.isPremium ? settings.premiumBoostWeight : 0)
   );
 }
 
@@ -424,10 +430,36 @@ export function getForYouFeed(posts: SocialPost[], options?: { userId?: UserScop
   const sortFn = (a: SocialPost, b: SocialPost) =>
     (scoreByPostId.get(b.id) ?? 0) - (scoreByPostId.get(a.id) ?? 0)
     || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  const followedSorted = [...followed].sort(sortFn);
-  const discoverSorted = [...discover].sort(sortFn);
-  const feed: SocialPost[] = [];
+
   const max = settings.maxFeedItems;
+
+  const buildMixedPool = (sourcePosts: SocialPost[]) => {
+    const premiumPosts = sourcePosts.filter((post) => post.isPremium);
+    const regularPosts = sourcePosts.filter((post) => !post.isPremium);
+    const premiumSorted = [...premiumPosts].sort(sortFn);
+    const regularSorted = [...regularPosts].sort(sortFn);
+    const mixed: SocialPost[] = [];
+    const target = Math.min(sourcePosts.length, max);
+    const premiumTarget = Math.round(target * (settings.premiumContentRatio / 100));
+    mixed.push(...premiumSorted.slice(0, premiumTarget));
+    mixed.push(...regularSorted.slice(0, target - mixed.length));
+    if (mixed.length < target) {
+      const leftovers = [...premiumSorted.slice(premiumTarget), ...regularSorted.slice(target - premiumTarget)];
+      leftovers
+        .sort(sortFn)
+        .forEach((post) => {
+          if (mixed.length < target && !mixed.find((item) => item.id === post.id)) {
+            mixed.push(post);
+          }
+        });
+    }
+    return mixed;
+  };
+
+  const followedSorted = buildMixedPool(followed);
+  const discoverSorted = buildMixedPool(discover);
+
+  const feed: SocialPost[] = [];
   const followingTarget = Math.round(max * (settings.followingRatio / 100));
   feed.push(...followedSorted.slice(0, followingTarget));
   feed.push(...discoverSorted.slice(0, max - feed.length));
@@ -454,10 +486,12 @@ export function createPost({
   content,
   imageUrl,
   profile,
+  isPremium,
 }: {
   content: string;
   imageUrl?: string | null;
   profile: SocialProfile;
+  isPremium?: boolean;
 }): SocialPost {
   return {
     id: createLocalPostId(),
@@ -474,5 +508,6 @@ export function createPost({
     views: 0,
     authorFollowers: 15,
     isFollowed: true,
+    isPremium: Boolean(isPremium),
   };
 }
