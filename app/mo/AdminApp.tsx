@@ -137,6 +137,9 @@ type FeedAlgorithmSettings = {
   premiumContentRatio: number;
   regularContentRatio: number;
   maxFeedItems: number;
+  dashboardForYouItems: number;
+  forYouPageItems: number;
+  topMonthlyItems: number;
 };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; usdt_spent: string; usdt_spent_wei: string };
 type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
@@ -2261,6 +2264,9 @@ function FeedAlgorithmPanel({ onNotify }: { onNotify: (message: string, variant?
         {row('Premium content ratio (%)', 'premiumContentRatio', 0, 100)}
         {row('Regular content ratio (%)', 'regularContentRatio', 0, 100)}
         {row('Max feed items', 'maxFeedItems', 5, 100)}
+        {row('Dashboard For You posts', 'dashboardForYouItems', 5, 100)}
+        {row('For You page batch size', 'forYouPageItems', 10, 200)}
+        {row('Top Monthly posts', 'topMonthlyItems', 3, 50)}
       </div>
     </section>
   );
