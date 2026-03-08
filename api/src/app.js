@@ -3941,7 +3941,8 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
     const monthlyPrice = Number.parseFloat(priceRow?.value || '1');
     const normalizedMonthlyPrice = Number.isFinite(monthlyPrice) && monthlyPrice > 0 ? monthlyPrice : 1;
     const chargeUnits = normalizedMonthlyPrice * payload.months;
-    const chargeWei = parseUnits(String(chargeUnits), 18);
+    const usdtDecimals = getSymbolDecimals('USDT');
+    const chargeWei = ethers.parseUnits(String(chargeUnits), usdtDecimals);
 
     const [balanceRows] = await conn.query(
       'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
@@ -3983,7 +3984,7 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
       },
       charged: {
         months: payload.months,
-        amount_usdt: trimDecimal(formatUnitsStr(chargeWei.toString(), 18)),
+        amount_usdt: trimDecimal(formatUnitsStr(chargeWei.toString(), usdtDecimals)),
         amount_wei: chargeWei.toString(),
       },
     });

@@ -10,6 +10,10 @@ process.env.DATABASE_URL = process.env.DATABASE_URL || 'mysql://root@localhost/e
 
 const testSchema = {
   users: [{ id: 1, email: 'user@example.com', password_hash: '$argon2id$v=19$m=65536,t=3,p=4$0O4HViXmWtx2WnYIob2P0Q$5h6yA7yrWzXUOqYdW+awh7Y8/4Iv7pGGNqvLFxY2QWo' }],
+  sessions: [{ id: 'valid-session', user_id: 1 }],
+  premium: { is_premium: 0, premium_expires_at: null },
+  balances: { '1:USDT': '1000000' },
+  platformFees: { premium_subscription: '0' },
 };
 
 const pool = {
@@ -21,6 +25,40 @@ const pool = {
     }
     if (sql.includes('INSERT INTO login_attempts')) return [{ affectedRows: 1 }];
     if (sql.includes('INSERT INTO sessions')) return [{ affectedRows: 1 }];
+    if (sql.includes('SELECT users.id FROM sessions JOIN users')) {
+      const token = params[0];
+      const session = testSchema.sessions.find((s) => s.id === token);
+      return [session ? [{ id: session.user_id }] : []];
+    }
+    if (sql.includes('UPDATE sessions SET expires_at')) return [{ affectedRows: 1 }];
+    if (sql.includes('SELECT id, is_premium, premium_expires_at FROM users WHERE id=? FOR UPDATE')) {
+      const userId = Number(params[0]);
+      if (userId !== 1) return [[]];
+      return [[{ id: 1, is_premium: testSchema.premium.is_premium, premium_expires_at: testSchema.premium.premium_expires_at }]];
+    }
+    if (sql.includes("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt'")) {
+      return [[{ value: '1' }]];
+    }
+    if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      const balance = testSchema.balances[key];
+      return [balance ? [{ balance_wei: balance }] : []];
+    }
+    if (sql.includes('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?')) {
+      const key = `${Number(params[1])}:${String(params[2]).toUpperCase()}`;
+      const current = BigInt(testSchema.balances[key] || '0');
+      testSchema.balances[key] = (current - BigInt(params[0])).toString();
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('UPDATE users SET is_premium=1, premium_expires_at=? WHERE id=?')) {
+      testSchema.premium = { is_premium: 1, premium_expires_at: params[0] };
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes("INSERT INTO platform_fee_balances (fee_type, asset, amount_wei)")) {
+      const next = BigInt(testSchema.platformFees.premium_subscription) + BigInt(params[0]);
+      testSchema.platformFees.premium_subscription = next.toString();
+      return [{ affectedRows: 1 }];
+    }
     if (sql.includes('FROM sessions JOIN users')) return [[]];
     if (sql.includes('SELECT id, chain_id, address FROM wallets')) return [[{ id: 1, chain_id: 56, address: '0x1234' }]];
     if (sql.includes('INSERT INTO wallets')) return [{ insertId: 1 }];
@@ -73,6 +111,19 @@ test('POST /trade/quote blocks unauthenticated requests', async () => {
   const res = await request.post('/trade/quote').send({ from_asset: 'USDT', to_asset: 'ELTX', from_amount: '10' });
   assert.equal(res.status, 401);
   assert.equal(res.body?.error?.code, 'UNAUTHENTICATED');
+});
+
+test('POST /premium/subscribe charges USDT using token decimals', async () => {
+  testSchema.balances['1:USDT'] = '1000000';
+  testSchema.platformFees.premium_subscription = '0';
+  testSchema.premium = { is_premium: 0, premium_expires_at: null };
+
+  const res = await request.post('/premium/subscribe').set('Cookie', 'sid=valid-session').send({ months: 1 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(res.body?.charged?.amount_wei, '1000000');
+  assert.equal(testSchema.balances['1:USDT'], '0');
+  assert.equal(testSchema.platformFees.premium_subscription, '1000000');
 });
 
 
