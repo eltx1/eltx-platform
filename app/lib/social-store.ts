@@ -476,6 +476,27 @@ export function getForYouFeed(posts: SocialPost[], options?: { userId?: UserScop
   return feed;
 }
 
+export function getForYouFeedPage(
+  posts: SocialPost[],
+  options?: {
+    userId?: UserScopeId;
+    settings?: Partial<FeedAlgorithmSettings> | null;
+    limit?: number;
+    offset?: number;
+  },
+) {
+  const full = getForYouFeed(posts, options);
+  const offset = Math.max(0, Math.floor(options?.offset || 0));
+  const limit = Math.max(1, Math.floor(options?.limit || full.length));
+  const items = full.slice(offset, offset + limit);
+  return {
+    items,
+    hasMore: offset + items.length < full.length,
+    nextOffset: offset + items.length,
+    total: full.length,
+  };
+}
+
 export function getFollowingFeed(posts: SocialPost[]) {
   return [...posts]
     .filter((post) => post.isFollowed)

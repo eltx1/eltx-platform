@@ -11,6 +11,9 @@ export type FeedAlgorithmSettings = {
   premiumContentRatio: number;
   regularContentRatio: number;
   maxFeedItems: number;
+  dashboardForYouItems: number;
+  forYouPageItems: number;
+  topMonthlyItems: number;
 };
 
 export const DEFAULT_FEED_ALGORITHM_SETTINGS: FeedAlgorithmSettings = {
@@ -26,6 +29,9 @@ export const DEFAULT_FEED_ALGORITHM_SETTINGS: FeedAlgorithmSettings = {
   premiumContentRatio: 80,
   regularContentRatio: 20,
   maxFeedItems: 30,
+  dashboardForYouItems: 30,
+  forYouPageItems: 50,
+  topMonthlyItems: 10,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -81,5 +87,8 @@ export function normalizeFeedAlgorithmSettings(input?: Partial<FeedAlgorithmSett
     premiumContentRatio: normalizedPremiumContent,
     regularContentRatio: normalizedRegularContent,
     maxFeedItems: clamp(Math.round(merged.maxFeedItems), 5, 100),
+    dashboardForYouItems: clamp(Math.round(merged.dashboardForYouItems), 5, 100),
+    forYouPageItems: clamp(Math.round(merged.forYouPageItems), 10, 200),
+    topMonthlyItems: clamp(Math.round(merged.topMonthlyItems), 3, 50),
   };
 }

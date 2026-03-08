@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
 import {
@@ -90,7 +91,8 @@ export default function DashboardPage() {
     return quickPost.trim().split(/\s+/).length;
   }, [quickPost]);
 
-  const forYouFeed = useMemo(() => getForYouFeed(posts, { userId: user?.id, settings: feedSettings }), [posts, user?.id, feedSettings]);
+  const fullForYouFeed = useMemo(() => getForYouFeed(posts, { userId: user?.id, settings: feedSettings }), [posts, user?.id, feedSettings]);
+  const forYouFeed = useMemo(() => fullForYouFeed.slice(0, feedSettings.dashboardForYouItems), [fullForYouFeed, feedSettings.dashboardForYouItems]);
   const followingFeed = useMemo(() => getFollowingFeed(posts), [posts]);
   const activeFeed = activeFeedTab === 'for-you' ? forYouFeed : followingFeed;
 
@@ -178,7 +180,8 @@ export default function DashboardPage() {
           </section>
 
           <section className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
               <button
                 className={`rounded-full border px-3 py-1 text-[11px] ${activeFeedTab === 'for-you' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
                 onClick={() => setActiveFeedTab('for-you')}
@@ -191,6 +194,12 @@ export default function DashboardPage() {
               >
                 {t.dashboard.social.followingTitle}
               </button>
+              </div>
+              {activeFeedTab === 'for-you' && (
+                <Link href="/for-you" className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/80 hover:border-[#c9a75c]/60 hover:text-[#f4deae]">
+                  {lang === 'ar' ? 'عرض المزيد' : 'Show More'}
+                </Link>
+              )}
             </div>
             <div className="space-y-2">
               {activeFeed.map((post) => {
