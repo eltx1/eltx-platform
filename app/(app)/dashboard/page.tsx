@@ -22,6 +22,7 @@ import {
   Plus,
   Send,
   Bot,
+  CircleDollarSign,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { dict, useLang } from '../../lib/i18n';
@@ -43,6 +44,7 @@ import {
 } from '../../lib/social-store';
 import { apiFetch } from '../../lib/api';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../../lib/feed-algorithm';
+import { trackPostView } from '../../lib/monetization';
 
 type FeedTab = 'for-you' | 'following';
 
@@ -106,6 +108,7 @@ export default function DashboardPage() {
             <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} />
             <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} />
             <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} />
+            <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} />
           </div>
           <button
             type="button"
@@ -224,6 +227,10 @@ export default function DashboardPage() {
                       setPosts((prev) => [...prev]);
                       toast(result.reposted ? t.dashboard.social.repostSuccess : t.dashboard.social.repostRemoved);
                     }}
+                    onViewed={(targetPost) => {
+                      const counted = trackPostView(targetPost.id, user?.id);
+                      if (counted) setPosts(getAllPosts(user?.id));
+                    }}
                     onComment={(targetPost, content) => {
                       if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                       if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
@@ -252,6 +259,7 @@ export default function DashboardPage() {
               <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} />
               <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} />
               <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} />
+            <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} />
               <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
               <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
               <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} />

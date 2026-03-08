@@ -13,6 +13,7 @@ import {
   type SocialPost,
 } from '../lib/social-store';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../lib/feed-algorithm';
+import { trackPostView } from '../lib/monetization';
 
 const FALLBACK_BATCH_SIZE = 50;
 
@@ -130,6 +131,10 @@ export default function ForYouPage() {
               commentsState={{ comments: summary.comments, commentsList: summary.commentsList }}
               commentPlaceholder={t.dashboard.social.commentPlaceholder}
               commentSubmitLabel={t.dashboard.social.commentSubmit}
+              onViewed={(targetPost) => {
+                const counted = trackPostView(targetPost.id, user?.id);
+                if (counted) setPosts(getAllPosts(user?.id));
+              }}
             />
           );
         })}
