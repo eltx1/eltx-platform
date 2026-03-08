@@ -18,6 +18,14 @@ type PostCardProps = {
   commentPlaceholder?: string;
   commentSubmitLabel?: string;
   onViewed?: (post: SocialPost) => void;
+  labels?: {
+    trustHigh?: string;
+    trustTrusted?: string;
+    trustGrowing?: string;
+    trustNew?: string;
+    followers?: string;
+    mediaAlt?: string;
+  };
 };
 
 export default function PostCard({
@@ -31,6 +39,7 @@ export default function PostCard({
   commentPlaceholder = 'Write a comment',
   commentSubmitLabel = 'Reply',
   onViewed,
+  labels,
 }: PostCardProps) {
   const { lang } = useLang();
   const t = dict[lang];
@@ -56,19 +65,19 @@ export default function PostCard({
 
   const trustLevel = useMemo(() => {
     const followers = post.authorFollowers || 0;
-    if (followers >= 5000) return 'High trust';
-    if (followers >= 1000) return 'Trusted';
-    if (followers >= 200) return 'Growing';
-    return 'New creator';
-  }, [post.authorFollowers]);
+    if (followers >= 5000) return labels?.trustHigh || (lang === 'ar' ? 'ثقة عالية' : 'High trust');
+    if (followers >= 1000) return labels?.trustTrusted || (lang === 'ar' ? 'موثوق' : 'Trusted');
+    if (followers >= 200) return labels?.trustGrowing || (lang === 'ar' ? 'في نمو' : 'Growing');
+    return labels?.trustNew || (lang === 'ar' ? 'صانع محتوى جديد' : 'New creator');
+  }, [labels?.trustGrowing, labels?.trustHigh, labels?.trustNew, labels?.trustTrusted, lang, post.authorFollowers]);
 
   const dateLabel = useMemo(() => {
     try {
-      return new Date(post.createdAt).toLocaleString();
+      return new Date(post.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US');
     } catch {
       return post.createdAt;
     }
-  }, [post.createdAt]);
+  }, [lang, post.createdAt]);
 
   const profileHref = `/creators/${encodeURIComponent(post.handle.replace(/^@/, '').trim())}`;
 
@@ -129,7 +138,7 @@ export default function PostCard({
           <p className="mt-2 text-sm text-white/85 leading-relaxed whitespace-pre-wrap">{post.content}</p>
           {post.imageUrl && (
             <div className="mt-3 overflow-hidden rounded-2xl border border-[#2f3336]">
-              <Image src={post.imageUrl} alt="Post media" width={680} height={380} className="h-auto w-full object-cover" />
+              <Image src={post.imageUrl} alt={labels?.mediaAlt || (lang === 'ar' ? 'وسائط المنشور' : 'Post media')} width={680} height={380} className="h-auto w-full object-cover" />
             </div>
           )}
         </div>
@@ -181,7 +190,10 @@ export default function PostCard({
       <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-white/10 bg-[#0d0f12] px-3 py-2 text-[11px] text-white/65">
         <span className="inline-flex items-center gap-1.5"><Eye className="h-3.5 w-3.5" />{post.views}</span>
         <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />{trustLevel}</span>
-        <span>{(post.authorFollowers || 0).toLocaleString()} followers</span>
+        <span>
+          {(post.authorFollowers || 0).toLocaleString()}{' '}
+          {labels?.followers || (lang === 'ar' ? 'متابع' : 'followers')}
+        </span>
       </div>
 
       {openComposer && (
