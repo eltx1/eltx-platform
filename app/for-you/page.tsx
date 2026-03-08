@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { dict, useLang } from '../lib/i18n';
+import { useAuth } from '../lib/auth';
 import PostCard from '../../components/social/PostCard';
 import { apiFetch } from '../lib/api';
 import {
@@ -16,6 +17,7 @@ import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../
 const FALLBACK_BATCH_SIZE = 50;
 
 export default function ForYouPage() {
+  const { user } = useAuth();
   const { lang } = useLang();
   const t = dict[lang];
   const [posts, setPosts] = useState<SocialPost[]>([]);
@@ -27,8 +29,8 @@ export default function ForYouPage() {
   const loaderRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    setPosts(getAllPosts(undefined));
-  }, []);
+    setPosts(getAllPosts(user?.id));
+  }, [user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,13 +47,22 @@ export default function ForYouPage() {
   }, []);
 
   const pageSize = Math.max(10, feedSettings.forYouPageItems || FALLBACK_BATCH_SIZE);
-  const forYouAll = useMemo(() => getForYouFeedPage(posts, { settings: feedSettings, limit: 500, offset: 0 }), [posts, feedSettings]);
+  const forYouAll = useMemo(
+    () => getForYouFeedPage(posts, {
+      userId: user?.id,
+      settings: feedSettings,
+      limit: 500,
+      offset: 0,
+    }),
+    [posts, feedSettings, user?.id],
+  );
 
   const loadNext = useCallback(() => {
     if (loadingMoreRef.current || !hasMore) return;
     loadingMoreRef.current = true;
 
     const page = getForYouFeedPage(posts, {
+      userId: user?.id,
       settings: feedSettings,
       offset,
       limit: pageSize,
@@ -65,7 +76,7 @@ export default function ForYouPage() {
     setOffset(page.nextOffset);
     setHasMore(page.hasMore);
     loadingMoreRef.current = false;
-  }, [feedSettings, hasMore, offset, pageSize, posts]);
+  }, [feedSettings, hasMore, offset, pageSize, posts, user?.id]);
 
   useEffect(() => {
     setVisible([]);
@@ -109,7 +120,7 @@ export default function ForYouPage() {
 
       <section className="space-y-3">
         {visible.map((post) => {
-          const summary = getPostInteractionSummary(post);
+          const summary = getPostInteractionSummary(post, user?.id);
           return (
             <PostCard
               key={post.id}
