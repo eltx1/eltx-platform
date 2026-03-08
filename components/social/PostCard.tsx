@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { BadgeCheck, Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
@@ -17,6 +17,7 @@ type PostCardProps = {
   onComment?: (post: SocialPost, content: string) => void;
   commentPlaceholder?: string;
   commentSubmitLabel?: string;
+  onViewed?: (post: SocialPost) => void;
 };
 
 export default function PostCard({
@@ -29,6 +30,7 @@ export default function PostCard({
   onComment,
   commentPlaceholder = 'Write a comment',
   commentSubmitLabel = 'Reply',
+  onViewed,
 }: PostCardProps) {
   const { lang } = useLang();
   const t = dict[lang];
@@ -70,8 +72,48 @@ export default function PostCard({
 
   const profileHref = `/creators/${encodeURIComponent(post.handle.replace(/^@/, '').trim())}`;
 
+  const articleRef = useRef<HTMLElement | null>(null);
+  const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewTrackedRef = useRef(false);
+
+  useEffect(() => {
+    viewTrackedRef.current = false;
+  }, [post.id]);
+
+  useEffect(() => {
+    const node = articleRef.current;
+    if (!node || !onViewed) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      if (entry.isIntersecting && !viewTrackedRef.current && !viewTimerRef.current) {
+        viewTimerRef.current = setTimeout(() => {
+          if (!viewTrackedRef.current) {
+            onViewed(post);
+            viewTrackedRef.current = true;
+          }
+          viewTimerRef.current = null;
+        }, 5000);
+      }
+      if (!entry.isIntersecting && viewTimerRef.current) {
+        clearTimeout(viewTimerRef.current);
+        viewTimerRef.current = null;
+      }
+    }, { threshold: 0.65 });
+
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+      if (viewTimerRef.current) {
+        clearTimeout(viewTimerRef.current);
+        viewTimerRef.current = null;
+      }
+    };
+  }, [onViewed, post]);
+
   return (
-    <article className="rounded-3xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#121417]">
+    <article ref={articleRef} className="rounded-3xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#121417]">
       <div className="flex items-start gap-3">
         <Link href={profileHref} className="h-10 w-10 overflow-hidden rounded-full border border-[#2f3336] bg-[#111] transition hover:border-[#c9a75c]/60">
           <Image src={post.avatarUrl || '/assets/img/logo-new.svg'} alt={post.authorName} width={40} height={40} className="h-full w-full object-cover" />

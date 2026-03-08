@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, Bell, Mail, UserRound, Sparkles, Wallet, ShieldCheck } from 'lucide-react';
+import { Home, Search, Bell, Mail, UserRound, Sparkles, Wallet, ShieldCheck, CircleDollarSign } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
 
 const items = [
@@ -14,6 +14,7 @@ const items = [
   { href: '/ai', key: 'ai', icon: Sparkles },
   { href: '/kyc', key: 'kyc', icon: ShieldCheck },
   { href: '/premium', key: 'premium', icon: ShieldCheck },
+  { href: '/monetize', key: 'monetize', icon: CircleDollarSign },
   { href: '/profile', key: 'profile', icon: UserRound },
 ] as const;
 
@@ -32,6 +33,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     kyc: lang === 'ar' ? 'التحقق' : 'Verification',
     premium: lang === 'ar' ? 'بريميم' : 'Premium',
     profile: lang === 'ar' ? 'الملف الشخصي' : 'Profile',
+    monetize: lang === 'ar' ? 'تحقيق الربح' : 'Monetize',
   };
 
   return (

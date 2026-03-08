@@ -45,6 +45,13 @@ const FOLLOWING_KEY = 'lordai.social.following';
 const USER_SCOPE_KEY = 'guest';
 const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
 
+const VIEW_BUCKET_KEY = 'lordai.social.view-bucket';
+
+function getViewBucket() {
+  if (typeof window === 'undefined') return {} as Record<string, number>;
+  return safeParse<Record<string, number>>(window.localStorage.getItem(VIEW_BUCKET_KEY), {});
+}
+
 type PostInteractionState = {
   liked: boolean;
   reposted: boolean;
@@ -382,11 +389,12 @@ export function getAllPosts(userId?: UserScopeId): SocialPost[] {
   const stored = getStoredPosts(userId);
   const all = [...stored, ...seedPosts];
   const byId = new Map<string, SocialPost>();
+  const viewBucket = getViewBucket();
   all.forEach((post) => {
     if (!byId.has(post.id)) {
       const normalized = normalizeHandle(post.handle);
       const isFollowed = typeof followingMap[normalized] === 'boolean' ? followingMap[normalized] : Boolean(post.isFollowed);
-      byId.set(post.id, { ...post, isFollowed });
+      byId.set(post.id, { ...post, isFollowed, views: Number(post.views || 0) + Number(viewBucket[post.id] || 0) });
     }
   });
   return Array.from(byId.values());

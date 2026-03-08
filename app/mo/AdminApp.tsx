@@ -194,6 +194,13 @@ type PremiumSettingsResponse = {
   };
 };
 
+type MonetizationSettingsResponse = {
+  settings: {
+    requiredPremiumFollowers: number;
+    payoutPerThousandViews: number;
+  };
+};
+
 type AdminKycRequest = {
   id: number;
   user_id: number;
@@ -2280,6 +2287,8 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     premium_monthly_price_usdt: '1',
     social_feed_premium_ratio: '80',
     social_feed_regular_ratio: '20',
+    requiredPremiumFollowers: '10',
+    payoutPerThousandViews: '0.01',
   });
 
   const load = useCallback(async () => {
@@ -2290,10 +2299,13 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       setLoading(false);
       return;
     }
+    const monetizationRes = await apiFetch<MonetizationSettingsResponse>('/api/admin/monetization-settings');
     setForm({
       premium_monthly_price_usdt: String(res.data.settings.premium_monthly_price_usdt || '1'),
       social_feed_premium_ratio: String(res.data.settings.social_feed_premium_ratio || '80'),
       social_feed_regular_ratio: String(res.data.settings.social_feed_regular_ratio || '20'),
+      requiredPremiumFollowers: String(monetizationRes.data?.settings?.requiredPremiumFollowers || '10'),
+      payoutPerThousandViews: String(monetizationRes.data?.settings?.payoutPerThousandViews || '0.01'),
     });
     setLoading(false);
   }, [onNotify]);
@@ -2308,17 +2320,27 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       method: 'PUT',
       body: JSON.stringify(form),
     });
+    const monetizationRes = await apiFetch<MonetizationSettingsResponse>('/api/admin/monetization-settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        requiredPremiumFollowers: Number(form.requiredPremiumFollowers || 10),
+        payoutPerThousandViews: Number(form.payoutPerThousandViews || 0.01),
+      }),
+    });
+
     setSaving(false);
-    if (!res.ok || !res.data?.settings) {
-      onNotify(res.error || 'Failed to save premium settings', 'error');
+    if (!res.ok || !res.data?.settings || !monetizationRes.ok) {
+      onNotify(res.error || monetizationRes.error || 'Failed to save premium settings', 'error');
       return;
     }
     setForm({
       premium_monthly_price_usdt: String(res.data.settings.premium_monthly_price_usdt || '1'),
       social_feed_premium_ratio: String(res.data.settings.social_feed_premium_ratio || '80'),
       social_feed_regular_ratio: String(res.data.settings.social_feed_regular_ratio || '20'),
+      requiredPremiumFollowers: String(monetizationRes.data?.settings?.requiredPremiumFollowers || '10'),
+      payoutPerThousandViews: String(monetizationRes.data?.settings?.payoutPerThousandViews || '0.01'),
     });
-    onNotify('Premium settings saved', 'success');
+    onNotify('Premium & monetization settings saved', 'success');
   };
 
   if (loading) {
@@ -2365,6 +2387,27 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
             className="x-input w-full px-3 py-2 text-sm"
             value={form.social_feed_regular_ratio}
             onChange={(event) => setForm((prev) => ({ ...prev, social_feed_regular_ratio: event.target.value }))}
+          />
+        </label>
+        <label className="space-y-2 text-xs text-white/70">
+          <span>Required premium followers for monetization</span>
+          <input
+            type="number"
+            min={1}
+            className="x-input w-full px-3 py-2 text-sm"
+            value={form.requiredPremiumFollowers}
+            onChange={(event) => setForm((prev) => ({ ...prev, requiredPremiumFollowers: event.target.value }))}
+          />
+        </label>
+        <label className="space-y-2 text-xs text-white/70">
+          <span>Payout per 1000 valid views (USDT)</span>
+          <input
+            type="number"
+            min={0}
+            step="0.000001"
+            className="x-input w-full px-3 py-2 text-sm"
+            value={form.payoutPerThousandViews}
+            onChange={(event) => setForm((prev) => ({ ...prev, payoutPerThousandViews: event.target.value }))}
           />
         </label>
       </div>
