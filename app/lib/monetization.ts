@@ -81,8 +81,7 @@ export function trackPostView(postId: string, viewerId?: string | number | null)
 }
 
 export function getPostViews(post: SocialPost) {
-  const bucket = readJson<Record<string, number>>(VIEW_BUCKET_KEY, {});
-  return Number(post.views || 0) + Number(bucket[post.id] || 0);
+  return Number(post.views || 0);
 }
 
 export function getCreatorUniqueViews(posts: SocialPost[], userHandle?: string | null) {
@@ -91,6 +90,28 @@ export function getCreatorUniqueViews(posts: SocialPost[], userHandle?: string |
   return posts
     .filter((post) => post.handle.trim().toLowerCase() === normalized)
     .reduce((sum, post) => sum + getPostViews(post), 0);
+}
+
+export function resolveCreatorPremiumFollowers(params: {
+  posts: SocialPost[];
+  userHandle?: string | null;
+  userId?: string | number | null;
+}) {
+  const normalized = String(params.userHandle || '').trim().toLowerCase();
+  const persisted = getPremiumFollowersCount(params.userId);
+  if (!normalized) return persisted;
+
+  const derived = params.posts.reduce((maxFollowers, post) => {
+    if (post.handle.trim().toLowerCase() !== normalized) return maxFollowers;
+    return Math.max(maxFollowers, Math.floor(Number(post.authorFollowers || 0)));
+  }, 0);
+
+  if (derived > persisted) {
+    setPremiumFollowersCount(derived, params.userId);
+    return derived;
+  }
+
+  return persisted;
 }
 
 function monthKeyFor(date: Date) {

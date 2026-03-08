@@ -10,8 +10,8 @@ import {
   getCreatorUniqueViews,
   getMonetizationSettings,
   getPayouts,
-  getPremiumFollowersCount,
   maybeScheduleMonthlyPayout,
+  resolveCreatorPremiumFollowers,
   setMonetizationSettings,
   type MonetizationSettings,
 } from '../../lib/monetization';
@@ -34,15 +34,15 @@ export default function MonetizePage() {
   }, []);
 
   const [posts, setPosts] = useState(() => getAllPosts(user?.id));
-  const premiumFollowers = getPremiumFollowersCount(user?.id);
   const isPremium = Boolean(user?.is_premium);
-  const hasFollowersRequirement = premiumFollowers >= settings.requiredPremiumFollowers;
-  const eligible = isPremium && hasFollowersRequirement;
   const myHandle = useMemo(() => {
     if (user?.username) return `@${String(user.username).replace(/^@/, '')}`;
     return null;
   }, [user?.username]);
   const totalViews = useMemo(() => getCreatorUniqueViews(posts, myHandle), [posts, myHandle]);
+  const premiumFollowers = useMemo(() => resolveCreatorPremiumFollowers({ posts, userHandle: myHandle, userId: user?.id }), [posts, myHandle, user?.id]);
+  const hasFollowersRequirement = premiumFollowers >= settings.requiredPremiumFollowers;
+  const eligible = isPremium && hasFollowersRequirement;
   const unpaidAmount = useMemo(() => Number(((totalViews / 1000) * settings.payoutPerThousandViews).toFixed(6)), [totalViews, settings.payoutPerThousandViews]);
 
   useEffect(() => {
@@ -58,21 +58,35 @@ export default function MonetizePage() {
 
   return (
     <main className="space-y-4">
-      <section className="x-card p-4">
-        <p className="text-[11px] uppercase tracking-[0.24em] text-white/55">{lang === 'ar' ? 'تحقيق الربح' : 'Monetization'}</p>
+      <section className="x-card overflow-hidden border border-emerald-300/20 bg-gradient-to-br from-emerald-500/15 via-cyan-500/10 to-transparent p-4">
+        <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/80">{lang === 'ar' ? 'تحقيق الربح' : 'Monetization'}</p>
         <h1 className="mt-1 text-lg font-semibold">{lang === 'ar' ? 'لوحة منشئي المحتوى' : 'Creator Monetization'}</h1>
-        <p className="mt-1 text-xs text-white/65">{lang === 'ar' ? 'تابع حالة الأهلية والأرباح المجدولة للدفع.' : 'Track eligibility and your scheduled payouts.'}</p>
+        <p className="mt-1 text-xs text-white/70">{lang === 'ar' ? 'تابع حالة الأهلية والأرباح المجدولة للدفع.' : 'Track eligibility and your scheduled payouts.'}</p>
+        <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
+          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+            <p className="text-white/60">{lang === 'ar' ? 'حالة الحساب' : 'Account status'}</p>
+            <p className="mt-1 font-semibold">{eligible ? (lang === 'ar' ? 'مؤهل للربح' : 'Eligible') : (lang === 'ar' ? 'قيد الاستيفاء' : 'In progress')}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+            <p className="text-white/60">{lang === 'ar' ? 'متابعو بريميم' : 'Premium followers'}</p>
+            <p className="mt-1 font-semibold">{premiumFollowers.toLocaleString()}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2">
+            <p className="text-white/60">{lang === 'ar' ? 'المشاهدات المؤهلة' : 'Eligible views'}</p>
+            <p className="mt-1 font-semibold">{totalViews.toLocaleString()}</p>
+          </div>
+        </div>
       </section>
 
       {!eligible && (
-        <section className="x-card space-y-3 p-4">
+        <section className="x-card space-y-3 border border-amber-300/15 bg-amber-500/5 p-4">
           <h2 className="text-sm font-semibold">{lang === 'ar' ? 'غير مؤهل حاليًا' : 'Not eligible yet'}</h2>
           <div className="space-y-2 text-sm">
-            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-3 py-2">
               <span>{lang === 'ar' ? 'عضوية بريميم مفعلة' : 'Active premium membership'}</span>
               <span>{isPremium ? '✅' : '⬜'}</span>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/30 px-3 py-2">
+            <div className="flex items-center justify-between rounded-xl border border-white/10 bg-black/40 px-3 py-2">
               <span>{lang === 'ar' ? `متابعين بريميم: ${premiumFollowers}/${settings.requiredPremiumFollowers}` : `Premium followers: ${premiumFollowers}/${settings.requiredPremiumFollowers}`}</span>
               <span>{hasFollowersRequirement ? '✅' : '⬜'}</span>
             </div>
@@ -82,18 +96,18 @@ export default function MonetizePage() {
       )}
 
       {eligible && (
-        <section className="x-card space-y-4 p-4">
+        <section className="x-card space-y-4 border border-emerald-300/20 bg-emerald-500/5 p-4">
           <h2 className="text-sm font-semibold">{lang === 'ar' ? 'لوحة الأرباح' : 'Earnings Dashboard'}</h2>
           <div className="grid gap-2 md:grid-cols-3">
-            <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
               <p className="text-xs text-white/60">{lang === 'ar' ? 'إجمالي Unique Views' : 'Total unique views'}</p>
               <p className="mt-1 text-lg font-semibold">{totalViews.toLocaleString()}</p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
               <p className="text-xs text-white/60">{lang === 'ar' ? 'الأرباح غير المدفوعة (USDT)' : 'Estimated unpaid (USDT)'}</p>
               <p className="mt-1 text-lg font-semibold">{unpaidAmount.toFixed(6)}</p>
             </div>
-            <div className="rounded-xl border border-white/10 bg-black/30 p-3">
+            <div className="rounded-xl border border-white/10 bg-black/40 p-3">
               <p className="text-xs text-white/60">{lang === 'ar' ? 'ربح كل 1000 View (USDT)' : 'Per 1000 views (USDT)'}</p>
               <p className="mt-1 text-lg font-semibold">{settings.payoutPerThousandViews}</p>
             </div>
@@ -101,7 +115,7 @@ export default function MonetizePage() {
         </section>
       )}
 
-      <section className="x-card space-y-3 p-4">
+      <section className="x-card space-y-3 border border-white/10 bg-white/[0.03] p-4">
         <h2 className="text-sm font-semibold">{lang === 'ar' ? 'الأرباح المجدولة للدفع' : 'Scheduled payouts'}</h2>
         {payouts.length === 0 ? (
           <p className="text-sm text-white/65">{lang === 'ar' ? 'لا توجد دفعات مجدولة حالياً.' : 'No scheduled payouts yet.'}</p>
