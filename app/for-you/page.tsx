@@ -131,6 +131,7 @@ export default function ForYouPage() {
               commentsState={{ comments: summary.comments, commentsList: summary.commentsList }}
               commentPlaceholder={t.dashboard.social.commentPlaceholder}
               commentSubmitLabel={t.dashboard.social.commentSubmit}
+                labels={t.dashboard.social.postMeta}
               onViewed={(targetPost) => {
                 const counted = trackPostView(targetPost.id, user?.id);
                 if (counted) setPosts(getAllPosts(user?.id));

@@ -58,6 +58,7 @@ export default function TopMonthlyPosts() {
               commentsState={{ comments: summary.comments, commentsList: summary.commentsList }}
               commentPlaceholder={t.dashboard.social.commentPlaceholder}
               commentSubmitLabel={t.dashboard.social.commentSubmit}
+                labels={t.dashboard.social.postMeta}
             />
           );
         })}
