@@ -22,6 +22,9 @@ export default function GoogleAuthButton({ mode, className = '' }: Props) {
     const url = new URL(`${base}/auth/google/start`, typeof window !== 'undefined' ? window.location.origin : 'https://lordai.net');
     url.searchParams.set('mode', mode);
     url.searchParams.set('redirect', '/dashboard');
+    if (typeof window !== 'undefined') {
+      url.searchParams.set('return_origin', window.location.origin);
+    }
     return url.toString();
   }, [mode]);
 

@@ -3788,6 +3788,24 @@ function buildGoogleAuthUrl(state) {
   return url.toString();
 }
 
+function isSafeAbsoluteRedirect(candidate) {
+  const normalized = normalizeOrigin(candidate);
+  if (!normalized) return false;
+  if (appBaseOrigin && normalized === appBaseOrigin) return true;
+  return allowedOrigins.includes(normalized);
+}
+
+function resolveGoogleRedirectUrl(redirectPath, returnOrigin) {
+  const safePath = redirectPath && String(redirectPath).startsWith('/') ? String(redirectPath) : '/dashboard';
+  if (returnOrigin && isSafeAbsoluteRedirect(returnOrigin)) {
+    return `${normalizeOrigin(returnOrigin)}${safePath}`;
+  }
+  if (appBaseOrigin && isSafeAbsoluteRedirect(appBaseOrigin)) {
+    return `${appBaseOrigin}${safePath}`;
+  }
+  return safePath;
+}
+
 async function exchangeGoogleCodeForUser(code) {
   const payload = new URLSearchParams({
     code,
@@ -3842,7 +3860,9 @@ app.get('/auth/google/start', async (req, res, next) => {
     }
     const mode = req.query?.mode === 'signup' ? 'signup' : 'login';
     const redirect = typeof req.query?.redirect === 'string' && req.query.redirect.startsWith('/') ? req.query.redirect : '/dashboard';
-    const state = signGoogleState({ nonce: crypto.randomUUID(), ts: Date.now(), mode, redirect });
+    const returnOrigin = typeof req.query?.return_origin === 'string' ? req.query.return_origin : '';
+    const safeReturnOrigin = isSafeAbsoluteRedirect(returnOrigin) ? normalizeOrigin(returnOrigin) : null;
+    const state = signGoogleState({ nonce: crypto.randomUUID(), ts: Date.now(), mode, redirect, returnOrigin: safeReturnOrigin });
     res.cookie(GOOGLE_AUTH_STATE_COOKIE, state, googleStateCookie);
     return res.redirect(buildGoogleAuthUrl(state));
   } catch (err) {
@@ -3914,8 +3934,8 @@ app.get('/auth/google/callback', async (req, res, next) => {
 
     res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
     res.cookie(COOKIE_NAME, token, sessionCookie);
-    const redirectPath = parsedState.redirect && String(parsedState.redirect).startsWith('/') ? parsedState.redirect : '/dashboard';
-    return res.redirect(redirectPath);
+    const redirectUrl = resolveGoogleRedirectUrl(parsedState.redirect, parsedState.returnOrigin);
+    return res.redirect(redirectUrl);
   } catch (err) {
     if (conn) await conn.rollback();
     return next(err);
