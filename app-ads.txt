@@ -1,3 +1,2 @@
-# Configure via /mo -> Ads Files in admin panel
-# Example:
-# example.com, app-0000000000000000, DIRECT
+# G AM UAE
+google.com, pub-3352422319761545, DIRECT, f08c47fec0942fa0
