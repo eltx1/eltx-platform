@@ -12,21 +12,25 @@ async function readFallbackFile(fileName: string) {
   }
 }
 
-function toValidSellersJson(raw: string): string {
-  if (!raw) return '[]';
+function toValidSellersJson(raw: string): string | null {
+  if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     return `${JSON.stringify(parsed, null, 2)}\n`;
   } catch {
-    return '[]\n';
+    return null;
   }
 }
 
 export async function GET() {
   const settings = await readAdsFilesSettings();
-  const content = settings.sellersJson || (await readFallbackFile('sellers.json'));
+  const settingsContent = toValidSellersJson(settings.sellersJson);
 
-  return new Response(toValidSellersJson(content), {
+  const content = settingsContent
+    ?? toValidSellersJson(await readFallbackFile('sellers.json'))
+    ?? '[]\n';
+
+  return new Response(content, {
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
       'Cache-Control': 'public, max-age=300, s-maxage=300',
