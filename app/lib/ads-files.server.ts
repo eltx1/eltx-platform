@@ -70,10 +70,22 @@ export async function readAdsFilesSettings(): Promise<AdsFilesSettings> {
 export async function writeAdsFilesSettings(input: Partial<AdsFilesSettings> | null | undefined): Promise<AdsFilesSettings> {
   const settings = normalize(input);
 
+  let wroteToDb = false;
+
   try {
     await writeToDb(settings);
+    wroteToDb = true;
   } catch {
     // Fallback to file mode when DB is unavailable.
+  }
+
+  if (wroteToDb) {
+    try {
+      await writeToFile(settings);
+    } catch {
+      // Ignore file write failures when DB persistence already succeeded.
+    }
+    return settings;
   }
 
   await writeToFile(settings);

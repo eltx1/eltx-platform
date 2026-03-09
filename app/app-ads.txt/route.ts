@@ -2,6 +2,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { readAdsFilesSettings } from '../lib/ads-files.server';
 
+export const dynamic = 'force-dynamic';
+
 async function readFallbackFile(fileName: string) {
   try {
     return (await fs.readFile(path.join(process.cwd(), fileName), 'utf8')).trim();
