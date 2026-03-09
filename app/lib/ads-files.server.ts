@@ -5,6 +5,7 @@ import { getDb } from './db.server';
 export type AdsFilesSettings = {
   adsTxt: string;
   appAdsTxt: string;
+  sellersJson: string;
 };
 
 const filePath = path.join(process.cwd(), 'data', 'ads-files.json');
@@ -13,6 +14,7 @@ const DB_SETTING_NAME = 'ads_files_settings_json';
 const defaults: AdsFilesSettings = {
   adsTxt: '',
   appAdsTxt: '',
+  sellersJson: '',
 };
 
 function normalizeText(value: unknown): string {
@@ -24,6 +26,7 @@ function normalize(input: Partial<AdsFilesSettings> | null | undefined): AdsFile
   return {
     adsTxt: normalizeText(input?.adsTxt),
     appAdsTxt: normalizeText(input?.appAdsTxt),
+    sellersJson: normalizeText(input?.sellersJson),
   };
 }
 
