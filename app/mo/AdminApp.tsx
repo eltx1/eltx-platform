@@ -13,6 +13,7 @@ import {
   Bell,
   Loader2,
   LineChart,
+  FileText,
   LogOut,
   MessageCircle,
   Pencil,
@@ -63,7 +64,8 @@ type Section =
   | 'withdrawals'
   | 'feed'
   | 'premium'
-  | 'analytics';
+  | 'analytics'
+  | 'ads';
 
 interface SummaryResponse {
   summary: {
@@ -184,6 +186,13 @@ type AnalyticsSettings = {
 };
 
 type AnalyticsSettingsResponse = { settings: AnalyticsSettings };
+
+type AdsFilesSettings = {
+  adsTxt: string;
+  appAdsTxt: string;
+};
+
+type AdsFilesSettingsResponse = { settings: AdsFilesSettings };
 
 type PremiumSettingsResponse = {
   ok: boolean;
@@ -372,6 +381,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'referrals', label: 'Referrals', icon: UserPlus },
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'analytics', label: 'Analytics', icon: LineChart },
+  { id: 'ads', label: 'Ads Files', icon: FileText },
   { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
@@ -1805,6 +1815,93 @@ function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 's
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function AdsFilesPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<AdsFilesSettings>({ adsTxt: '', appAdsTxt: '' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<AdsFilesSettingsResponse>('/api/admin/ads-files');
+    if (res.ok && res.data?.settings) {
+      setForm(res.data.settings);
+    } else {
+      onNotify(res.error || 'Failed to load ads files content', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    const res = await apiFetch<AdsFilesSettingsResponse>('/api/admin/ads-files', {
+      method: 'PUT',
+      body: JSON.stringify(form),
+    });
+
+    if (res.ok && res.data?.settings) {
+      setForm(res.data.settings);
+      onNotify('Ads files updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update ads files', 'error');
+    }
+
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Ads files</h2>
+        <p className="text-sm text-white/70">Manage <code>ads.txt</code> and <code>app-ads.txt</code> from one place. These files are served at <code>/ads.txt</code> and <code>/app-ads.txt</code>.</p>
+      </div>
+
+      {loading ? (
+        <div className="x-card p-4 text-sm text-white/70">Loading ads files...</div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block text-sm text-white/70">
+            ads.txt
+            <textarea
+              value={form.adsTxt}
+              onChange={(e) => setForm((prev) => ({ ...prev, adsTxt: e.target.value }))}
+              rows={10}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+              placeholder="google.com, pub-0000000000000000, DIRECT, f08c47fec0942fa0"
+            />
+          </label>
+
+          <label className="block text-sm text-white/70">
+            app-ads.txt
+            <textarea
+              value={form.appAdsTxt}
+              onChange={(e) => setForm((prev) => ({ ...prev, appAdsTxt: e.target.value }))}
+              rows={10}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+              placeholder="example.com, app-0000000000000000, DIRECT"
+            />
+          </label>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-60"
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save ads files
+            </button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -5144,6 +5241,7 @@ export default function AdminApp() {
           {active === 'referrals' && <ReferralPanel onNotify={notify} />}
           {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
           {active === 'analytics' && <AnalyticsPanel onNotify={notify} />}
+          {active === 'ads' && <AdsFilesPanel onNotify={notify} />}
           {active === 'support' && <SupportPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
