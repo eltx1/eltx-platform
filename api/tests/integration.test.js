@@ -14,6 +14,7 @@ const testSchema = {
   premium: { is_premium: 0, premium_expires_at: null },
   balances: { '1:USDT': '1000000' },
   platformFees: { premium_subscription: '0' },
+  premiumMonthlyPriceUsdt: '1',
 };
 
 const pool = {
@@ -37,7 +38,7 @@ const pool = {
       return [[{ id: 1, is_premium: testSchema.premium.is_premium, premium_expires_at: testSchema.premium.premium_expires_at }]];
     }
     if (sql.includes("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt'")) {
-      return [[{ value: '1' }]];
+      return [[{ value: testSchema.premiumMonthlyPriceUsdt }]];
     }
     if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
@@ -116,6 +117,7 @@ test('POST /trade/quote blocks unauthenticated requests', async () => {
 test('POST /premium/subscribe charges USDT using token decimals', async () => {
   testSchema.balances['1:USDT'] = '1000000';
   testSchema.platformFees.premium_subscription = '0';
+  testSchema.premiumMonthlyPriceUsdt = '1';
   testSchema.premium = { is_premium: 0, premium_expires_at: null };
 
   const res = await request.post('/premium/subscribe').set('Cookie', 'sid=valid-session').send({ months: 1 });
@@ -124,6 +126,20 @@ test('POST /premium/subscribe charges USDT using token decimals', async () => {
   assert.equal(res.body?.charged?.amount_wei, '1000000');
   assert.equal(testSchema.balances['1:USDT'], '0');
   assert.equal(testSchema.platformFees.premium_subscription, '1000000');
+});
+
+test('POST /premium/subscribe handles fractional USDT totals without float artifacts', async () => {
+  testSchema.balances['1:USDT'] = '3000000';
+  testSchema.platformFees.premium_subscription = '0';
+  testSchema.premiumMonthlyPriceUsdt = '0.99';
+  testSchema.premium = { is_premium: 0, premium_expires_at: null };
+
+  const res = await request.post('/premium/subscribe').set('Cookie', 'sid=valid-session').send({ months: 3 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(res.body?.charged?.amount_wei, '2970000');
+  assert.equal(testSchema.balances['1:USDT'], '30000');
+  assert.equal(testSchema.platformFees.premium_subscription, '2970000');
 });
 
 

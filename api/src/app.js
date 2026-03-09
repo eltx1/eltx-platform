@@ -3938,11 +3938,11 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
     }
 
     const [[priceRow]] = await conn.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
-    const monthlyPrice = Number.parseFloat(priceRow?.value || '1');
-    const normalizedMonthlyPrice = Number.isFinite(monthlyPrice) && monthlyPrice > 0 ? monthlyPrice : 1;
-    const chargeUnits = normalizedMonthlyPrice * payload.months;
     const usdtDecimals = getSymbolDecimals('USDT');
-    const chargeWei = ethers.parseUnits(String(chargeUnits), usdtDecimals);
+    const monthlyPrice = parseDecimalValue(priceRow?.value || '1');
+    const normalizedMonthlyPrice = monthlyPrice && monthlyPrice.gt(0) ? monthlyPrice : new Decimal(1);
+    const chargeUnits = normalizedMonthlyPrice.mul(payload.months).toFixed(usdtDecimals, Decimal.ROUND_DOWN);
+    const chargeWei = ethers.parseUnits(chargeUnits, usdtDecimals);
 
     const [balanceRows] = await conn.query(
       'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
@@ -3980,7 +3980,7 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
       status: {
         is_premium: true,
         premium_expires_at: nextExpiry.toISOString(),
-        monthly_price_usdt: normalizedMonthlyPrice,
+        monthly_price_usdt: Number(normalizedMonthlyPrice.toString()),
       },
       charged: {
         months: payload.months,
