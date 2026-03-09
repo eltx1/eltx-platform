@@ -1,0 +1,3 @@
+# Configure via /mo -> Ads Files in admin panel
+# Example:
+# example.com, app-0000000000000000, DIRECT
