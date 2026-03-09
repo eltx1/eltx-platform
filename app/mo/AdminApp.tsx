@@ -190,6 +190,7 @@ type AnalyticsSettingsResponse = { settings: AnalyticsSettings };
 type AdsFilesSettings = {
   adsTxt: string;
   appAdsTxt: string;
+  sellersJson: string;
 };
 
 type AdsFilesSettingsResponse = { settings: AdsFilesSettings };
@@ -1822,7 +1823,7 @@ function AnalyticsPanel({ onNotify }: { onNotify: (message: string, variant?: 's
 function AdsFilesPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<AdsFilesSettings>({ adsTxt: '', appAdsTxt: '' });
+  const [form, setForm] = useState<AdsFilesSettings>({ adsTxt: '', appAdsTxt: '', sellersJson: '' });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1861,7 +1862,7 @@ function AdsFilesPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">Ads files</h2>
-        <p className="text-sm text-white/70">Manage <code>ads.txt</code> and <code>app-ads.txt</code> from one place. These files are served at <code>/ads.txt</code> and <code>/app-ads.txt</code>.</p>
+        <p className="text-sm text-white/70">Manage <code>ads.txt</code>, <code>app-ads.txt</code>, and <code>sellers.json</code> from one place. These files are served at <code>/ads.txt</code>, <code>/app-ads.txt</code>, and <code>/sellers.json</code>.</p>
       </div>
 
       {loading ? (
@@ -1887,6 +1888,18 @@ function AdsFilesPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
               rows={10}
               className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
               placeholder="example.com, app-0000000000000000, DIRECT"
+            />
+          </label>
+
+
+          <label className="block text-sm text-white/70">
+            sellers.json
+            <textarea
+              value={form.sellersJson}
+              onChange={(e) => setForm((prev) => ({ ...prev, sellersJson: e.target.value }))}
+              rows={14}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+              placeholder={'[{"seller_id":"example.com","name":"ELTX","domain":"example.com","seller_type":"PUBLISHER"}]'}
             />
           </label>
 
