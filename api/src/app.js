@@ -397,9 +397,23 @@ const sessionCookie = {
   maxAge: USER_SESSION_TTL_SECONDS * 1000,
 };
 
-const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
-const GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
-const GOOGLE_OAUTH_REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || 'https://lordai.net/auth/google/callback';
+const GOOGLE_OAUTH_CLIENT_ID = (
+  process.env.GOOGLE_OAUTH_CLIENT_ID ||
+  process.env.GOOGLE_CLIENT_ID ||
+  process.env.GOOGLE_OAUTH_WEB_CLIENT_ID ||
+  ''
+).trim();
+const GOOGLE_OAUTH_CLIENT_SECRET = (
+  process.env.GOOGLE_OAUTH_CLIENT_SECRET ||
+  process.env.GOOGLE_CLIENT_SECRET ||
+  process.env.GOOGLE_OAUTH_WEB_CLIENT_SECRET ||
+  ''
+).trim();
+const GOOGLE_OAUTH_REDIRECT_URI = (
+  process.env.GOOGLE_OAUTH_REDIRECT_URI ||
+  process.env.GOOGLE_REDIRECT_URI ||
+  'https://lordai.net/auth/google/callback'
+).trim();
 const GOOGLE_OAUTH_SCOPES = ['openid', 'email', 'profile'];
 const GOOGLE_OAUTH_PROVIDER = 'google';
 const GOOGLE_OAUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
