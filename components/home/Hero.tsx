@@ -5,6 +5,7 @@ import { FormEvent, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../app/lib/auth';
+import GoogleAuthButton from '../../app/components/auth/GoogleAuthButton';
 import { apiFetch } from '../../app/lib/api';
 import { ArrowRight, LogIn, Sparkles, UserPlus } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
@@ -134,6 +135,14 @@ export default function Hero() {
               </div>
 
               <form onSubmit={onSubmit} className="space-y-3">
+
+              <GoogleAuthButton mode={authTab === 'signup' ? 'signup' : 'login'} />
+              <div className="flex items-center gap-3">
+                <div className="h-px flex-1 bg-white/20" />
+                <span className="text-[10px] uppercase tracking-[0.2em] text-white/60">{t.auth.google.or}</span>
+                <div className="h-px flex-1 bg-white/20" />
+              </div>
+
                 {error && <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">{error}</div>}
                 <div className="space-y-1">
                   <label className="text-xs text-white/70">{t.auth.common.email}</label>

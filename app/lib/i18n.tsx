@@ -60,6 +60,13 @@ export const dict = {
           { title: 'Multi-language', description: 'Switch between English and Arabic anytime.' },
         ],
       },
+      google: {
+        loginCta: 'Continue with Google',
+        signupCta: 'Sign up with Google',
+        or: 'Or',
+        cancelled: 'Google sign-in was cancelled.',
+        failed: 'Google sign-in failed. Please try again.',
+      },
       login: {
         title: 'Login',
         success: 'Welcome back!',
@@ -1174,6 +1181,13 @@ export const dict = {
           { title: 'أولوية الأمان', description: 'تشفير، 2FA جاهزة، ومراقبة للجلسات.' },
           { title: 'لغتين متاحتين', description: 'تبديل سريع بين الإنجليزي والعربي في أي وقت.' },
         ],
+      },
+      google: {
+        loginCta: 'المتابعة باستخدام Google',
+        signupCta: 'التسجيل باستخدام Google',
+        or: 'أو',
+        cancelled: 'تم إلغاء تسجيل الدخول بجوجل.',
+        failed: 'فشل تسجيل الدخول بجوجل. حاول مرة أخرى.',
       },
       login: {
         title: 'تسجيل الدخول',

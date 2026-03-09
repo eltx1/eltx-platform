@@ -397,6 +397,25 @@ const sessionCookie = {
   maxAge: USER_SESSION_TTL_SECONDS * 1000,
 };
 
+const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
+const GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
+const GOOGLE_OAUTH_REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || 'https://lordai.net/auth/google/callback';
+const GOOGLE_OAUTH_SCOPES = ['openid', 'email', 'profile'];
+const GOOGLE_OAUTH_PROVIDER = 'google';
+const GOOGLE_OAUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
+const GOOGLE_AUTH_STATE_TTL_SECONDS = 60 * 10;
+const GOOGLE_AUTH_STATE_COOKIE = process.env.GOOGLE_AUTH_STATE_COOKIE_NAME || 'gstate';
+const googleStateCookie = {
+  httpOnly: true,
+  sameSite: IS_PROD ? 'none' : 'lax',
+  secure: IS_PROD,
+  domain: COOKIE_DOMAIN,
+  path: '/',
+  maxAge: GOOGLE_AUTH_STATE_TTL_SECONDS * 1000,
+};
+
 const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 24));
 const adminSessionCookie = {
   httpOnly: true,
@@ -3696,6 +3715,195 @@ app.get('/fiat/stripe/session/:sessionId', walletLimiter, async (req, res, next)
   }
 });
 
+
+function encodeBase64Url(input) {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function decodeBase64Url(input) {
+  const normalized = `${input}`.replace(/-/g, '+').replace(/_/g, '/');
+  const padding = normalized.length % 4;
+  const padded = padding ? normalized + '='.repeat(4 - padding) : normalized;
+  return Buffer.from(padded, 'base64').toString('utf8');
+}
+
+function signGoogleState(payload) {
+  const body = encodeBase64Url(JSON.stringify(payload));
+  const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'lordai-google-state';
+  const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+function verifyGoogleState(token) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const [body, sig] = token.split('.');
+  const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'lordai-google-state';
+  const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+  if (sig !== expected) return null;
+  try {
+    const parsed = JSON.parse(decodeBase64Url(body));
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.nonce || !parsed.ts) return null;
+    if (Date.now() - Number(parsed.ts) > GOOGLE_AUTH_STATE_TTL_SECONDS * 1000) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function buildGoogleAuthUrl(state) {
+  const url = new URL(GOOGLE_OAUTH_URL);
+  url.searchParams.set('client_id', GOOGLE_OAUTH_CLIENT_ID);
+  url.searchParams.set('redirect_uri', GOOGLE_OAUTH_REDIRECT_URI);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', GOOGLE_OAUTH_SCOPES.join(' '));
+  url.searchParams.set('state', state);
+  url.searchParams.set('access_type', 'online');
+  url.searchParams.set('include_granted_scopes', 'false');
+  url.searchParams.set('prompt', 'select_account');
+  return url.toString();
+}
+
+async function exchangeGoogleCodeForUser(code) {
+  const payload = new URLSearchParams({
+    code,
+    client_id: GOOGLE_OAUTH_CLIENT_ID,
+    client_secret: GOOGLE_OAUTH_CLIENT_SECRET,
+    redirect_uri: GOOGLE_OAUTH_REDIRECT_URI,
+    grant_type: 'authorization_code',
+  });
+  const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: payload.toString(),
+  });
+  if (!tokenRes.ok) throw Object.assign(new Error('Google token exchange failed'), { status: 502, code: 'GOOGLE_TOKEN_FAILED' });
+  const tokenData = await tokenRes.json();
+  const accessToken = tokenData?.access_token;
+  if (!accessToken) throw Object.assign(new Error('Google access token missing'), { status: 502, code: 'GOOGLE_TOKEN_INVALID' });
+  const userRes = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!userRes.ok) throw Object.assign(new Error('Google userinfo failed'), { status: 502, code: 'GOOGLE_PROFILE_FAILED' });
+  const profile = await userRes.json();
+  if (!profile?.email) throw Object.assign(new Error('Google email missing'), { status: 400, code: 'GOOGLE_EMAIL_MISSING' });
+  if (!profile?.email_verified) throw Object.assign(new Error('Google email not verified'), { status: 400, code: 'GOOGLE_EMAIL_NOT_VERIFIED' });
+  if (!profile?.sub) throw Object.assign(new Error('Google subject missing'), { status: 400, code: 'GOOGLE_SUB_MISSING' });
+  return {
+    sub: String(profile.sub),
+    email: String(profile.email).toLowerCase(),
+    emailVerified: Boolean(profile.email_verified),
+    picture: profile.picture ? String(profile.picture) : null,
+  };
+}
+
+async function issueUserSessionAndWallets(connLike, userId) {
+  const token = crypto.randomUUID();
+  await connLike.query(
+    'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
+    [token, userId, USER_SESSION_TTL_SECONDS]
+  );
+  const wallets = [];
+  for (const cid of SUPPORTED_CHAINS) {
+    wallets.push(await provisionUserAddress(connLike, userId, cid));
+  }
+  return { token, wallets };
+}
+
+
+app.get('/auth/google/start', async (req, res, next) => {
+  try {
+    if (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET) {
+      return next({ status: 503, code: 'GOOGLE_AUTH_DISABLED', message: 'Google auth is not configured' });
+    }
+    const mode = req.query?.mode === 'signup' ? 'signup' : 'login';
+    const redirect = typeof req.query?.redirect === 'string' && req.query.redirect.startsWith('/') ? req.query.redirect : '/dashboard';
+    const state = signGoogleState({ nonce: crypto.randomUUID(), ts: Date.now(), mode, redirect });
+    res.cookie(GOOGLE_AUTH_STATE_COOKIE, state, googleStateCookie);
+    return res.redirect(buildGoogleAuthUrl(state));
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.get('/auth/google/callback', async (req, res, next) => {
+  let conn;
+  try {
+    const state = typeof req.query?.state === 'string' ? req.query.state : '';
+    const code = typeof req.query?.code === 'string' ? req.query.code : '';
+    const providerError = typeof req.query?.error === 'string' ? req.query.error : '';
+    const cookieState = req.cookies?.[GOOGLE_AUTH_STATE_COOKIE];
+
+    if (providerError) {
+      res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
+      return res.redirect(`/login?authError=${encodeURIComponent(providerError)}`);
+    }
+    if (!state || !cookieState || state !== cookieState) {
+      return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
+    }
+    const parsedState = verifyGoogleState(state);
+    if (!parsedState) {
+      return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
+    }
+    if (!code) {
+      return next({ status: 400, code: 'GOOGLE_CODE_MISSING', message: 'Authorization code missing' });
+    }
+
+    const profile = await exchangeGoogleCodeForUser(code);
+    const utm = parseUtmPayload(req.query || {});
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [oauthRows] = await conn.query(
+      'SELECT user_id FROM user_oauth_accounts WHERE provider=? AND provider_sub=? LIMIT 1',
+      [GOOGLE_OAUTH_PROVIDER, profile.sub]
+    );
+    let userId = oauthRows[0]?.user_id || null;
+
+    if (!userId) {
+      const [usersByEmail] = await conn.query('SELECT id, language FROM users WHERE email=? LIMIT 1', [profile.email]);
+      if (usersByEmail.length) {
+        userId = usersByEmail[0].id;
+      } else {
+        const username = await generateUsernameFromEmail(conn, profile.email);
+        const [newUser] = await conn.query('INSERT INTO users (email, username, language) VALUES (?, ?, ?)', [profile.email, username, 'en']);
+        userId = newUser.insertId;
+        await ensureReferralCode(conn, userId);
+      }
+      await conn.query(
+        `INSERT INTO user_oauth_accounts (user_id, provider, provider_sub, email, email_verified, picture_url, last_login_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), email=VALUES(email), email_verified=VALUES(email_verified), picture_url=VALUES(picture_url), last_login_at=NOW()`,
+        [userId, GOOGLE_OAUTH_PROVIDER, profile.sub, profile.email, profile.emailVerified ? 1 : 0, profile.picture]
+      );
+    } else {
+      await conn.query(
+        'UPDATE user_oauth_accounts SET email=?, email_verified=?, picture_url=?, last_login_at=NOW() WHERE provider=? AND provider_sub=?',
+        [profile.email, profile.emailVerified ? 1 : 0, profile.picture, GOOGLE_OAUTH_PROVIDER, profile.sub]
+      );
+    }
+
+    await storeFirstUtmSession(conn, userId, utm);
+    const { token } = await issueUserSessionAndWallets(conn, userId);
+    await conn.commit();
+
+    res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
+    res.cookie(COOKIE_NAME, token, sessionCookie);
+    const redirectPath = parsedState.redirect && String(parsedState.redirect).startsWith('/') ? parsedState.redirect : '/dashboard';
+    return res.redirect(redirectPath);
+  } catch (err) {
+    if (conn) await conn.rollback();
+    return next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
 app.post('/auth/signup', async (req, res, next) => {
   let conn;
   try {
@@ -3803,6 +4011,16 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
     }
     next(err);
   }
+});
+
+app.get('/auth/logout', async (req, res) => {
+  const token = req.cookies[COOKIE_NAME];
+  if (token) {
+    await pool.query('DELETE FROM sessions WHERE id = ?', [token]);
+  }
+  res.clearCookie(COOKIE_NAME);
+  const nextPath = typeof req.query?.next === 'string' && req.query.next.startsWith('/') ? req.query.next : '/login?loggedOut=1';
+  return res.redirect(nextPath);
 });
 
 app.post('/auth/logout', async (req, res) => {
