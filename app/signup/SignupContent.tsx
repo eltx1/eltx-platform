@@ -8,6 +8,7 @@ import { dict, useLang } from '../lib/i18n';
 import { useToast } from '../lib/toast';
 import { getOrStoreFirstUtm } from '../lib/utm';
 import { trackEvent } from '../lib/analytics';
+import GoogleAuthButton from '../components/auth/GoogleAuthButton';
 
 export default function SignupContent() {
   const [email, setEmail] = useState('');
@@ -111,6 +112,12 @@ export default function SignupContent() {
               >
                 {lang === 'en' ? 'العربية' : 'English'}
               </button>
+            </div>
+            <GoogleAuthButton mode="signup" />
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-white/20" />
+              <span className="text-xs uppercase tracking-[0.2em] text-white/60">{t.auth.google.or}</span>
+              <div className="h-px flex-1 bg-white/20" />
             </div>
             {error && (
               <div role="alert" aria-live="polite" className="text-red-400 text-sm bg-red-500/10 border border-red-500/30 px-3 py-2 rounded-lg">
