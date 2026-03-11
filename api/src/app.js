@@ -4181,81 +4181,103 @@ app.get('/premium/status', walletLimiter, async (req, res, next) => {
   }
 });
 
+const PREMIUM_SUBSCRIBE_MAX_RETRIES = 3;
+const PREMIUM_SUBSCRIBE_LOCK_WAIT_SECONDS = 5;
+
+function isRetryableTransactionError(err) {
+  const code = String(err?.code || '').toUpperCase();
+  return code === 'ER_LOCK_WAIT_TIMEOUT' || code === 'ER_LOCK_DEADLOCK';
+}
+
+function waitForRetry(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
-  let conn;
   try {
     const userId = await requireUser(req);
     const payload = PremiumSubscribeSchema.parse(req.body || {});
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
+    for (let attempt = 1; attempt <= PREMIUM_SUBSCRIBE_MAX_RETRIES; attempt += 1) {
+      let conn;
+      try {
+        conn = await pool.getConnection();
+        await conn.query('SET innodb_lock_wait_timeout = ?', [PREMIUM_SUBSCRIBE_LOCK_WAIT_SECONDS]);
+        await conn.beginTransaction();
 
-    const [[user]] = await conn.query('SELECT id, is_premium, premium_expires_at FROM users WHERE id=? FOR UPDATE', [userId]);
-    if (!user) {
-      await conn.rollback();
-      return next({ status: 404, code: 'NOT_FOUND', message: 'User not found' });
+        const [[user]] = await conn.query('SELECT id, is_premium, premium_expires_at FROM users WHERE id=? FOR UPDATE', [userId]);
+        if (!user) {
+          await conn.rollback();
+          return next({ status: 404, code: 'NOT_FOUND', message: 'User not found' });
+        }
+
+        const [[priceRow]] = await conn.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
+        const usdtDecimals = getSymbolDecimals('USDT');
+        const monthlyPrice = parseDecimalValue(priceRow?.value || '1');
+        const normalizedMonthlyPrice = monthlyPrice && monthlyPrice.gt(0) ? monthlyPrice : new Decimal(1);
+        const chargeUnits = normalizedMonthlyPrice.mul(payload.months).toFixed(usdtDecimals, Decimal.ROUND_DOWN);
+        const chargeWei = ethers.parseUnits(chargeUnits, usdtDecimals);
+
+        const [balanceRows] = await conn.query(
+          'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+          [userId, 'USDT']
+        );
+        const currentBalanceWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+        if (currentBalanceWei < chargeWei) {
+          await conn.rollback();
+          return next({ status: 400, code: 'INSUFFICIENT_USDT', message: 'Insufficient USDT balance for premium subscription' });
+        }
+
+        await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+          chargeWei.toString(),
+          userId,
+          'USDT',
+        ]);
+
+        const currentExpiry = user.premium_expires_at ? new Date(user.premium_expires_at) : null;
+        const baseDate = currentExpiry && currentExpiry.getTime() > Date.now() ? currentExpiry : new Date();
+        const nextExpiry = new Date(baseDate);
+        nextExpiry.setMonth(nextExpiry.getMonth() + payload.months);
+
+        await conn.query('UPDATE users SET is_premium=1, premium_expires_at=? WHERE id=?', [nextExpiry, userId]);
+        await conn.query(
+          `INSERT INTO platform_fee_balances (fee_type, asset, amount_wei)
+           VALUES ('premium_subscription', 'USDT', ?)
+           ON DUPLICATE KEY UPDATE amount_wei = amount_wei + VALUES(amount_wei), updated_at = NOW()`,
+          [chargeWei.toString()]
+        );
+
+        await conn.commit();
+
+        return res.json({
+          ok: true,
+          status: {
+            is_premium: true,
+            premium_expires_at: nextExpiry.toISOString(),
+            monthly_price_usdt: Number(normalizedMonthlyPrice.toString()),
+          },
+          charged: {
+            months: payload.months,
+            amount_usdt: trimDecimal(formatUnitsStr(chargeWei.toString(), usdtDecimals)),
+            amount_wei: chargeWei.toString(),
+          },
+        });
+      } catch (err) {
+        if (conn) {
+          try { await conn.rollback(); } catch {}
+        }
+        if (!isRetryableTransactionError(err) || attempt >= PREMIUM_SUBSCRIBE_MAX_RETRIES) {
+          throw err;
+        }
+        await waitForRetry(attempt * 150);
+      } finally {
+        if (conn) conn.release();
+      }
     }
-
-    const [[priceRow]] = await conn.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
-    const usdtDecimals = getSymbolDecimals('USDT');
-    const monthlyPrice = parseDecimalValue(priceRow?.value || '1');
-    const normalizedMonthlyPrice = monthlyPrice && monthlyPrice.gt(0) ? monthlyPrice : new Decimal(1);
-    const chargeUnits = normalizedMonthlyPrice.mul(payload.months).toFixed(usdtDecimals, Decimal.ROUND_DOWN);
-    const chargeWei = ethers.parseUnits(chargeUnits, usdtDecimals);
-
-    const [balanceRows] = await conn.query(
-      'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
-      [userId, 'USDT']
-    );
-    const currentBalanceWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
-    if (currentBalanceWei < chargeWei) {
-      await conn.rollback();
-      return next({ status: 400, code: 'INSUFFICIENT_USDT', message: 'Insufficient USDT balance for premium subscription' });
-    }
-
-    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-      chargeWei.toString(),
-      userId,
-      'USDT',
-    ]);
-
-    const currentExpiry = user.premium_expires_at ? new Date(user.premium_expires_at) : null;
-    const baseDate = currentExpiry && currentExpiry.getTime() > Date.now() ? currentExpiry : new Date();
-    const nextExpiry = new Date(baseDate);
-    nextExpiry.setMonth(nextExpiry.getMonth() + payload.months);
-
-    await conn.query('UPDATE users SET is_premium=1, premium_expires_at=? WHERE id=?', [nextExpiry, userId]);
-    await conn.query(
-      `INSERT INTO platform_fee_balances (fee_type, asset, amount_wei)
-       VALUES ('premium_subscription', 'USDT', ?)
-       ON DUPLICATE KEY UPDATE amount_wei = amount_wei + VALUES(amount_wei), updated_at = NOW()`,
-      [chargeWei.toString()]
-    );
-
-    await conn.commit();
-
-    res.json({
-      ok: true,
-      status: {
-        is_premium: true,
-        premium_expires_at: nextExpiry.toISOString(),
-        monthly_price_usdt: Number(normalizedMonthlyPrice.toString()),
-      },
-      charged: {
-        months: payload.months,
-        amount_usdt: trimDecimal(formatUnitsStr(chargeWei.toString(), usdtDecimals)),
-        amount_wei: chargeWei.toString(),
-      },
-    });
   } catch (err) {
-    if (conn) {
-      try { await conn.rollback(); } catch {}
-    }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
     }
     next(err);
-  } finally {
-    if (conn) conn.release();
   }
 });
 
