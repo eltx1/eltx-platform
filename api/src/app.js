@@ -4682,13 +4682,17 @@ function notifyMessageUsers(userIds, event, payload) {
     if (!bucket?.size) return;
     const body = JSON.stringify({ type: event, payload });
     bucket.forEach((socket) => {
-      if (socket.readyState !== WebSocket.OPEN) return;
+      if (socket.readyState !== WebSocket.OPEN) {
+        bucket.delete(socket);
+        return;
+      }
       try {
         socket.send(body);
       } catch {
-        // ignore noisy ws failures
+        bucket.delete(socket);
       }
     });
+    if (!bucket.size) messageSocketUsers.delete(uid);
   });
 }
 
@@ -9391,6 +9395,7 @@ async function handleSpotWebsocketConnection(socket, req) {
   let lastTradeId = 0;
   let heartbeatTimer;
   let deltaTimer;
+  const maxSocketBufferBytes = Math.max(64 * 1024, Number(process.env.SPOT_WS_MAX_BUFFER_BYTES || 512 * 1024) || 512 * 1024);
 
   const cleanup = () => {
     if (closed) return;
@@ -9401,6 +9406,10 @@ async function handleSpotWebsocketConnection(socket, req) {
 
   const send = (type, payload) => {
     if (closed || socket.readyState !== WebSocket.OPEN) return;
+    if (socket.bufferedAmount > maxSocketBufferBytes) {
+      sendError('Client is too slow, reconnecting stream', 1013);
+      return;
+    }
     socket.send(JSON.stringify({ type, payload }));
   };
 
@@ -9458,23 +9467,34 @@ async function handleSpotWebsocketConnection(socket, req) {
           readSpotTradeDeltas(pool, marketRow, lastTradeId),
         ]);
 
-        const hasChange = orderbookDelta.deltas.length > 0 || tradeDelta.trades.length > 0;
+        const hasOrderbookChange = orderbookDelta.deltas.length > 0;
+        const hasTradeChange = tradeDelta.trades.length > 0;
+        const hasChange = hasOrderbookChange || hasTradeChange;
         if (!hasChange) return;
 
-        const [orders, balances, snapshot, fees] = await Promise.all([
+        if (hasOrderbookChange) {
+          lastOrderbookVersion = orderbookDelta.version;
+          send('orderbook_delta', {
+            version: lastOrderbookVersion,
+            deltas: orderbookDelta.deltas,
+          });
+        }
+
+        if (hasTradeChange) {
+          lastTradeId = tradeDelta.lastTradeId;
+          send('trades_delta', {
+            last_trade_id: lastTradeId,
+            trades: tradeDelta.trades,
+          });
+        }
+
+        const [orders, balances, fees] = await Promise.all([
           readSpotOrdersForUser(pool, userId, marketRow),
           readUserBalancesForAssets(pool, userId, [marketRow.base_asset, marketRow.quote_asset]),
-          readSpotOrderbookSnapshot(pool, marketRow),
           readSpotFeeBps(pool),
         ]);
-        lastOrderbookVersion = snapshot.orderbookVersion;
-        lastTradeId = snapshot.lastTradeId;
 
-        send('update', {
-          orderbook_version: lastOrderbookVersion,
-          last_trade_id: lastTradeId,
-          orderbook: snapshot.orderbook,
-          trades: snapshot.trades,
+        send('account', {
           orders,
           balances,
           fees: { maker_bps: fees.maker, taker_bps: fees.taker },
