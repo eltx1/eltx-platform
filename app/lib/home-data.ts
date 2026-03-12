@@ -33,6 +33,7 @@ const MARKET_ASSETS = [
 
 const MARKET_CACHE_TTL_MS = 5 * 60 * 1000;
 const HOME_OVERVIEW_TIMEOUT_MS = 1200;
+const COINGECKO_REVALIDATE_SECONDS = 60;
 const FALLBACK_MARKETS: HomeMarketEntry[] = MARKET_ASSETS.map((asset) => ({
   symbol: asset.symbol,
   label: asset.label,
@@ -156,7 +157,7 @@ async function fetchCoingeckoPrices(): Promise<Record<string, { price: number; c
     const res = await fetch(url.toString(), {
       headers: { accept: 'application/json' },
       signal: controller.signal,
-      cache: 'no-store',
+      next: { revalidate: COINGECKO_REVALIDATE_SECONDS },
     });
     if (!res.ok) throw new Error(`CoinGecko request failed with status ${res.status}`);
     const data = await res.json();
