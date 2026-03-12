@@ -3907,6 +3907,19 @@ function isSafeAbsoluteRedirect(candidate) {
   return allowedOrigins.includes(normalized);
 }
 
+
+function resolveGoogleLoginUrl(returnOrigin, query = '') {
+  const suffix = query ? `?${query}` : '';
+  const localPath = `/login${suffix}`;
+  if (returnOrigin && isSafeAbsoluteRedirect(returnOrigin)) {
+    return `${normalizeOrigin(returnOrigin)}${localPath}`;
+  }
+  if (appBaseOrigin && isSafeAbsoluteRedirect(appBaseOrigin)) {
+    return `${appBaseOrigin}${localPath}`;
+  }
+  return localPath;
+}
+
 function resolveGoogleRedirectUrl(redirectPath, returnOrigin) {
   const safePath = redirectPath && String(redirectPath).startsWith('/') ? String(redirectPath) : '/dashboard';
   if (returnOrigin && isSafeAbsoluteRedirect(returnOrigin)) {
@@ -4034,7 +4047,7 @@ app.get('/auth/google/start', async (req, res, next) => {
         browserSessionId,
         stateRef: activeAttempt.state_hash ? String(activeAttempt.state_hash).slice(0, 12) : null,
       });
-      return res.redirect('/login?authError=login_in_progress');
+      return res.redirect(resolveGoogleLoginUrl(safeReturnOrigin, 'authError=login_in_progress'));
     }
 
     const state = signGoogleState({ nonce: crypto.randomUUID(), ts: Date.now(), mode, redirect, returnOrigin: safeReturnOrigin });
@@ -4078,15 +4091,17 @@ app.get('/auth/google/callback', async (req, res, next) => {
     const browserSessionId = typeof req.cookies?.[GOOGLE_AUTH_BROWSER_SESSION_COOKIE] === 'string'
       ? req.cookies[GOOGLE_AUTH_BROWSER_SESSION_COOKIE]
       : '';
+    const parsedState = state ? resolveParsedGoogleState(state) : null;
+    const loginFallback = resolveGoogleLoginUrl(parsedState?.returnOrigin || null);
 
     if (providerError) {
       logGoogleOAuth('callback_provider_error', req, { providerError });
       res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
-      return res.redirect(`/login?authError=${encodeURIComponent(providerError)}`);
+      return res.redirect(`${loginFallback}?authError=${encodeURIComponent(providerError)}`);
     }
     if (!state) {
       logGoogleOAuth('callback_state_missing', req, { browserSessionId });
-      return res.redirect('/login?authError=oauth_session_expired');
+      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
     if (!cookieState || state !== cookieState) {
       logGoogleOAuth('callback_state_cookie_mismatch', req, {
@@ -4094,15 +4109,14 @@ app.get('/auth/google/callback', async (req, res, next) => {
         queryStateRef: maskStateRef(state),
         cookieStateRef: maskStateRef(cookieState),
       });
-      return res.redirect('/login?authError=oauth_session_expired');
+      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
-    const parsedState = resolveParsedGoogleState(state);
     if (!parsedState) {
       logGoogleOAuth('callback_state_signature_invalid', req, {
         browserSessionId,
         stateRef: maskStateRef(state),
       });
-      return res.redirect('/login?authError=oauth_session_expired');
+      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
     if (!code) {
       logGoogleOAuth('callback_code_missing', req, { browserSessionId, stateRef: maskStateRef(state) });
@@ -4116,7 +4130,7 @@ app.get('/auth/google/callback', async (req, res, next) => {
         stateRef: maskStateRef(state),
         reason: stateUse?.reason || 'unknown',
       });
-      return res.redirect('/login?authError=oauth_session_expired');
+      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
 
     const profile = await exchangeGoogleCodeForUser(code);
@@ -4175,7 +4189,7 @@ app.get('/auth/google/callback', async (req, res, next) => {
     return res.redirect(redirectUrl);
   } catch (err) {
     if (isRetryableDbError(err)) {
-      return res.redirect('/login?authError=temporarily_unavailable');
+      return res.redirect(resolveGoogleLoginUrl(null, 'authError=temporarily_unavailable'));
     }
     return next(err);
   }

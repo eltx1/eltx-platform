@@ -2,23 +2,19 @@
 
 import { useMemo } from 'react';
 import { dict, useLang } from '../../lib/i18n';
+import { getApiBaseForBrowser } from '../../lib/api-base';
 
 type Props = {
   mode: 'login' | 'signup';
   className?: string;
 };
 
-function getApiBase() {
-  const raw = process.env.NEXT_PUBLIC_API_BASE || '';
-  return raw.replace(/\/+$/, '');
-}
-
 export default function GoogleAuthButton({ mode, className = '' }: Props) {
   const { lang } = useLang();
   const t = dict[lang];
 
   const href = useMemo(() => {
-    const base = getApiBase();
+    const base = getApiBaseForBrowser();
     const url = new URL(`${base}/auth/google/start`, typeof window !== 'undefined' ? window.location.origin : 'https://lordai.net');
     url.searchParams.set('mode', mode);
     url.searchParams.set('redirect', '/dashboard');
