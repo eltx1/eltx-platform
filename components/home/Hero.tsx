@@ -155,7 +155,7 @@ export default function Hero() {
                     }
                     autoComplete="email"
                     placeholder={t.auth.common.emailPlaceholder}
-                    className="w-full rounded-xl border border-[#2f3336] bg-[#0f1113] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#c9a75c]/70"
+                    className="w-full rounded-xl border border-[#2f3336] bg-[#0f1113] px-3 py-2 text-sm text-white placeholder:text-white/45 outline-none focus:ring-2 focus:ring-[#c9a75c]/70"
                   />
                 </div>
                 <div className="space-y-1">
@@ -170,7 +170,7 @@ export default function Hero() {
                     }
                     autoComplete={authTab === 'signup' ? 'new-password' : 'current-password'}
                     placeholder={authTab === 'signup' ? t.auth.signup.passwordPlaceholder : t.auth.common.passwordPlaceholder}
-                    className="w-full rounded-xl border border-[#2f3336] bg-[#0f1113] px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-[#c9a75c]/70"
+                    className="w-full rounded-xl border border-[#2f3336] bg-[#0f1113] px-3 py-2 text-sm text-white placeholder:text-white/45 outline-none focus:ring-2 focus:ring-[#c9a75c]/70"
                   />
                 </div>
                 <button

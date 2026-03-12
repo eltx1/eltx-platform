@@ -45,6 +45,11 @@ const pool = {
       const balance = testSchema.balances[key];
       return [balance ? [{ balance_wei: balance }] : []];
     }
+    if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? LIMIT 1')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      const balance = testSchema.balances[key];
+      return [balance ? [{ balance_wei: balance }] : []];
+    }
     if (sql.includes('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?')) {
       const key = `${Number(params[1])}:${String(params[2]).toUpperCase()}`;
       const current = BigInt(testSchema.balances[key] || '0');
@@ -93,6 +98,15 @@ test('GET /wallet/balance blocks unauthenticated requests', async () => {
   const res = await request.get('/wallet/balance');
   assert.equal(res.status, 401);
   assert.equal(res.body?.error?.code, 'UNAUTHENTICATED');
+});
+
+test('GET /wallet/usdt-balance returns formatted USDT balance for authenticated users', async () => {
+  testSchema.balances['1:USDT'] = '1234567';
+  const res = await request.get('/wallet/usdt-balance').set('Cookie', 'sid=valid-session');
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(res.body?.balance_wei, '1234567');
+  assert.equal(res.body?.balance, '1.234567');
 });
 
 test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {

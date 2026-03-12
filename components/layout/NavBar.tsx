@@ -44,24 +44,27 @@ export default function NavBar() {
         return;
       }
       setLoadingBalance(true);
-      const res = await apiFetch<{ assets: Array<{ symbol: string; balance: string; balance_wei: string; decimals: number }> }>('/wallet/assets');
+      const res = await apiFetch<{ balance: string }>('/wallet/usdt-balance');
       if (!active) return;
       if (res.ok) {
-        const asset = res.data.assets.find((a) => (a.symbol || '').toUpperCase() === 'USDT');
-        if (asset) {
-          const value = asset.balance || formatWei(asset.balance_wei, asset.decimals);
-          setBalance(value);
-        } else {
-          setBalance('0');
-        }
-      } else {
-        setBalance(null);
+        const value = res.data.balance || formatWei('0', 6);
+        setBalance(value);
       }
       setLoadingBalance(false);
     };
     loadBalance();
+
+    const onWalletRefresh = () => {
+      loadBalance();
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('wallet:refresh', onWalletRefresh);
+    }
     return () => {
       active = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('wallet:refresh', onWalletRefresh);
+      }
     };
   }, [user]);
 

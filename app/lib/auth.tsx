@@ -32,6 +32,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     await apiFetch('/auth/logout', { method: 'POST' });
     setUser(null);
+    if (typeof window !== 'undefined') {
+      window.location.assign('/login?loggedOut=1');
+    }
   };
   return <AuthContext.Provider value={{ user, refresh, logout }}>{children}</AuthContext.Provider>;
 }
