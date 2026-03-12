@@ -22,7 +22,7 @@ export default function NavBar() {
   const [logoError, setLogoError] = useState(false);
   const [balance, setBalance] = useState<string | null>(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
-  const hideNav = pathname?.startsWith('/mo');
+  const hideNav = pathname === '/mo' || pathname?.startsWith('/mo/');
 
   useEffect(() => {
     if (hideNav) {
