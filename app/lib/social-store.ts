@@ -2,6 +2,7 @@
 
 import { imageRemotePatterns } from './image-remote-patterns.mjs';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, normalizeFeedAlgorithmSettings, type FeedAlgorithmSettings } from './feed-algorithm';
+import { apiFetch } from './api';
 
 export type SocialPost = {
   id: string;
@@ -19,6 +20,9 @@ export type SocialPost = {
   authorFollowers?: number;
   isFollowed?: boolean;
   isPremium?: boolean;
+  viewerLiked?: boolean;
+  viewerReposted?: boolean;
+  commentsList?: SocialComment[];
 };
 
 export type SocialProfile = {
@@ -37,30 +41,14 @@ export type SocialComment = {
   createdAt: string;
 };
 
-const POSTS_KEY = 'lordai.social.posts';
 const PROFILE_KEY = 'lordai.social.profile';
 const WORD_LIMIT_KEY = 'lordai.social.postWordLimit';
-const INTERACTIONS_KEY = 'lordai.social.interactions';
 const FOLLOWING_KEY = 'lordai.social.following';
 const USER_SCOPE_KEY = 'guest';
 const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
-
 const VIEW_BUCKET_KEY = 'lordai.social.view-bucket';
 
-function getViewBucket() {
-  if (typeof window === 'undefined') return {} as Record<string, number>;
-  return safeParse<Record<string, number>>(window.localStorage.getItem(VIEW_BUCKET_KEY), {});
-}
-
-type PostInteractionState = {
-  liked: boolean;
-  reposted: boolean;
-  comments: SocialComment[];
-};
-
-type InteractionMap = Record<string, PostInteractionState>;
 type FollowingMap = Record<string, boolean>;
-
 type UserScopeId = string | number | null | undefined;
 
 export type PersistResult = {
@@ -74,74 +62,6 @@ const defaultProfile: SocialProfile = {
   bio: 'Building, trading, and sharing on LordAi.Net.',
   avatarUrl: '/assets/img/logo-new.svg',
 };
-
-const seedPosts: SocialPost[] = [
-  {
-    id: 'seed-1',
-    authorName: 'Lina Hassan',
-    handle: '@lina.web3',
-    profileId: 'lina',
-    content: 'Shipped a new tutorial on Web3 onboarding today. Sharing the key takeaways soon.',
-    createdAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-    avatarUrl: '/assets/img/logo-new.svg',
-    likes: 128,
-    comments: 24,
-    reposts: 18,
-    views: 2250,
-    authorFollowers: 3900,
-    isFollowed: true,
-    isPremium: true,
-  },
-  {
-    id: 'seed-2',
-    authorName: 'Omar Yusuf',
-    handle: '@omaryusuf',
-    profileId: 'omar',
-    content: 'Testing the LordAI feed — love how fast the media preview loads.',
-    createdAt: new Date(Date.now() - 1000 * 60 * 50).toISOString(),
-    avatarUrl: '/assets/img/logo-new.svg',
-    imageUrl: '/assets/img/logo-new.svg',
-    likes: 86,
-    comments: 12,
-    reposts: 7,
-    views: 980,
-    authorFollowers: 1100,
-    isFollowed: false,
-    isPremium: false,
-  },
-  {
-    id: 'seed-3',
-    authorName: 'Ava Reed',
-    handle: '@ava.trade',
-    profileId: 'ava',
-    content: 'USDT balance synced up top while I trade. Feels clean.',
-    createdAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-    avatarUrl: '/assets/img/logo-new.svg',
-    likes: 42,
-    comments: 8,
-    reposts: 4,
-    views: 720,
-    authorFollowers: 610,
-    isFollowed: true,
-    isPremium: false,
-  },
-  {
-    id: 'seed-4',
-    authorName: 'Yara Ali',
-    handle: '@yara.ai',
-    profileId: 'yara',
-    content: 'جربت Ask LordAI ورد بسرعة جدًا. محتوى الذكاء الاصطناعي هيكون ترند هنا.',
-    createdAt: new Date(Date.now() - 1000 * 60 * 130).toISOString(),
-    avatarUrl: '/assets/img/logo-new.svg',
-    likes: 210,
-    comments: 31,
-    reposts: 26,
-    views: 4120,
-    authorFollowers: 5300,
-    isFollowed: false,
-    isPremium: true,
-  },
-];
 
 function safeParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
@@ -216,25 +136,6 @@ export function isValidAvatarUrl(rawUrl: string) {
   return normalizeAvatarUrl(value) === value;
 }
 
-function getInteractions(userId?: UserScopeId): InteractionMap {
-  if (typeof window === 'undefined') return {};
-  return safeParse<InteractionMap>(window.localStorage.getItem(getScopedKey(INTERACTIONS_KEY, userId)), {});
-}
-
-function saveInteractions(map: InteractionMap, userId?: UserScopeId): PersistResult {
-  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
-  return safeSetItem(getScopedKey(INTERACTIONS_KEY, userId), JSON.stringify(map));
-}
-
-function getPostState(postId: string, userId?: UserScopeId): PostInteractionState {
-  const interactions = getInteractions(userId);
-  return interactions[postId] || { liked: false, reposted: false, comments: [] };
-}
-
-function getPostStateFromMap(postId: string, interactions: InteractionMap): PostInteractionState {
-  return interactions[postId] || { liked: false, reposted: false, comments: [] };
-}
-
 function getFollowingMap(userId?: UserScopeId): FollowingMap {
   if (typeof window === 'undefined') return {};
   return safeParse<FollowingMap>(window.localStorage.getItem(getScopedKey(FOLLOWING_KEY, userId)), {});
@@ -273,77 +174,43 @@ export function toggleFollowHandle(handle: string, fallback: boolean, userId?: U
   };
 }
 
-function getPostInteractionSummaryFromMap(post: SocialPost, interactions: InteractionMap) {
-  const state = getPostStateFromMap(post.id, interactions);
+export function getPostInteractionSummary(post: SocialPost) {
   return {
-    liked: state.liked,
-    reposted: state.reposted,
-    commentsList: state.comments,
-    likes: post.likes + (state.liked ? 1 : 0),
-    reposts: post.reposts + (state.reposted ? 1 : 0),
-    comments: post.comments + state.comments.length,
+    liked: Boolean(post.viewerLiked),
+    reposted: Boolean(post.viewerReposted),
+    commentsList: post.commentsList || [],
+    likes: Number(post.likes || 0),
+    reposts: Number(post.reposts || 0),
+    comments: Number(post.comments || 0),
   };
 }
 
-export function getPostInteractionSummary(post: SocialPost, userId?: UserScopeId) {
-  const state = getPostState(post.id, userId);
-  return {
-    liked: state.liked,
-    reposted: state.reposted,
-    commentsList: state.comments,
-    likes: post.likes + (state.liked ? 1 : 0),
-    reposts: post.reposts + (state.reposted ? 1 : 0),
-    comments: post.comments + state.comments.length,
-  };
+export async function togglePostLike(post: SocialPost, userId?: UserScopeId) {
+  const res = await apiFetch<{ liked: boolean; likes: number }>('/api/social/posts/like', {
+    method: 'POST',
+    body: JSON.stringify({ postId: post.id, userId: userId == null ? null : String(userId) }),
+  });
+  if (!res.ok) return { ok: false as const, reason: 'unknown' as const, liked: Boolean(post.viewerLiked), likes: post.likes };
+  return { ok: true as const, liked: res.data.liked, likes: res.data.likes };
 }
 
-export function togglePostLike(post: SocialPost, userId?: UserScopeId) {
-  const interactions = getInteractions(userId);
-  const state = interactions[post.id] || { liked: false, reposted: false, comments: [] };
-  state.liked = !state.liked;
-  interactions[post.id] = state;
-  const persist = saveInteractions(interactions, userId);
-  return {
-    ...persist,
-    liked: state.liked,
-    likes: post.likes + (state.liked ? 1 : 0),
-  };
+export async function togglePostRepost(post: SocialPost, userId?: UserScopeId) {
+  const res = await apiFetch<{ reposted: boolean; reposts: number }>('/api/social/posts/repost', {
+    method: 'POST',
+    body: JSON.stringify({ postId: post.id, userId: userId == null ? null : String(userId) }),
+  });
+  if (!res.ok) return { ok: false as const, reason: 'unknown' as const, reposted: Boolean(post.viewerReposted), reposts: post.reposts };
+  return { ok: true as const, reposted: res.data.reposted, reposts: res.data.reposts };
 }
 
-export function togglePostRepost(post: SocialPost, userId?: UserScopeId) {
-  const interactions = getInteractions(userId);
-  const state = interactions[post.id] || { liked: false, reposted: false, comments: [] };
-  state.reposted = !state.reposted;
-  interactions[post.id] = state;
-  const persist = saveInteractions(interactions, userId);
-  return {
-    ...persist,
-    reposted: state.reposted,
-    reposts: post.reposts + (state.reposted ? 1 : 0),
-  };
-}
-
-export function addPostComment(post: SocialPost, content: string, profile: SocialProfile, userId?: UserScopeId) {
+export async function addPostComment(post: SocialPost, content: string, profile: SocialProfile, userId?: UserScopeId) {
   if (!content.trim()) return { ok: false as const, reason: 'unknown' as const };
-  const interactions = getInteractions(userId);
-  const state = interactions[post.id] || { liked: false, reposted: false, comments: [] };
-  const comment: SocialComment = {
-    id: createLocalPostId(),
-    postId: post.id,
-    authorName: profile.publicName,
-    handle: profile.handle,
-    content: content.trim(),
-    createdAt: new Date().toISOString(),
-  };
-  state.comments = [comment, ...state.comments];
-  interactions[post.id] = state;
-  const persist = saveInteractions(interactions, userId);
-  return {
-    ...persist,
-    comment,
-    comments: post.comments + state.comments.length,
-    commentsList: state.comments,
-  };
+  const res = await apiFetch<{ comment: SocialComment; comments: number; commentsList: SocialComment[] }>('/api/social/posts/comment', {
+    method: 'POST',
+    body: JSON.stringify({ postId: post.id, userId: userId == null ? null : String(userId), content: content.trim(), profile }),
+  });
+  if (!res.ok) return { ok: false as const, reason: 'unknown' as const };
+  return { ok: true as const, ...res.data };
 }
 
 export function validatePostImage(file?: File | null) {
@@ -373,31 +240,27 @@ export function saveProfile(profile: SocialProfile, userId?: UserScopeId): Persi
   return safeSetItem(getScopedKey(PROFILE_KEY, userId), JSON.stringify(sanitizedProfile));
 }
 
-export function getStoredPosts(userId?: UserScopeId): SocialPost[] {
-  if (typeof window === 'undefined') return [];
-  return safeParse<SocialPost[]>(window.localStorage.getItem(getScopedKey(POSTS_KEY, userId)), []);
+function getViewBucket() {
+  if (typeof window === 'undefined') return {} as Record<string, number>;
+  return safeParse<Record<string, number>>(window.localStorage.getItem(VIEW_BUCKET_KEY), {});
 }
 
-export function savePost(post: SocialPost, userId?: UserScopeId): PersistResult {
-  if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
-  const posts = getStoredPosts(userId);
-  return safeSetItem(getScopedKey(POSTS_KEY, userId), JSON.stringify([post, ...posts]));
-}
-
-export function getAllPosts(userId?: UserScopeId): SocialPost[] {
+export async function fetchAllPosts(userId?: UserScopeId): Promise<SocialPost[]> {
+  const params = new URLSearchParams();
+  if (userId != null) params.set('viewerId', String(userId));
+  const res = await apiFetch<{ posts: SocialPost[] }>(`/api/social/posts?${params.toString()}`);
+  if (!res.ok || !res.data?.posts) return [];
   const followingMap = getFollowingMap(userId);
-  const stored = getStoredPosts(userId);
-  const all = [...stored, ...seedPosts];
-  const byId = new Map<string, SocialPost>();
   const viewBucket = getViewBucket();
-  all.forEach((post) => {
-    if (!byId.has(post.id)) {
-      const normalized = normalizeHandle(post.handle);
-      const isFollowed = typeof followingMap[normalized] === 'boolean' ? followingMap[normalized] : Boolean(post.isFollowed);
-      byId.set(post.id, { ...post, isFollowed, views: Number(post.views || 0) + Number(viewBucket[post.id] || 0) });
-    }
+  return res.data.posts.map((post) => {
+    const normalized = normalizeHandle(post.handle);
+    const isFollowed = typeof followingMap[normalized] === 'boolean' ? followingMap[normalized] : Boolean(post.isFollowed);
+    return { ...post, isFollowed, views: Number(post.views || 0) + Number(viewBucket[post.id] || 0) };
   });
-  return Array.from(byId.values());
+}
+
+export function getAllPosts() {
+  return [] as SocialPost[];
 }
 
 function estimateTrustSignal(post: SocialPost) {
@@ -406,11 +269,7 @@ function estimateTrustSignal(post: SocialPost) {
   return Math.log10(followers + 1);
 }
 
-function buildScoreFromSummary(
-  post: SocialPost,
-  settings: FeedAlgorithmSettings,
-  interaction: ReturnType<typeof getPostInteractionSummaryFromMap>,
-) {
+function buildScoreFromSummary(post: SocialPost, settings: FeedAlgorithmSettings, interaction: ReturnType<typeof getPostInteractionSummary>) {
   const threadScore = interaction.commentsList.length;
   return (
     interaction.likes * settings.likeWeight
@@ -423,15 +282,14 @@ function buildScoreFromSummary(
   );
 }
 
-export function getForYouFeed(posts: SocialPost[], options?: { userId?: UserScopeId; settings?: Partial<FeedAlgorithmSettings> | null }) {
+export function getForYouFeed(posts: SocialPost[], options?: { settings?: Partial<FeedAlgorithmSettings> | null }) {
   const settings = normalizeFeedAlgorithmSettings(options?.settings ?? DEFAULT_FEED_ALGORITHM_SETTINGS);
   const followed = posts.filter((post) => post.isFollowed);
   const discover = posts.filter((post) => !post.isFollowed);
-  const interactions = getInteractions(options?.userId);
   const scoreByPostId = new Map<string, number>();
 
   posts.forEach((post) => {
-    const summary = getPostInteractionSummaryFromMap(post, interactions);
+    const summary = getPostInteractionSummary(post);
     scoreByPostId.set(post.id, buildScoreFromSummary(post, settings, summary));
   });
 
@@ -487,7 +345,6 @@ export function getForYouFeed(posts: SocialPost[], options?: { userId?: UserScop
 export function getForYouFeedPage(
   posts: SocialPost[],
   options?: {
-    userId?: UserScopeId;
     settings?: Partial<FeedAlgorithmSettings> | null;
     limit?: number;
     offset?: number;
@@ -538,5 +395,28 @@ export function createPost({
     authorFollowers: 15,
     isFollowed: true,
     isPremium: Boolean(isPremium),
+    viewerLiked: false,
+    viewerReposted: false,
+    commentsList: [],
   };
+}
+
+export async function savePost(post: SocialPost, userId?: UserScopeId): Promise<PersistResult> {
+  const res = await apiFetch('/api/social/posts', {
+    method: 'POST',
+    body: JSON.stringify({
+      userId: userId == null ? null : String(userId),
+      content: post.content,
+      imageUrl: post.imageUrl || null,
+      isPremium: Boolean(post.isPremium),
+      profile: {
+        publicName: post.authorName,
+        handle: post.handle,
+        avatarUrl: post.avatarUrl || defaultProfile.avatarUrl,
+      },
+    }),
+  });
+
+  if (!res.ok) return { ok: false, reason: 'unknown' };
+  return { ok: true };
 }

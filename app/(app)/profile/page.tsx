@@ -7,7 +7,7 @@ import { dict, useLang } from '../../lib/i18n';
 import { BadgeCheck } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import PostCard from '../../../components/social/PostCard';
-import { addPostComment, getAllPosts, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
+import { addPostComment, fetchAllPosts, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
 import { useToast } from '../../lib/toast';
 
 export default function ProfilePage() {
@@ -20,8 +20,16 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!user?.id) return;
+    let cancelled = false;
+    const load = async () => {
+      const loaded = await fetchAllPosts(user.id);
+      if (!cancelled) setPosts(loaded);
+    };
     setProfile(getProfile(user.id));
-    setPosts(getAllPosts(user.id));
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const userPosts = useMemo(() => {
@@ -71,7 +79,7 @@ export default function ProfilePage() {
           </div>
         ) : (
           userPosts.map((post) => {
-            const summary = getPostInteractionSummary(post, user?.id);
+            const summary = getPostInteractionSummary(post);
             return (
               <PostCard
                 key={post.id}
@@ -82,22 +90,25 @@ export default function ProfilePage() {
                 commentPlaceholder={t.dashboard.social.commentPlaceholder}
                 commentSubmitLabel={t.dashboard.social.commentSubmit}
                 labels={t.dashboard.social.postMeta}
-                onLike={(targetPost) => {
-                  const result = togglePostLike(targetPost, user?.id);
+                onLike={async (targetPost) => {
+                  const result = await togglePostLike(targetPost, user?.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [...prev]);
+                  const loaded = await fetchAllPosts(user?.id);
+                  setPosts(loaded);
                 }}
-                onRepost={(targetPost) => {
-                  const result = togglePostRepost(targetPost, user?.id);
+                onRepost={async (targetPost) => {
+                  const result = await togglePostRepost(targetPost, user?.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [...prev]);
+                  const loaded = await fetchAllPosts(user?.id);
+                  setPosts(loaded);
                 }}
-                onComment={(targetPost, content) => {
+                onComment={async (targetPost, content) => {
                   if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                   if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
-                  const result = addPostComment(targetPost, content, profile, user.id);
+                  const result = await addPostComment(targetPost, content, profile, user.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [...prev]);
+                  const loaded = await fetchAllPosts(user?.id);
+                  setPosts(loaded);
                   toast(t.dashboard.social.commentSuccess);
                 }}
               />

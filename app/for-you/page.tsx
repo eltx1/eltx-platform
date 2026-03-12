@@ -11,7 +11,7 @@ import AppShell from '../../components/layout/AppShell';
 import AppBottomNav from '../../components/layout/AppBottomNav';
 import { apiFetch } from '../lib/api';
 import {
-  getAllPosts,
+  fetchAllPosts,
   getForYouFeedPage,
   getPostInteractionSummary,
   type SocialPost,
@@ -41,7 +41,15 @@ export default function ForYouPage() {
   }, [router, user]);
 
   useEffect(() => {
-    setPosts(getAllPosts(user?.id));
+    let cancelled = false;
+    const load = async () => {
+      const loaded = await fetchAllPosts(user?.id);
+      if (!cancelled) setPosts(loaded);
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -61,12 +69,11 @@ export default function ForYouPage() {
   const pageSize = Math.max(10, feedSettings.forYouPageItems || FALLBACK_BATCH_SIZE);
   const forYouAll = useMemo(
     () => getForYouFeedPage(posts, {
-      userId: user?.id,
       settings: feedSettings,
       limit: 500,
       offset: 0,
     }),
-    [posts, feedSettings, user?.id],
+    [posts, feedSettings],
   );
 
   const loadNext = useCallback(() => {
@@ -74,7 +81,6 @@ export default function ForYouPage() {
     loadingMoreRef.current = true;
 
     const page = getForYouFeedPage(posts, {
-      userId: user?.id,
       settings: feedSettings,
       offset,
       limit: pageSize,
@@ -88,7 +94,7 @@ export default function ForYouPage() {
     setOffset(page.nextOffset);
     setHasMore(page.hasMore);
     loadingMoreRef.current = false;
-  }, [feedSettings, hasMore, offset, pageSize, posts, user?.id]);
+  }, [feedSettings, hasMore, offset, pageSize, posts]);
 
   useEffect(() => {
     setVisible([]);
@@ -136,7 +142,7 @@ export default function ForYouPage() {
 
           <section className="space-y-3">
             {visible.map((post) => {
-              const summary = getPostInteractionSummary(post, user?.id);
+              const summary = getPostInteractionSummary(post);
               return (
                 <PostCard
                   key={post.id}
@@ -147,9 +153,12 @@ export default function ForYouPage() {
                   commentPlaceholder={t.dashboard.social.commentPlaceholder}
                   commentSubmitLabel={t.dashboard.social.commentSubmit}
                   labels={t.dashboard.social.postMeta}
-                  onViewed={(targetPost) => {
+                  onViewed={async (targetPost) => {
                     const counted = trackPostView(targetPost.id, user?.id);
-                    if (counted) setPosts(getAllPosts(user?.id));
+                    if (counted) {
+                      const loaded = await fetchAllPosts(user?.id);
+                      setPosts(loaded);
+                    }
                   }}
                 />
               );

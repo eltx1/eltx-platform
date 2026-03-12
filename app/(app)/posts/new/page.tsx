@@ -79,7 +79,7 @@ export default function NewPostPage() {
       <div className="flex flex-wrap gap-3">
         <button
           className="btn btn-primary px-4 py-2 text-xs"
-          onClick={() => {
+          onClick={async () => {
             if (!content.trim()) {
               toast(t.dashboard.social.quickPostEmpty);
               return;
@@ -94,7 +94,7 @@ export default function NewPostPage() {
             }
             const profile = getProfile(user.id);
             const newPost = createPost({ content: content.trim(), imageUrl, profile });
-            const saveResult = savePost(newPost, user.id);
+            const saveResult = await savePost(newPost, user.id);
             if (!saveResult.ok) {
               toast(t.dashboard.social.quickPostStorageError);
               return;

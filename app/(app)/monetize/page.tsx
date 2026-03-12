@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '../../lib/auth';
 import { useLang } from '../../lib/i18n';
-import { getAllPosts } from '../../lib/social-store';
+import { fetchAllPosts, type SocialPost } from '../../lib/social-store';
 import { apiFetch } from '../../lib/api';
 import {
   getCreatorUniqueViews,
@@ -33,7 +33,7 @@ export default function MonetizePage() {
     load();
   }, []);
 
-  const [posts, setPosts] = useState(() => getAllPosts(user?.id));
+  const [posts, setPosts] = useState<SocialPost[]>([]);
   const isPremium = Boolean(user?.is_premium);
   const myHandle = useMemo(() => {
     if (user?.username) return `@${String(user.username).replace(/^@/, '')}`;
@@ -46,8 +46,16 @@ export default function MonetizePage() {
   const unpaidAmount = useMemo(() => Number(((totalViews / 1000) * settings.payoutPerThousandViews).toFixed(6)), [totalViews, settings.payoutPerThousandViews]);
 
   useEffect(() => {
-    setPosts(getAllPosts(user?.id));
+    let cancelled = false;
+    const load = async () => {
+      const loaded = await fetchAllPosts(user?.id);
+      if (!cancelled) setPosts(loaded);
+    };
+    load();
     setPayouts(getPayouts(user?.id));
+    return () => {
+      cancelled = true;
+    };
   }, [refreshKey, user?.id]);
   const [payouts, setPayouts] = useState(() => getPayouts(user?.id));
 

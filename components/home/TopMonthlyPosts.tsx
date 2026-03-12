@@ -5,7 +5,7 @@ import Link from 'next/link';
 import PostCard from '../social/PostCard';
 import { dict, useLang } from '../../app/lib/i18n';
 import { apiFetch } from '../../app/lib/api';
-import { getAllPosts, getForYouFeed, getPostInteractionSummary, type SocialPost } from '../../app/lib/social-store';
+import { fetchAllPosts, getForYouFeed, getPostInteractionSummary, type SocialPost } from '../../app/lib/social-store';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../../app/lib/feed-algorithm';
 
 export default function TopMonthlyPosts() {
@@ -15,7 +15,15 @@ export default function TopMonthlyPosts() {
   const [feedSettings, setFeedSettings] = useState<FeedAlgorithmSettings>(DEFAULT_FEED_ALGORITHM_SETTINGS);
 
   useEffect(() => {
-    setPosts(getAllPosts(undefined));
+    let cancelled = false;
+    const load = async () => {
+      const loaded = await fetchAllPosts(undefined);
+      if (!cancelled) setPosts(loaded);
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
