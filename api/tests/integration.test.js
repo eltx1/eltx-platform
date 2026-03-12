@@ -91,10 +91,10 @@ const pool = {
     if (sql.includes("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt'")) {
       return [[{ value: testSchema.premiumMonthlyPriceUsdt }]];
     }
-    if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
+    if (sql.includes('SELECT asset, balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
       const balance = testSchema.balances[key];
-      return [balance ? [{ balance_wei: balance }] : []];
+      return [balance ? [{ asset: String(params[1]).toUpperCase(), balance_wei: balance }] : []];
     }
     if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? LIMIT 1')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
@@ -105,6 +105,16 @@ const pool = {
       const key = `${Number(params[1])}:${String(params[2]).toUpperCase()}`;
       const current = BigInt(testSchema.balances[key] || '0');
       testSchema.balances[key] = (current - BigInt(params[0])).toString();
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('DELETE FROM user_balances WHERE user_id=? AND UPPER(asset)=?')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      delete testSchema.balances[key];
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?)')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      testSchema.balances[key] = String(params[2]);
       return [{ affectedRows: 1 }];
     }
     if (sql.includes('UPDATE users SET is_premium=1, premium_expires_at=? WHERE id=?')) {
