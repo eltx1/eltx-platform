@@ -37,7 +37,12 @@ export default function LoginContent() {
 
     const authError = params.get('authError');
     if (authError) {
-      const mapped = authError === 'access_denied' ? t.auth.google.cancelled : t.auth.google.failed;
+      const mapped =
+        authError === 'access_denied'
+          ? t.auth.google.cancelled
+          : authError === 'temporarily_unavailable'
+            ? t.auth.google.temporarilyUnavailable
+            : t.auth.google.failed;
       setError(mapped);
       params.delete('authError');
       const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;

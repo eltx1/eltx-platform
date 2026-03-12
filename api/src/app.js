@@ -3852,6 +3852,49 @@ async function issueUserSessionAndWallets(connLike, userId) {
   return { token, wallets };
 }
 
+function isRetryableDbError(err) {
+  return err?.code === 'ER_LOCK_WAIT_TIMEOUT' || err?.code === 'ER_LOCK_DEADLOCK';
+}
+
+async function provisionWalletsBestEffort(userId) {
+  const wallets = [];
+  for (const cid of SUPPORTED_CHAINS) {
+    try {
+      wallets.push(await provisionUserAddress(pool, userId, cid));
+    } catch (err) {
+      console.error('Wallet provisioning failed after auth flow', {
+        userId,
+        chainId: cid,
+        code: err?.code,
+        message: err?.message,
+      });
+    }
+  }
+  return wallets;
+}
+
+async function withTransactionRetry(work, { maxAttempts = 3, retryDelayMs = 150 } = {}) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let conn;
+    try {
+      conn = await pool.getConnection();
+      await conn.beginTransaction();
+      const result = await work(conn);
+      await conn.commit();
+      return result;
+    } catch (err) {
+      lastErr = err;
+      if (conn) await conn.rollback();
+      if (!isRetryableDbError(err) || attempt === maxAttempts) break;
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+    } finally {
+      if (conn) conn.release();
+    }
+  }
+  throw lastErr;
+}
+
 
 app.get('/auth/google/start', async (req, res, next) => {
   try {
@@ -3871,7 +3914,6 @@ app.get('/auth/google/start', async (req, res, next) => {
 });
 
 app.get('/auth/google/callback', async (req, res, next) => {
-  let conn;
   try {
     const state = typeof req.query?.state === 'string' ? req.query.state : '';
     const code = typeof req.query?.code === 'string' ? req.query.code : '';
@@ -3899,90 +3941,97 @@ app.get('/auth/google/callback', async (req, res, next) => {
     const profile = await exchangeGoogleCodeForUser(code);
     const utm = parseUtmPayload(req.query || {});
 
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
+    const { userId, token } = await withTransactionRetry(async (conn) => {
+      const [oauthRows] = await conn.query(
+        'SELECT user_id FROM user_oauth_accounts WHERE provider=? AND provider_sub=? LIMIT 1',
+        [GOOGLE_OAUTH_PROVIDER, profile.sub]
+      );
+      let currentUserId = oauthRows[0]?.user_id || null;
 
-    const [oauthRows] = await conn.query(
-      'SELECT user_id FROM user_oauth_accounts WHERE provider=? AND provider_sub=? LIMIT 1',
-      [GOOGLE_OAUTH_PROVIDER, profile.sub]
-    );
-    let userId = oauthRows[0]?.user_id || null;
-
-    if (!userId) {
-      const [usersByEmail] = await conn.query('SELECT id, language FROM users WHERE email=? LIMIT 1', [profile.email]);
-      if (usersByEmail.length) {
-        userId = usersByEmail[0].id;
+      if (!currentUserId) {
+        const [usersByEmail] = await conn.query('SELECT id, language FROM users WHERE email=? LIMIT 1', [profile.email]);
+        if (usersByEmail.length) {
+          currentUserId = usersByEmail[0].id;
+        } else {
+          const username = await generateUsernameFromEmail(conn, profile.email);
+          const [newUser] = await conn.query('INSERT INTO users (email, username, language) VALUES (?, ?, ?)', [profile.email, username, 'en']);
+          currentUserId = newUser.insertId;
+          await ensureReferralCode(conn, currentUserId);
+        }
+        await conn.query(
+          `INSERT INTO user_oauth_accounts (user_id, provider, provider_sub, email, email_verified, picture_url, last_login_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())
+           ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), email=VALUES(email), email_verified=VALUES(email_verified), picture_url=VALUES(picture_url), last_login_at=NOW()`,
+          [currentUserId, GOOGLE_OAUTH_PROVIDER, profile.sub, profile.email, profile.emailVerified ? 1 : 0, profile.picture]
+        );
       } else {
-        const username = await generateUsernameFromEmail(conn, profile.email);
-        const [newUser] = await conn.query('INSERT INTO users (email, username, language) VALUES (?, ?, ?)', [profile.email, username, 'en']);
-        userId = newUser.insertId;
-        await ensureReferralCode(conn, userId);
+        await conn.query(
+          'UPDATE user_oauth_accounts SET email=?, email_verified=?, picture_url=?, last_login_at=NOW() WHERE provider=? AND provider_sub=?',
+          [profile.email, profile.emailVerified ? 1 : 0, profile.picture, GOOGLE_OAUTH_PROVIDER, profile.sub]
+        );
       }
-      await conn.query(
-        `INSERT INTO user_oauth_accounts (user_id, provider, provider_sub, email, email_verified, picture_url, last_login_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW())
-         ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), email=VALUES(email), email_verified=VALUES(email_verified), picture_url=VALUES(picture_url), last_login_at=NOW()`,
-        [userId, GOOGLE_OAUTH_PROVIDER, profile.sub, profile.email, profile.emailVerified ? 1 : 0, profile.picture]
-      );
-    } else {
-      await conn.query(
-        'UPDATE user_oauth_accounts SET email=?, email_verified=?, picture_url=?, last_login_at=NOW() WHERE provider=? AND provider_sub=?',
-        [profile.email, profile.emailVerified ? 1 : 0, profile.picture, GOOGLE_OAUTH_PROVIDER, profile.sub]
-      );
-    }
 
-    await storeFirstUtmSession(conn, userId, utm);
-    const { token } = await issueUserSessionAndWallets(conn, userId);
-    await conn.commit();
+      await storeFirstUtmSession(conn, currentUserId, utm);
+      const token = crypto.randomUUID();
+      await conn.query(
+        'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
+        [token, currentUserId, USER_SESSION_TTL_SECONDS]
+      );
+      return { userId: currentUserId, token };
+    });
+
+    await provisionWalletsBestEffort(userId);
 
     res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
     res.cookie(COOKIE_NAME, token, sessionCookie);
     const redirectUrl = resolveGoogleRedirectUrl(parsedState.redirect, parsedState.returnOrigin);
     return res.redirect(redirectUrl);
   } catch (err) {
-    if (conn) await conn.rollback();
+    if (isRetryableDbError(err)) {
+      return res.redirect('/login?authError=temporarily_unavailable');
+    }
     return next(err);
-  } finally {
-    if (conn) conn.release();
   }
 });
 
 app.post('/auth/signup', async (req, res, next) => {
-  let conn;
   try {
     const { email, password, language, referral_code: referralCodeRaw } = SignupSchema.parse(req.body);
     const utm = parseUtmPayload(req.body || {});
-    conn = await pool.getConnection();
-    await conn.beginTransaction();
-    const username = await generateUsernameFromEmail(conn, email);
-    const [u] = await conn.query(
-      'INSERT INTO users (email, username, language) VALUES (?, ?, ?)',
-      [email, username, language || 'en']
-    );
+    const [[existingUser]] = await pool.query('SELECT id FROM users WHERE email=? LIMIT 1', [email]);
+    if (existingUser) {
+      return next({ status: 409, code: 'USER_EXISTS', message: 'Email already exists' });
+    }
+
     const hash = await argon2.hash(password, { type: argon2.argon2id });
-    await conn.query('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)', [u.insertId, hash]);
-    await ensureReferralCode(conn, u.insertId);
-    await storeFirstUtmSession(conn, u.insertId, utm);
     const referralCode = referralCodeRaw ? referralCodeRaw.trim().toUpperCase() : null;
-    if (referralCode) {
-      const [[referrer]] = await conn.query('SELECT user_id FROM referral_codes WHERE code=? LIMIT 1', [referralCode]);
-      if (referrer?.user_id && referrer.user_id !== u.insertId) {
-        await conn.query('INSERT IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?, ?)', [
-          referrer.user_id,
-          u.insertId,
-        ]);
+    const { userId, username, token } = await withTransactionRetry(async (conn) => {
+      const username = await generateUsernameFromEmail(conn, email);
+      const [u] = await conn.query(
+        'INSERT INTO users (email, username, language) VALUES (?, ?, ?)',
+        [email, username, language || 'en']
+      );
+      await conn.query('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)', [u.insertId, hash]);
+      await ensureReferralCode(conn, u.insertId);
+      await storeFirstUtmSession(conn, u.insertId, utm);
+      if (referralCode) {
+        const [[referrer]] = await conn.query('SELECT user_id FROM referral_codes WHERE code=? LIMIT 1', [referralCode]);
+        if (referrer?.user_id && referrer.user_id !== u.insertId) {
+          await conn.query('INSERT IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?, ?)', [
+            referrer.user_id,
+            u.insertId,
+          ]);
+        }
       }
-    }
-    const token = crypto.randomUUID();
-    await conn.query(
-      'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
-      [token, u.insertId, USER_SESSION_TTL_SECONDS]
-    );
-    const wallets = [];
-    for (const cid of SUPPORTED_CHAINS) {
-      wallets.push(await provisionUserAddress(conn, u.insertId, cid));
-    }
-    await conn.commit();
+      const token = crypto.randomUUID();
+      await conn.query(
+        'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
+        [token, u.insertId, USER_SESSION_TTL_SECONDS]
+      );
+      return { userId: u.insertId, username, token };
+    });
+
+    const wallets = await provisionWalletsBestEffort(userId);
     enqueueEmail({
       kind: 'welcome',
       to: email,
@@ -3993,7 +4042,6 @@ app.post('/auth/signup', async (req, res, next) => {
     res.cookie(COOKIE_NAME, token, sessionCookie);
     res.json({ ok: true, wallet: wallets[0], wallets });
   } catch (err) {
-    if (conn) await conn.rollback();
     if (err instanceof z.ZodError) {
       const issues = err.errors.map((e) => ({
         path: e.path.join('.'),
@@ -4009,9 +4057,10 @@ app.post('/auth/signup', async (req, res, next) => {
     if (err.code === 'ER_DUP_ENTRY') {
       return next({ status: 409, code: 'USER_EXISTS', message: 'Email already exists' });
     }
+    if (isRetryableDbError(err)) {
+      return next({ status: 503, code: 'AUTH_TEMPORARILY_UNAVAILABLE', message: 'Please retry in a moment' });
+    }
     next(err);
-  } finally {
-    if (conn) conn.release();
   }
 });
 
