@@ -4318,10 +4318,13 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
 
         const [[priceRow]] = await conn.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
         const [balanceRows] = await conn.query(
-          'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
+          'SELECT asset, balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
           [userId, 'USDT']
         );
-        const currentBalanceWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+        const currentBalanceWei = balanceRows.reduce(
+          (sum, row) => sum + bigIntFromValue(row?.balance_wei || 0),
+          0n
+        );
         const usdtDecimals = resolveStablecoinLedgerDecimals('USDT', currentBalanceWei);
         const monthlyPrice = parseDecimalValue(priceRow?.value || '1');
         const normalizedMonthlyPrice = monthlyPrice && monthlyPrice.gt(0) ? monthlyPrice : new Decimal(1);
@@ -4333,11 +4336,12 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
           return next({ status: 400, code: 'INSUFFICIENT_USDT', message: 'Insufficient USDT balance for premium subscription' });
         }
 
-        await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-          chargeWei.toString(),
-          userId,
-          'USDT',
-        ]);
+        const nextBalanceWei = currentBalanceWei - chargeWei;
+        await conn.query('DELETE FROM user_balances WHERE user_id=? AND UPPER(asset)=?', [userId, 'USDT']);
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?, ?, ?)',
+          [userId, 'USDT', nextBalanceWei.toString()]
+        );
 
         const currentExpiry = user.premium_expires_at ? new Date(user.premium_expires_at) : null;
         const baseDate = currentExpiry && currentExpiry.getTime() > Date.now() ? currentExpiry : new Date();
