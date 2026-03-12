@@ -4237,6 +4237,34 @@ const PREMIUM_SUBSCRIBE_MAX_RETRIES = 3;
 const PREMIUM_SUBSCRIBE_LOCK_WAIT_SECONDS = 5;
 const LEGACY_STABLECOIN_DECIMALS = 6;
 
+const PLATFORM_FEE_BALANCES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS platform_fee_balances (
+  fee_type VARCHAR(64) NOT NULL,
+  asset VARCHAR(32) NOT NULL,
+  amount_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (fee_type, asset)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+`.trim();
+
+let platformFeeBalancesEnsured = false;
+let platformFeeBalancesEnsurePromise = null;
+
+async function ensurePlatformFeeBalancesTable() {
+  if (platformFeeBalancesEnsured) return;
+  if (!platformFeeBalancesEnsurePromise) {
+    platformFeeBalancesEnsurePromise = pool
+      .query(PLATFORM_FEE_BALANCES_SCHEMA_SQL)
+      .then(() => {
+        platformFeeBalancesEnsured = true;
+      })
+      .finally(() => {
+        platformFeeBalancesEnsurePromise = null;
+      });
+  }
+  await platformFeeBalancesEnsurePromise;
+}
+
 function resolveStablecoinLedgerDecimals(symbol, balanceWei) {
   const decimals = getSymbolDecimals(symbol);
   if (symbol?.toUpperCase() !== 'USDT') return decimals;
@@ -4260,6 +4288,7 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const payload = PremiumSubscribeSchema.parse(req.body || {});
+    await ensurePlatformFeeBalancesTable();
     for (let attempt = 1; attempt <= PREMIUM_SUBSCRIBE_MAX_RETRIES; attempt += 1) {
       let conn;
       try {
