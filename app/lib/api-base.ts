@@ -43,7 +43,9 @@ export function getApiBaseForBrowser() {
     const configuredUrl = new URL(configuredOrigin);
     const currentUrl = new URL(currentOrigin);
     const apexHost = configuredUrl.hostname.startsWith('api.') ? configuredUrl.hostname.slice(4) : '';
-    const isSameApex = apexHost && currentUrl.hostname === apexHost;
+    const isSameApex =
+      Boolean(apexHost) &&
+      (currentUrl.hostname === apexHost || currentUrl.hostname.endsWith(`.${apexHost}`));
 
     if (isSameApex && configuredUrl.protocol === currentUrl.protocol) {
       return currentOrigin;
@@ -54,4 +56,3 @@ export function getApiBaseForBrowser() {
 
   return configuredBase;
 }
-
