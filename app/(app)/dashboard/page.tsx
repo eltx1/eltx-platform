@@ -31,7 +31,7 @@ import PostCard from '../../../components/social/PostCard';
 import {
   addPostComment,
   createPost,
-  getAllPosts,
+  fetchAllPosts,
   getFollowingFeed,
   getForYouFeed,
   getPostInteractionSummary,
@@ -70,8 +70,16 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!user?.id) return;
-    setPosts(getAllPosts(user.id));
+    let cancelled = false;
+    const load = async () => {
+      const loaded = await fetchAllPosts(user.id);
+      if (!cancelled) setPosts(loaded);
+    };
+    load();
     setWordLimit(getPostWordLimit());
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -93,7 +101,7 @@ export default function DashboardPage() {
     return quickPost.trim().split(/\s+/).length;
   }, [quickPost]);
 
-  const fullForYouFeed = useMemo(() => getForYouFeed(posts, { userId: user?.id, settings: feedSettings }), [posts, user?.id, feedSettings]);
+  const fullForYouFeed = useMemo(() => getForYouFeed(posts, { settings: feedSettings }), [posts, feedSettings]);
   const forYouFeed = useMemo(() => fullForYouFeed.slice(0, feedSettings.dashboardForYouItems), [fullForYouFeed, feedSettings.dashboardForYouItems]);
   const followingFeed = useMemo(() => getFollowingFeed(posts), [posts]);
   const activeFeed = activeFeedTab === 'for-you' ? forYouFeed : followingFeed;
@@ -132,7 +140,7 @@ export default function DashboardPage() {
               />
               <button
                 className="btn btn-primary px-3 py-2 text-xs"
-                onClick={() => {
+                onClick={async () => {
                   if (!aiQuestion.trim()) return toast(t.dashboard.social.askAiEmpty);
                   router.push(`/ai?q=${encodeURIComponent(aiQuestion.trim())}`);
                   setAiQuestion('');
@@ -163,15 +171,16 @@ export default function DashboardPage() {
               <div className="text-[11px] text-white/60">{t.dashboard.social.quickPostHint}</div>
               <button
                 className="btn btn-primary px-3 py-2 text-xs"
-                onClick={() => {
+                onClick={async () => {
                   if (!quickPost.trim()) return toast(t.dashboard.social.quickPostEmpty);
                   if (wordCount > wordLimit) return toast(t.dashboard.social.quickPostLimit);
                   if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                   const profile = getProfile(user.id);
                   const newPost = createPost({ content: quickPost.trim(), profile, isPremium: Boolean(user.is_premium) });
-                  const saveResult = savePost(newPost, user.id);
+                  const saveResult = await savePost(newPost, user.id);
                   if (!saveResult.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [newPost, ...prev]);
+                  const loaded = await fetchAllPosts(user.id);
+                  setPosts(loaded);
                   setQuickPost('');
                   toast(t.dashboard.social.quickPostSuccess);
                 }}
@@ -206,7 +215,7 @@ export default function DashboardPage() {
             </div>
             <div className="space-y-2">
               {activeFeed.map((post) => {
-                const summary = getPostInteractionSummary(post, user?.id);
+                const summary = getPostInteractionSummary(post);
                 return (
                   <PostCard
                     key={post.id}
@@ -217,28 +226,34 @@ export default function DashboardPage() {
                     commentPlaceholder={t.dashboard.social.commentPlaceholder}
                     commentSubmitLabel={t.dashboard.social.commentSubmit}
                 labels={t.dashboard.social.postMeta}
-                    onLike={(targetPost) => {
-                      const result = togglePostLike(targetPost, user?.id);
+                    onLike={async (targetPost) => {
+                      const result = await togglePostLike(targetPost, user?.id);
                       if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                      setPosts((prev) => [...prev]);
+                      const loaded = await fetchAllPosts(user?.id);
+                      setPosts(loaded);
                     }}
-                    onRepost={(targetPost) => {
-                      const result = togglePostRepost(targetPost, user?.id);
+                    onRepost={async (targetPost) => {
+                      const result = await togglePostRepost(targetPost, user?.id);
                       if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                      setPosts((prev) => [...prev]);
+                      const loaded = await fetchAllPosts(user?.id);
+                      setPosts(loaded);
                       toast(result.reposted ? t.dashboard.social.repostSuccess : t.dashboard.social.repostRemoved);
                     }}
-                    onViewed={(targetPost) => {
+                    onViewed={async (targetPost) => {
                       const counted = trackPostView(targetPost.id, user?.id);
-                      if (counted) setPosts(getAllPosts(user?.id));
+                      if (counted) {
+                        const loaded = await fetchAllPosts(user?.id);
+                        setPosts(loaded);
+                      }
                     }}
-                    onComment={(targetPost, content) => {
+                    onComment={async (targetPost, content) => {
                       if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                       if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
                       const profile = getProfile(user.id);
-                      const result = addPostComment(targetPost, content, profile, user.id);
+                      const result = await addPostComment(targetPost, content, profile, user.id);
                       if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                      setPosts((prev) => [...prev]);
+                      const loaded = await fetchAllPosts(user?.id);
+                      setPosts(loaded);
                       toast(t.dashboard.social.commentSuccess);
                     }}
                   />

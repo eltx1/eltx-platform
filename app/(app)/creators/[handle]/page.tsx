@@ -9,7 +9,7 @@ import { useAuth } from '../../../lib/auth';
 import { dict, useLang } from '../../../lib/i18n';
 import {
   addPostComment,
-  getAllPosts,
+  fetchAllPosts,
   getPostInteractionSummary,
   getProfile,
   isFollowingHandle,
@@ -41,8 +41,16 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
   const [activeTab, setActiveTab] = useState<'posts' | 'media'>('posts');
 
   useEffect(() => {
-    setPosts(getAllPosts(user?.id));
+    let cancelled = false;
+    const load = async () => {
+      const loaded = await fetchAllPosts(user?.id);
+      if (!cancelled) setPosts(loaded);
+    };
+    load();
     setProfile(getProfile(user?.id));
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   const creatorPosts = useMemo(
@@ -56,7 +64,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
 
     const aggregate = creatorPosts.reduce(
       (acc, post) => {
-        const summary = getPostInteractionSummary(post, user?.id);
+        const summary = getPostInteractionSummary(post);
         acc.likes += summary.likes;
         acc.comments += summary.comments;
         acc.reposts += summary.reposts;
@@ -77,7 +85,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
       followFallback: Boolean(latestPost.isFollowed),
       ...aggregate,
     };
-  }, [creatorPosts, lang, user?.id]);
+  }, [creatorPosts, lang]);
 
   const isOwnProfile = Boolean(profile) && normalizeHandle(profile.handle) === normalizedRouteHandle;
   const isFollowing = creatorData
@@ -126,10 +134,11 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
                 </Link>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     const result = toggleFollowHandle(creatorData.handle, creatorData.followFallback, user?.id);
                     if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                    setPosts(getAllPosts(user?.id));
+                    const loaded = await fetchAllPosts(user?.id);
+                    setPosts(loaded);
                     toast(result.isFollowed
                       ? (lang === 'ar' ? 'تمت المتابعة بنجاح.' : 'Following successfully.')
                       : (lang === 'ar' ? 'تم إلغاء المتابعة.' : 'Unfollowed successfully.'));
@@ -193,7 +202,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
           </div>
         ) : (
           shownPosts.map((post) => {
-            const summary = getPostInteractionSummary(post, user?.id);
+            const summary = getPostInteractionSummary(post);
             return (
               <PostCard
                 key={post.id}
@@ -204,22 +213,25 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
                 commentPlaceholder={t.dashboard.social.commentPlaceholder}
                 commentSubmitLabel={t.dashboard.social.commentSubmit}
                 labels={t.dashboard.social.postMeta}
-                onLike={(targetPost) => {
-                  const result = togglePostLike(targetPost, user?.id);
+                onLike={async (targetPost) => {
+                  const result = await togglePostLike(targetPost, user?.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [...prev]);
+                  const loaded = await fetchAllPosts(user?.id);
+                  setPosts(loaded);
                 }}
-                onRepost={(targetPost) => {
-                  const result = togglePostRepost(targetPost, user?.id);
+                onRepost={async (targetPost) => {
+                  const result = await togglePostRepost(targetPost, user?.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [...prev]);
+                  const loaded = await fetchAllPosts(user?.id);
+                  setPosts(loaded);
                 }}
-                onComment={(targetPost, content) => {
+                onComment={async (targetPost, content) => {
                   if (!profile || !user?.id) return toast(t.dashboard.social.sessionMissing);
                   if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
-                  const result = addPostComment(targetPost, content, profile, user.id);
+                  const result = await addPostComment(targetPost, content, profile, user.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  setPosts((prev) => [...prev]);
+                  const loaded = await fetchAllPosts(user?.id);
+                  setPosts(loaded);
                   toast(t.dashboard.social.commentSuccess);
                 }}
               />
