@@ -213,15 +213,15 @@ test('POST /auth/signup creates a new account successfully', async () => {
   assert.equal(testSchema.users.some((u) => u.email === email), true);
 });
 
-test('GET /auth/google/callback redirects to login when oauth cookie state mismatches', async () => {
+test('GET /auth/google/callback does not fail only because cookie state mismatches', async () => {
   const payload = { nonce: 'n-1', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
   const state = signState(payload);
   const res = await request
     .get(`/auth/google/callback?state=${encodeURIComponent(state)}`)
     .set('Cookie', 'gstate=other-state-value; goauth_sid=browser-1');
 
-  assert.equal(res.status, 302);
-  assert.equal(res.headers.location, '/login?authError=oauth_session_expired');
+  assert.equal(res.status, 400);
+  assert.equal(res.body?.error?.code, 'GOOGLE_CODE_MISSING');
 });
 
 test('GET /auth/google/callback returns GOOGLE_CODE_MISSING when state is valid and stored', async () => {
@@ -321,4 +321,35 @@ test('POST /premium/subscribe handles fractional USDT totals without float artif
 
 test.after(async () => {
   await new Promise((resolve) => server.close(resolve));
+});
+
+
+test('GET /auth/google/callback accepts missing gstate cookie when state is valid and stored', async () => {
+  const payload = { nonce: 'n-3', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
+  const state = signState(payload);
+  const stateHash = crypto.createHash('sha256').update(state).digest('hex');
+  testSchema.oauthGoogleStates[stateHash] = {
+    id: 78,
+    state_hash: stateHash,
+    browser_session_id: 'browser-3',
+    redirect_path: '/dashboard',
+    return_origin: 'https://lordai.net',
+    mode: 'login',
+    consumed_at: null,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+
+  const res = await request
+    .get(`/auth/google/callback?state=${encodeURIComponent(state)}`)
+    .set('Cookie', 'goauth_sid=browser-3');
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body?.error?.code, 'GOOGLE_CODE_MISSING');
+});
+
+test('POST /auth/logout clears oauth browser session cookie', async () => {
+  const res = await request.post('/auth/logout').set('Cookie', 'sid=valid-session; goauth_sid=browser-1');
+  assert.equal(res.status, 200);
+  const setCookie = res.headers['set-cookie'] || [];
+  assert.equal(setCookie.some((value) => String(value).startsWith('goauth_sid=;')), true);
 });

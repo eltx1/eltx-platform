@@ -3816,11 +3816,6 @@ async function ensureGoogleBrowserSession(req, res) {
   return created;
 }
 
-async function deleteGoogleAuthStatesByBrowserSession(conn, browserSessionId) {
-  if (!browserSessionId) return;
-  await conn.query('DELETE FROM oauth_google_states WHERE browser_session_id=?', [browserSessionId]);
-}
-
 async function consumeGoogleAuthState(conn, stateToken, browserSessionId, requestId) {
   const stateHash = hashGoogleStateToken(stateToken);
   if (!stateHash || !browserSessionId) return { ok: false, reason: 'missing_state_or_browser_session' };
@@ -3856,7 +3851,12 @@ async function consumeGoogleAuthState(conn, stateToken, browserSessionId, reques
 }
 
 async function saveGoogleAuthStateAttempt(conn, payload) {
-  await deleteGoogleAuthStatesByBrowserSession(conn, payload.browserSessionId);
+  await conn.query(
+    `DELETE FROM oauth_google_states
+      WHERE browser_session_id=?
+        AND (consumed_at IS NOT NULL OR expires_at < NOW() OR created_at < DATE_SUB(NOW(), INTERVAL ? SECOND))`,
+    [payload.browserSessionId, GOOGLE_AUTH_STATE_TTL_SECONDS]
+  );
   await conn.query(
     `INSERT INTO oauth_google_states
       (state_hash, browser_session_id, redirect_path, return_origin, mode, request_id, user_agent, ip_address, expires_at)
@@ -4104,12 +4104,11 @@ app.get('/auth/google/callback', async (req, res, next) => {
       return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
     if (!cookieState || state !== cookieState) {
-      logGoogleOAuth('callback_state_cookie_mismatch', req, {
+      logGoogleOAuth('callback_state_cookie_mismatch_nonfatal', req, {
         browserSessionId,
         queryStateRef: maskStateRef(state),
         cookieStateRef: maskStateRef(cookieState),
       });
-      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
     if (!parsedState) {
       logGoogleOAuth('callback_state_signature_invalid', req, {
@@ -4319,6 +4318,7 @@ app.get('/auth/logout', async (req, res) => {
   }
   res.clearCookie(COOKIE_NAME, { ...sessionCookie, maxAge: 0 });
   res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
+  res.clearCookie(GOOGLE_AUTH_BROWSER_SESSION_COOKIE, { ...googleAuthBrowserSessionCookie, maxAge: 0 });
   const nextPath = typeof req.query?.next === 'string' && req.query.next.startsWith('/') ? req.query.next : '/login?loggedOut=1';
   return res.redirect(nextPath);
 });
@@ -4336,6 +4336,7 @@ app.post('/auth/logout', async (req, res) => {
   }
   res.clearCookie(COOKIE_NAME, { ...sessionCookie, maxAge: 0 });
   res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
+  res.clearCookie(GOOGLE_AUTH_BROWSER_SESSION_COOKIE, { ...googleAuthBrowserSessionCookie, maxAge: 0 });
   res.json({ ok: true });
 });
 

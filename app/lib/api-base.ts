@@ -17,6 +17,17 @@ export function getConfiguredApiBase() {
   return normalizeBase(process.env.NEXT_PUBLIC_API_BASE);
 }
 
+
+export function getConfiguredApiOriginForBrowser() {
+  const configuredBase = getConfiguredApiBase();
+  if (!configuredBase) {
+    if (typeof window === 'undefined') return '';
+    return window.location.origin;
+  }
+  const configuredOrigin = parseOrigin(configuredBase);
+  return configuredOrigin || configuredBase;
+}
+
 export function getApiBaseForBrowser() {
   const configuredBase = getConfiguredApiBase();
   if (typeof window === 'undefined') return configuredBase;
