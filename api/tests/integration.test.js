@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const supertest = require('supertest');
 const proxyquire = require('proxyquire');
 
@@ -138,6 +139,12 @@ const { app, server } = proxyquire('../src/app', {
 
 const request = supertest(app);
 
+function signState(payload, secret = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'lordai-google-state') {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
 test('POST /auth/login returns 400 for invalid payload', async () => {
   const res = await request.post('/auth/login').send({ email: 'bad' });
   assert.equal(res.status, 400);
@@ -156,6 +163,30 @@ test('POST /auth/signup creates a new account successfully', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body?.ok, true);
   assert.equal(testSchema.users.some((u) => u.email === email), true);
+});
+
+test('GET /auth/google/callback accepts cookie-matched state even when signature cannot be verified', async () => {
+  const payload = { nonce: 'n-1', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
+  const validSignedState = signState(payload, 'cluster-a-secret');
+  const body = validSignedState.split('.')[0];
+  const mismatchedSignatureState = `${body}.${signState(payload, 'cluster-b-secret').split('.')[1]}`;
+  const res = await request
+    .get(`/auth/google/callback?state=${encodeURIComponent(mismatchedSignatureState)}`)
+    .set('Cookie', `gstate=${mismatchedSignatureState}`);
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body?.error?.code, 'GOOGLE_CODE_MISSING');
+});
+
+test('GET /auth/google/callback rejects tampered state without matching cookie fallback', async () => {
+  const payload = { nonce: 'n-2', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
+  const validSignedState = signState(payload, 'cluster-a-secret');
+  const body = validSignedState.split('.')[0];
+  const mismatchedSignatureState = `${body}.${signState(payload, 'cluster-b-secret').split('.')[1]}`;
+  const res = await request.get(`/auth/google/callback?state=${encodeURIComponent(mismatchedSignatureState)}`);
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body?.error?.code, 'GOOGLE_STATE_INVALID');
 });
 
 test('GET /wallet/balance blocks unauthenticated requests', async () => {

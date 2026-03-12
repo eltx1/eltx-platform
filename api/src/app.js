@@ -3764,6 +3764,10 @@ function verifyGoogleState(token) {
   const secret = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'lordai-google-state';
   const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
   if (sig !== expected) return null;
+  return parseGoogleStatePayload(body);
+}
+
+function parseGoogleStatePayload(body) {
   try {
     const parsed = JSON.parse(decodeBase64Url(body));
     if (!parsed || typeof parsed !== 'object') return null;
@@ -3773,6 +3777,14 @@ function verifyGoogleState(token) {
   } catch {
     return null;
   }
+}
+
+function resolveParsedGoogleState(state, cookieState) {
+  const parsedFromSignature = verifyGoogleState(state);
+  if (parsedFromSignature) return parsedFromSignature;
+  if (!cookieState || state !== cookieState || !state.includes('.')) return null;
+  const [body] = state.split('.');
+  return parseGoogleStatePayload(body);
 }
 
 function buildGoogleAuthUrl(state) {
@@ -3930,7 +3942,7 @@ app.get('/auth/google/callback', async (req, res, next) => {
     if (cookieState && state !== cookieState) {
       return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
     }
-    const parsedState = verifyGoogleState(state);
+    const parsedState = resolveParsedGoogleState(state, cookieState);
     if (!parsedState) {
       return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
     }
