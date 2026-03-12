@@ -69,6 +69,11 @@ export const dict = {
         temporarilyUnavailable: 'Google sign-in is temporarily unavailable. Please try again in a moment.',
         sessionExpired: 'Your sign-in session expired. Please try again.',
         loginInProgress: 'A login attempt is already in progress. Please wait a few seconds and try again.',
+        callbackTimeout: 'Google sign-in is taking too long. Please retry or return to login.',
+        retryCallback: 'Retry now',
+        backToLogin: 'Back to login',
+        redirecting: 'Redirecting…',
+        completing: 'Completing Google sign-in…',
       },
       login: {
         title: 'Login',
@@ -1196,6 +1201,11 @@ export const dict = {
         temporarilyUnavailable: 'تسجيل الدخول بجوجل غير متاح مؤقتًا. حاول مرة أخرى بعد لحظات.',
         sessionExpired: 'جلسة تسجيل الدخول انتهت. حاول مرة تانية.',
         loginInProgress: 'في محاولة تسجيل دخول شغالة دلوقتي. استنى شوية وحاول تاني.',
+        callbackTimeout: 'تسجيل الدخول بجوجل أخد وقت أطول من المتوقع. جرّب تاني أو ارجع لصفحة الدخول.',
+        retryCallback: 'إعادة المحاولة الآن',
+        backToLogin: 'الرجوع لتسجيل الدخول',
+        redirecting: 'جاري التحويل…',
+        completing: 'جاري إكمال تسجيل الدخول بجوجل…',
       },
       login: {
         title: 'تسجيل الدخول',

@@ -26,6 +26,8 @@ export default function LoginContent() {
   useEffect(() => {
     if (typeof window === 'undefined' || hasShownRegistered.current) return;
 
+    window.localStorage.removeItem('google_oauth_click_guard_ts');
+
     const params = new URLSearchParams(window.location.search);
     if (params.get('registered')) {
       hasShownRegistered.current = true;
@@ -46,7 +48,9 @@ export default function LoginContent() {
               ? t.auth.google.sessionExpired
               : authError === 'login_in_progress'
                 ? t.auth.google.loginInProgress
-                : t.auth.google.failed;
+                : authError === 'callback_timeout'
+                  ? t.auth.google.callbackTimeout
+                  : t.auth.google.failed;
       setError(mapped);
       params.delete('authError');
       const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
