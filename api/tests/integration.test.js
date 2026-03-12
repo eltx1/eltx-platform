@@ -15,6 +15,7 @@ const testSchema = {
   balances: { '1:USDT': '1000000' },
   platformFees: { premium_subscription: '0' },
   premiumMonthlyPriceUsdt: '1',
+  walletAddresses: {},
 };
 
 const pool = {
@@ -26,6 +27,52 @@ const pool = {
     }
     if (sql.includes('INSERT INTO login_attempts')) return [{ affectedRows: 1 }];
     if (sql.includes('INSERT INTO sessions')) return [{ affectedRows: 1 }];
+    if (sql.includes('SELECT id FROM users WHERE email=? LIMIT 1')) {
+      const email = params[0];
+      const user = testSchema.users.find((u) => u.email === email);
+      return [[user ? { id: user.id } : undefined].filter(Boolean)];
+    }
+    if (sql.includes('INSERT INTO users (email, username, language) VALUES (?, ?, ?)')) {
+      const email = params[0];
+      if (testSchema.users.some((u) => u.email === email)) {
+        const err = new Error('Duplicate entry');
+        err.code = 'ER_DUP_ENTRY';
+        throw err;
+      }
+      const id = testSchema.users.length + 1;
+      testSchema.users.push({ id, email, password_hash: '' });
+      return [{ insertId: id }];
+    }
+    if (sql.includes('INSERT INTO user_credentials (user_id, password_hash) VALUES (?, ?)')) {
+      const user = testSchema.users.find((u) => u.id === Number(params[0]));
+      if (user) user.password_hash = String(params[1]);
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO referral_codes (user_id, code) VALUES (?, ?)')) return [{ affectedRows: 1 }];
+    if (sql.includes('SELECT user_id FROM referral_codes WHERE code=? LIMIT 1')) return [[undefined].filter(Boolean)];
+    if (sql.includes('INSERT IGNORE INTO referrals (referrer_user_id, referred_user_id) VALUES (?, ?)')) return [{ affectedRows: 1 }];
+    if (sql.includes('SELECT chain_id, address, wallet_index, wallet_path FROM wallet_addresses WHERE user_id=? AND chain_id=?')) {
+      const key = `${params[0]}:${params[1]}`;
+      const row = testSchema.walletAddresses[key];
+      return [row ? [row] : []];
+    }
+    if (sql.includes('INSERT INTO wallet_index (chain_id, next_index) VALUES (?, 1) ON DUPLICATE KEY UPDATE next_index=LAST_INSERT_ID(next_index + 1)')) {
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('SELECT LAST_INSERT_ID() AS nextIndex')) return [[{ nextIndex: 1 }]];
+    if (sql.includes('INSERT INTO wallet_addresses (user_id, chain_id, wallet_index, wallet_path, derivation_index, address) VALUES (?,?,?,?,?,?)')) {
+      const [userId, chainId, walletIndex, walletPath, derivationIndex, address] = params;
+      testSchema.walletAddresses[`${userId}:${chainId}`] = {
+        user_id: userId,
+        chain_id: chainId,
+        wallet_index: walletIndex,
+        wallet_path: walletPath,
+        derivation_index: derivationIndex,
+        address,
+      };
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO first_touch_utm')) return [{ affectedRows: 1 }];
     if (sql.includes('SELECT users.id FROM sessions JOIN users')) {
       const token = params[0];
       const session = testSchema.sessions.find((s) => s.id === token);
@@ -83,7 +130,7 @@ const pool = {
 
 const { app, server } = proxyquire('../src/app', {
   './config/database': { createDatabasePool: () => pool },
-  argon2: { verify: async () => false },
+  argon2: { verify: async () => false, hash: async () => 'hashed-password', argon2id: 2 },
 });
 
 const request = supertest(app);
@@ -92,6 +139,20 @@ test('POST /auth/login returns 400 for invalid payload', async () => {
   const res = await request.post('/auth/login').send({ email: 'bad' });
   assert.equal(res.status, 400);
   assert.equal(res.body?.error?.code, 'BAD_INPUT');
+});
+
+test('POST /auth/signup returns USER_EXISTS when email already exists', async () => {
+  const res = await request.post('/auth/signup').send({ email: 'user@example.com', password: 'Password123' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body?.error?.code, 'USER_EXISTS');
+});
+
+test('POST /auth/signup creates a new account successfully', async () => {
+  const email = 'new-user@example.com';
+  const res = await request.post('/auth/signup').send({ email, password: 'Password123', language: 'en' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(testSchema.users.some((u) => u.email === email), true);
 });
 
 test('GET /wallet/balance blocks unauthenticated requests', async () => {
