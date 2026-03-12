@@ -5,6 +5,9 @@ const proxyquire = require('proxyquire');
 
 process.env.NODE_ENV = 'test';
 process.env.DEMO_MODE = 'true';
+process.env.CHAIN_ID = '56';
+process.env.TOKEN_USDT = '0x55d398326f99059fF775485246999027B3197955';
+process.env.TOKEN_USDT_DECIMALS = '18';
 process.env.MASTER_MNEMONIC = process.env.MASTER_MNEMONIC || 'test test test test test test test test test test test junk';
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'mysql://root@localhost/eltx_test';
 
@@ -168,6 +171,15 @@ test('GET /wallet/usdt-balance returns formatted USDT balance for authenticated 
   assert.equal(res.body?.ok, true);
   assert.equal(res.body?.balance_wei, '1234567');
   assert.equal(res.body?.balance, '1.234567');
+});
+
+test('GET /wallet/usdt-balance keeps 18-decimal balances unchanged when already normalized', async () => {
+  testSchema.balances['1:USDT'] = '1000000000000000000';
+  const res = await request.get('/wallet/usdt-balance').set('Cookie', 'sid=valid-session');
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.decimals, 18);
+  assert.equal(res.body?.balance, '1.000000000000000000');
 });
 
 test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {

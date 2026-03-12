@@ -4235,6 +4235,17 @@ app.get('/premium/status', walletLimiter, async (req, res, next) => {
 
 const PREMIUM_SUBSCRIBE_MAX_RETRIES = 3;
 const PREMIUM_SUBSCRIBE_LOCK_WAIT_SECONDS = 5;
+const LEGACY_STABLECOIN_DECIMALS = 6;
+
+function resolveStablecoinLedgerDecimals(symbol, balanceWei) {
+  const decimals = getSymbolDecimals(symbol);
+  if (symbol?.toUpperCase() !== 'USDT') return decimals;
+  if (decimals <= LEGACY_STABLECOIN_DECIMALS) return decimals;
+  const value = bigIntFromValue(balanceWei || 0);
+  const upgradeFactor = 10n ** BigInt(decimals - LEGACY_STABLECOIN_DECIMALS);
+  if (value > 0n && value < upgradeFactor) return LEGACY_STABLECOIN_DECIMALS;
+  return decimals;
+}
 
 function isRetryableTransactionError(err) {
   const code = String(err?.code || '').toUpperCase();
@@ -4253,7 +4264,9 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
       let conn;
       try {
         conn = await pool.getConnection();
-        await conn.query('SET innodb_lock_wait_timeout = ?', [PREMIUM_SUBSCRIBE_LOCK_WAIT_SECONDS]);
+        try {
+          await conn.query('SET innodb_lock_wait_timeout = ?', [PREMIUM_SUBSCRIBE_LOCK_WAIT_SECONDS]);
+        } catch {}
         await conn.beginTransaction();
 
         const [[user]] = await conn.query('SELECT id, is_premium, premium_expires_at FROM users WHERE id=? FOR UPDATE', [userId]);
@@ -4263,17 +4276,17 @@ app.post('/premium/subscribe', walletLimiter, async (req, res, next) => {
         }
 
         const [[priceRow]] = await conn.query("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt' LIMIT 1");
-        const usdtDecimals = getSymbolDecimals('USDT');
-        const monthlyPrice = parseDecimalValue(priceRow?.value || '1');
-        const normalizedMonthlyPrice = monthlyPrice && monthlyPrice.gt(0) ? monthlyPrice : new Decimal(1);
-        const chargeUnits = normalizedMonthlyPrice.mul(payload.months).toFixed(usdtDecimals, Decimal.ROUND_DOWN);
-        const chargeWei = ethers.parseUnits(chargeUnits, usdtDecimals);
-
         const [balanceRows] = await conn.query(
           'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
           [userId, 'USDT']
         );
         const currentBalanceWei = balanceRows.length ? bigIntFromValue(balanceRows[0].balance_wei || 0) : 0n;
+        const usdtDecimals = resolveStablecoinLedgerDecimals('USDT', currentBalanceWei);
+        const monthlyPrice = parseDecimalValue(priceRow?.value || '1');
+        const normalizedMonthlyPrice = monthlyPrice && monthlyPrice.gt(0) ? monthlyPrice : new Decimal(1);
+        const chargeUnits = normalizedMonthlyPrice.mul(payload.months).toFixed(usdtDecimals, Decimal.ROUND_DOWN);
+        const chargeWei = ethers.parseUnits(chargeUnits, usdtDecimals);
+
         if (currentBalanceWei < chargeWei) {
           await conn.rollback();
           return next({ status: 400, code: 'INSUFFICIENT_USDT', message: 'Insufficient USDT balance for premium subscription' });
@@ -8408,8 +8421,8 @@ app.get('/wallet/usdt-balance', walletLimiter, async (req, res, next) => {
   try {
     const userId = await requireUser(req);
     const [rows] = await pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? LIMIT 1', [userId, 'USDT']);
-    const usdtDecimals = getSymbolDecimals('USDT');
     const balanceWei = rows.length ? bigIntFromValue(rows[0].balance_wei || 0).toString() : '0';
+    const usdtDecimals = resolveStablecoinLedgerDecimals('USDT', balanceWei);
     return res.json({
       ok: true,
       balance_wei: balanceWei,
