@@ -7,7 +7,7 @@ import { motion } from 'framer-motion';
 import { useAuth } from '../../app/lib/auth';
 import GoogleAuthButton from '../../app/components/auth/GoogleAuthButton';
 import { apiFetch } from '../../app/lib/api';
-import { ArrowRight, LogIn, Sparkles, UserPlus } from 'lucide-react';
+import { LogIn, Sparkles, UserPlus } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
 
 export default function Hero() {
@@ -60,29 +60,22 @@ export default function Hero() {
     <section className="relative overflow-hidden border-b border-[#2f3336] py-14 text-white md:py-20">
       <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_16%_12%,rgba(29,155,240,0.22),transparent_32%),radial-gradient(circle_at_86%_14%,rgba(123,97,255,0.18),transparent_30%)]" />
       <div className="relative z-10 mx-auto grid max-w-6xl items-start gap-8 px-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <div className="space-y-6">
-          <div className="inline-flex items-center gap-2 rounded-full border border-[#2f3336] bg-[#16181c] px-3 py-1 text-xs uppercase tracking-[0.24em]">
-            <span className="h-2 w-2 rounded-full bg-[#c9a75c]" />
-            <span>{hero.badge}</span>
-          </div>
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="max-w-3xl text-4xl font-extrabold leading-tight md:text-6xl"
-          >
-            {hero.title}
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.08 }}
-            className="max-w-2xl text-base text-white/85 md:text-lg"
-          >
-            {hero.description}
-          </motion.p>
-
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="space-y-3"
+        >
+          <h1 className="max-w-3xl text-sm font-medium text-white/90 md:text-base">{hero.statement}</h1>
+          {!user && (
+            <p className="text-xs text-white/70 md:text-sm">
+              {hero.inlineCta}{' '}
+              <Link href="/signup" className="font-semibold text-[#c9a75c] hover:text-[#e2c784]">
+                {t.nav.signup}
+              </Link>
+            </p>
+          )}
+        </motion.div>
 
         <motion.aside
           initial={{ opacity: 0, y: 24 }}
@@ -193,17 +186,6 @@ export default function Hero() {
             </>
           )}
 
-          <div className="rounded-2xl border border-[#2f3336] bg-[#101215] p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-white/60">{hero.livePreviewLabel}</p>
-            <ul className="mt-3 space-y-2 text-sm text-white/80">
-              {hero.feedPreview.map((line) => (
-                <li key={line} className="flex items-center justify-between rounded-xl bg-black/30 px-3 py-2">
-                  <span>{line}</span>
-                  <ArrowRight className="h-4 w-4 text-white/60" />
-                </li>
-              ))}
-            </ul>
-          </div>
         </motion.aside>
       </div>
     </section>

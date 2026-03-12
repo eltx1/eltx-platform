@@ -1,10 +1,4 @@
 import Hero from '../components/home/Hero';
-import Features from '../components/home/Features';
-import About from '../components/home/About';
-import UserTrust from '../components/home/UserTrust';
-import SeoIntro from '../components/home/SeoIntro';
-import TopMonthlyPosts from '../components/home/TopMonthlyPosts';
-import { getHomeOverview } from './lib/home-data';
 import ScrollToTopOnLoad from '../components/ScrollToTopOnLoad';
 import type { Metadata } from 'next';
 
@@ -39,17 +33,10 @@ export const metadata: Metadata = {
 };
 
 export default async function Page() {
-  const overview = await getHomeOverview();
   return (
     <main className="flex flex-col">
       <ScrollToTopOnLoad />
       <Hero />
-      <UserTrust userCount={overview.userCount} />
-      <TopMonthlyPosts />
-      <About />
-      <Features />
-      <SeoIntro />
-
     </main>
   );
 }
