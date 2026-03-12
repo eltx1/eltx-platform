@@ -42,7 +42,11 @@ export default function LoginContent() {
           ? t.auth.google.cancelled
           : authError === 'temporarily_unavailable'
             ? t.auth.google.temporarilyUnavailable
-            : t.auth.google.failed;
+            : authError === 'oauth_session_expired'
+              ? t.auth.google.sessionExpired
+              : authError === 'login_in_progress'
+                ? t.auth.google.loginInProgress
+                : t.auth.google.failed;
       setError(mapped);
       params.delete('authError');
       const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ''}`;
