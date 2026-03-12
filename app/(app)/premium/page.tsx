@@ -74,11 +74,16 @@ export default function PremiumPage() {
     const res = await apiFetch('/premium/subscribe', { method: 'POST', body: JSON.stringify({ months: 1 }) });
     setSaving(false);
     if (!res.ok) {
+      const apiError = (res.data as any)?.error?.message;
+      if (apiError) toast(apiError);
       toast(labels.fail);
       return;
     }
     toast(labels.success);
     await Promise.all([loadStatus(), refresh()]);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('wallet:refresh'));
+    }
   };
 
   if (!user) return null;

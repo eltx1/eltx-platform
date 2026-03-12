@@ -3882,7 +3882,10 @@ app.get('/auth/google/callback', async (req, res, next) => {
       res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
       return res.redirect(`/login?authError=${encodeURIComponent(providerError)}`);
     }
-    if (!state || !cookieState || state !== cookieState) {
+    if (!state) {
+      return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
+    }
+    if (cookieState && state !== cookieState) {
       return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
     }
     const parsedState = verifyGoogleState(state);
@@ -8347,6 +8350,23 @@ app.get('/wallet/balance', walletLimiter, async (req, res, next) => {
     const userId = await requireUser(req);
     const balance_wei = await getUserBalance(pool, userId);
     res.json({ ok: true, balance_wei, balance: ethers.formatEther(BigInt(balance_wei)) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get('/wallet/usdt-balance', walletLimiter, async (req, res, next) => {
+  try {
+    const userId = await requireUser(req);
+    const [rows] = await pool.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? LIMIT 1', [userId, 'USDT']);
+    const usdtDecimals = getSymbolDecimals('USDT');
+    const balanceWei = rows.length ? bigIntFromValue(rows[0].balance_wei || 0).toString() : '0';
+    return res.json({
+      ok: true,
+      balance_wei: balanceWei,
+      decimals: usdtDecimals,
+      balance: formatUnitsStr(balanceWei, usdtDecimals),
+    });
   } catch (err) {
     next(err);
   }
