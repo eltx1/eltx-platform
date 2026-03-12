@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS oauth_google_states (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  state_hash CHAR(64) NOT NULL,
+  browser_session_id CHAR(36) NOT NULL,
+  redirect_path VARCHAR(512) NOT NULL,
+  return_origin VARCHAR(255) NULL,
+  mode ENUM('login','signup') NOT NULL DEFAULT 'login',
+  request_id VARCHAR(64) NULL,
+  consumed_request_id VARCHAR(64) NULL,
+  user_agent VARCHAR(255) NULL,
+  ip_address VARCHAR(64) NULL,
+  consumed_at DATETIME NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_state_hash (state_hash),
+  KEY idx_browser_session (browser_session_id),
+  KEY idx_expires_at (expires_at),
+  KEY idx_consumed_at (consumed_at)
+);

@@ -20,6 +20,7 @@ const testSchema = {
   platformFees: { premium_subscription: '0' },
   premiumMonthlyPriceUsdt: '1',
   walletAddresses: {},
+  oauthGoogleStates: {},
 };
 
 const pool = {
@@ -126,6 +127,43 @@ const pool = {
       testSchema.platformFees.premium_subscription = next.toString();
       return [{ affectedRows: 1 }];
     }
+
+    if (sql.includes('DELETE FROM oauth_google_states WHERE browser_session_id=?')) {
+      const browserSessionId = String(params[0]);
+      for (const key of Object.keys(testSchema.oauthGoogleStates)) {
+        if (testSchema.oauthGoogleStates[key].browser_session_id === browserSessionId) delete testSchema.oauthGoogleStates[key];
+      }
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO oauth_google_states')) {
+      const [stateHash, browserSessionId, redirectPath, returnOrigin, mode] = params;
+      testSchema.oauthGoogleStates[String(stateHash)] = {
+        id: Object.keys(testSchema.oauthGoogleStates).length + 1,
+        state_hash: String(stateHash),
+        browser_session_id: String(browserSessionId),
+        redirect_path: String(redirectPath),
+        return_origin: returnOrigin ? String(returnOrigin) : null,
+        mode: String(mode),
+        consumed_at: null,
+        expires_at: new Date(Date.now() + 60_000).toISOString(),
+      };
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('FROM oauth_google_states') && sql.includes('state_hash=? AND browser_session_id=?')) {
+      const stateHash = String(params[0]);
+      const browserSessionId = String(params[1]);
+      const row = testSchema.oauthGoogleStates[stateHash];
+      if (!row || row.browser_session_id !== browserSessionId) return [[]];
+      return [[row]];
+    }
+    if (sql.includes('UPDATE oauth_google_states') && sql.includes('consumed_at=NOW()')) {
+      const rowId = Number(params[1]);
+      const row = Object.values(testSchema.oauthGoogleStates).find((entry) => entry.id === rowId);
+      if (!row || row.consumed_at) return [{ affectedRows: 0 }];
+      row.consumed_at = new Date().toISOString();
+      return [{ affectedRows: 1 }];
+    }
+
     if (sql.includes('FROM sessions JOIN users')) return [[]];
     if (sql.includes('SELECT id, chain_id, address FROM wallets')) return [[{ id: 1, chain_id: 56, address: '0x1234' }]];
     if (sql.includes('INSERT INTO wallets')) return [{ insertId: 1 }];
@@ -175,28 +213,38 @@ test('POST /auth/signup creates a new account successfully', async () => {
   assert.equal(testSchema.users.some((u) => u.email === email), true);
 });
 
-test('GET /auth/google/callback accepts cookie-matched state even when signature cannot be verified', async () => {
+test('GET /auth/google/callback redirects to login when oauth cookie state mismatches', async () => {
   const payload = { nonce: 'n-1', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
-  const validSignedState = signState(payload, 'cluster-a-secret');
-  const body = validSignedState.split('.')[0];
-  const mismatchedSignatureState = `${body}.${signState(payload, 'cluster-b-secret').split('.')[1]}`;
+  const state = signState(payload);
   const res = await request
-    .get(`/auth/google/callback?state=${encodeURIComponent(mismatchedSignatureState)}`)
-    .set('Cookie', `gstate=${mismatchedSignatureState}`);
+    .get(`/auth/google/callback?state=${encodeURIComponent(state)}`)
+    .set('Cookie', 'gstate=other-state-value; goauth_sid=browser-1');
+
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.location, '/login?authError=oauth_session_expired');
+});
+
+test('GET /auth/google/callback returns GOOGLE_CODE_MISSING when state is valid and stored', async () => {
+  const payload = { nonce: 'n-2', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
+  const state = signState(payload);
+  const stateHash = crypto.createHash('sha256').update(state).digest('hex');
+  testSchema.oauthGoogleStates[stateHash] = {
+    id: 77,
+    state_hash: stateHash,
+    browser_session_id: 'browser-2',
+    redirect_path: '/dashboard',
+    return_origin: 'https://lordai.net',
+    mode: 'login',
+    consumed_at: null,
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+
+  const res = await request
+    .get(`/auth/google/callback?state=${encodeURIComponent(state)}`)
+    .set('Cookie', `gstate=${encodeURIComponent(state)}; goauth_sid=browser-2`);
 
   assert.equal(res.status, 400);
   assert.equal(res.body?.error?.code, 'GOOGLE_CODE_MISSING');
-});
-
-test('GET /auth/google/callback rejects tampered state without matching cookie fallback', async () => {
-  const payload = { nonce: 'n-2', ts: Date.now(), mode: 'login', redirect: '/dashboard', returnOrigin: 'https://lordai.net' };
-  const validSignedState = signState(payload, 'cluster-a-secret');
-  const body = validSignedState.split('.')[0];
-  const mismatchedSignatureState = `${body}.${signState(payload, 'cluster-b-secret').split('.')[1]}`;
-  const res = await request.get(`/auth/google/callback?state=${encodeURIComponent(mismatchedSignatureState)}`);
-
-  assert.equal(res.status, 400);
-  assert.equal(res.body?.error?.code, 'GOOGLE_STATE_INVALID');
 });
 
 test('GET /wallet/balance blocks unauthenticated requests', async () => {

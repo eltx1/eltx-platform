@@ -67,6 +67,8 @@ export const dict = {
         cancelled: 'Google sign-in was cancelled.',
         failed: 'Google sign-in failed. Please try again.',
         temporarilyUnavailable: 'Google sign-in is temporarily unavailable. Please try again in a moment.',
+        sessionExpired: 'Your sign-in session expired. Please try again.',
+        loginInProgress: 'A login attempt is already in progress. Please wait a few seconds and try again.',
       },
       login: {
         title: 'Login',
@@ -1192,6 +1194,8 @@ export const dict = {
         cancelled: 'تم إلغاء تسجيل الدخول بجوجل.',
         failed: 'فشل تسجيل الدخول بجوجل. حاول مرة أخرى.',
         temporarilyUnavailable: 'تسجيل الدخول بجوجل غير متاح مؤقتًا. حاول مرة أخرى بعد لحظات.',
+        sessionExpired: 'جلسة تسجيل الدخول انتهت. حاول مرة تانية.',
+        loginInProgress: 'في محاولة تسجيل دخول شغالة دلوقتي. استنى شوية وحاول تاني.',
       },
       login: {
         title: 'تسجيل الدخول',

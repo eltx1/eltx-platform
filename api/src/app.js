@@ -386,7 +386,7 @@ if (isDemoMode) {
 const COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 const IS_PROD = process.env.NODE_ENV === 'production';
-const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || undefined;
+const COOKIE_DOMAIN = process.env.SESSION_COOKIE_DOMAIN || (IS_PROD ? '.lordai.net' : undefined);
 const USER_SESSION_TTL_SECONDS = Math.max(300, Number(process.env.SESSION_TTL_SECONDS || 60 * 60 * 24 * 7));
 const sessionCookie = {
   httpOnly: true,
@@ -427,6 +427,8 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 const GOOGLE_AUTH_STATE_TTL_SECONDS = 60 * 10;
 const GOOGLE_AUTH_STATE_COOKIE = process.env.GOOGLE_AUTH_STATE_COOKIE_NAME || 'gstate';
+const GOOGLE_AUTH_BROWSER_SESSION_COOKIE = process.env.GOOGLE_AUTH_BROWSER_SESSION_COOKIE_NAME || 'goauth_sid';
+const GOOGLE_AUTH_STATE_DEBOUNCE_SECONDS = Math.max(1, Number(process.env.GOOGLE_AUTH_STATE_DEBOUNCE_SECONDS || 5));
 const googleStateCookie = {
   httpOnly: true,
   sameSite: IS_PROD ? 'none' : 'lax',
@@ -434,6 +436,15 @@ const googleStateCookie = {
   domain: COOKIE_DOMAIN,
   path: '/',
   maxAge: GOOGLE_AUTH_STATE_TTL_SECONDS * 1000,
+};
+
+const googleAuthBrowserSessionCookie = {
+  httpOnly: true,
+  sameSite: IS_PROD ? 'none' : 'lax',
+  secure: IS_PROD,
+  domain: COOKIE_DOMAIN,
+  path: '/',
+  maxAge: 1000 * 60 * 60 * 24 * 30,
 };
 
 const ADMIN_SESSION_TTL_SECONDS = Math.max(60, Number(process.env.ADMIN_SESSION_TTL_SECONDS || 60 * 60 * 24));
@@ -3779,12 +3790,101 @@ function parseGoogleStatePayload(body) {
   }
 }
 
-function resolveParsedGoogleState(state, cookieState) {
+function resolveParsedGoogleState(state) {
   const parsedFromSignature = verifyGoogleState(state);
   if (parsedFromSignature) return parsedFromSignature;
-  if (!cookieState || state !== cookieState || !state.includes('.')) return null;
-  const [body] = state.split('.');
-  return parseGoogleStatePayload(body);
+  return null;
+}
+
+function maskStateRef(stateToken) {
+  if (!stateToken || typeof stateToken !== 'string') return null;
+  return stateToken.slice(0, 8);
+}
+
+function hashGoogleStateToken(stateToken) {
+  if (!stateToken || typeof stateToken !== 'string') return null;
+  return crypto.createHash('sha256').update(stateToken).digest('hex');
+}
+
+async function ensureGoogleBrowserSession(req, res) {
+  const existing = typeof req.cookies?.[GOOGLE_AUTH_BROWSER_SESSION_COOKIE] === 'string'
+    ? req.cookies[GOOGLE_AUTH_BROWSER_SESSION_COOKIE].trim()
+    : '';
+  if (existing) return existing;
+  const created = crypto.randomUUID();
+  res.cookie(GOOGLE_AUTH_BROWSER_SESSION_COOKIE, created, googleAuthBrowserSessionCookie);
+  return created;
+}
+
+async function deleteGoogleAuthStatesByBrowserSession(conn, browserSessionId) {
+  if (!browserSessionId) return;
+  await conn.query('DELETE FROM oauth_google_states WHERE browser_session_id=?', [browserSessionId]);
+}
+
+async function consumeGoogleAuthState(conn, stateToken, browserSessionId, requestId) {
+  const stateHash = hashGoogleStateToken(stateToken);
+  if (!stateHash || !browserSessionId) return { ok: false, reason: 'missing_state_or_browser_session' };
+  const [rows] = await conn.query(
+    `SELECT id, redirect_path, return_origin, mode, expires_at, consumed_at
+       FROM oauth_google_states
+      WHERE state_hash=? AND browser_session_id=?
+      LIMIT 1`,
+    [stateHash, browserSessionId]
+  );
+  if (!rows.length) return { ok: false, reason: 'state_not_found' };
+  const row = rows[0];
+  if (row.consumed_at) return { ok: false, reason: 'state_already_consumed' };
+  const expiresAtMs = row.expires_at ? new Date(row.expires_at).getTime() : 0;
+  if (!expiresAtMs || Date.now() > expiresAtMs) {
+    return { ok: false, reason: 'state_expired' };
+  }
+  const [update] = await conn.query(
+    `UPDATE oauth_google_states
+        SET consumed_at=NOW(), consumed_request_id=?, updated_at=NOW()
+      WHERE id=? AND consumed_at IS NULL`,
+    [requestId, row.id]
+  );
+  if (!update.affectedRows) return { ok: false, reason: 'state_race_lost' };
+  return {
+    ok: true,
+    data: {
+      redirect: row.redirect_path || '/dashboard',
+      returnOrigin: row.return_origin || null,
+      mode: row.mode || 'login',
+    },
+  };
+}
+
+async function saveGoogleAuthStateAttempt(conn, payload) {
+  await deleteGoogleAuthStatesByBrowserSession(conn, payload.browserSessionId);
+  await conn.query(
+    `INSERT INTO oauth_google_states
+      (state_hash, browser_session_id, redirect_path, return_origin, mode, request_id, user_agent, ip_address, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))`,
+    [
+      payload.stateHash,
+      payload.browserSessionId,
+      payload.redirect,
+      payload.returnOrigin,
+      payload.mode,
+      payload.requestId,
+      payload.userAgent,
+      payload.ipAddress,
+      GOOGLE_AUTH_STATE_TTL_SECONDS,
+    ]
+  );
+}
+
+function logGoogleOAuth(event, req, details = {}) {
+  const payload = {
+    event,
+    requestId: req.requestId,
+    hasSessionCookie: !!req.cookies?.[COOKIE_NAME],
+    hasGoogleStateCookie: !!req.cookies?.[GOOGLE_AUTH_STATE_COOKIE],
+    hasGoogleBrowserSessionCookie: !!req.cookies?.[GOOGLE_AUTH_BROWSER_SESSION_COOKIE],
+    ...details,
+  };
+  console.log('[oauth/google]', JSON.stringify(payload));
 }
 
 function buildGoogleAuthUrl(state) {
@@ -3913,12 +4013,56 @@ app.get('/auth/google/start', async (req, res, next) => {
     if (!GOOGLE_OAUTH_CLIENT_ID || !GOOGLE_OAUTH_CLIENT_SECRET) {
       return next({ status: 503, code: 'GOOGLE_AUTH_DISABLED', message: 'Google auth is not configured' });
     }
+
     const mode = req.query?.mode === 'signup' ? 'signup' : 'login';
     const redirect = typeof req.query?.redirect === 'string' && req.query.redirect.startsWith('/') ? req.query.redirect : '/dashboard';
     const returnOrigin = typeof req.query?.return_origin === 'string' ? req.query.return_origin : '';
     const safeReturnOrigin = isSafeAbsoluteRedirect(returnOrigin) ? normalizeOrigin(returnOrigin) : null;
+    const browserSessionId = await ensureGoogleBrowserSession(req, res);
+
+    const [[activeAttempt]] = await pool.query(
+      `SELECT id, state_hash, created_at
+         FROM oauth_google_states
+        WHERE browser_session_id=? AND consumed_at IS NULL AND created_at >= DATE_SUB(NOW(), INTERVAL ? SECOND)
+        ORDER BY id DESC
+        LIMIT 1`,
+      [browserSessionId, GOOGLE_AUTH_STATE_DEBOUNCE_SECONDS]
+    );
+
+    if (activeAttempt) {
+      logGoogleOAuth('start_debounced', req, {
+        browserSessionId,
+        stateRef: activeAttempt.state_hash ? String(activeAttempt.state_hash).slice(0, 12) : null,
+      });
+      return res.redirect('/login?authError=login_in_progress');
+    }
+
     const state = signGoogleState({ nonce: crypto.randomUUID(), ts: Date.now(), mode, redirect, returnOrigin: safeReturnOrigin });
+    const stateHash = hashGoogleStateToken(state);
+
+    await withTransactionRetry(async (conn) => {
+      await saveGoogleAuthStateAttempt(conn, {
+        stateHash,
+        browserSessionId,
+        mode,
+        redirect,
+        returnOrigin: safeReturnOrigin,
+        requestId: req.requestId,
+        userAgent: (req.headers['user-agent'] || '').slice(0, 255),
+        ipAddress: (req.ip || req.socket?.remoteAddress || '').slice(0, 64),
+      });
+      return true;
+    });
+
     res.cookie(GOOGLE_AUTH_STATE_COOKIE, state, googleStateCookie);
+    logGoogleOAuth('start_created', req, {
+      browserSessionId,
+      storage: 'mysql.oauth_google_states+cookie',
+      stateRef: maskStateRef(state),
+      returnOrigin: safeReturnOrigin,
+      redirect,
+      mode,
+    });
     return res.redirect(buildGoogleAuthUrl(state));
   } catch (err) {
     return next(err);
@@ -3931,23 +4075,48 @@ app.get('/auth/google/callback', async (req, res, next) => {
     const code = typeof req.query?.code === 'string' ? req.query.code : '';
     const providerError = typeof req.query?.error === 'string' ? req.query.error : '';
     const cookieState = req.cookies?.[GOOGLE_AUTH_STATE_COOKIE];
+    const browserSessionId = typeof req.cookies?.[GOOGLE_AUTH_BROWSER_SESSION_COOKIE] === 'string'
+      ? req.cookies[GOOGLE_AUTH_BROWSER_SESSION_COOKIE]
+      : '';
 
     if (providerError) {
-      res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
+      logGoogleOAuth('callback_provider_error', req, { providerError });
+      res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
       return res.redirect(`/login?authError=${encodeURIComponent(providerError)}`);
     }
     if (!state) {
-      return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
+      logGoogleOAuth('callback_state_missing', req, { browserSessionId });
+      return res.redirect('/login?authError=oauth_session_expired');
     }
-    if (cookieState && state !== cookieState) {
-      return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
+    if (!cookieState || state !== cookieState) {
+      logGoogleOAuth('callback_state_cookie_mismatch', req, {
+        browserSessionId,
+        queryStateRef: maskStateRef(state),
+        cookieStateRef: maskStateRef(cookieState),
+      });
+      return res.redirect('/login?authError=oauth_session_expired');
     }
-    const parsedState = resolveParsedGoogleState(state, cookieState);
+    const parsedState = resolveParsedGoogleState(state);
     if (!parsedState) {
-      return next({ status: 400, code: 'GOOGLE_STATE_INVALID', message: 'Invalid OAuth state' });
+      logGoogleOAuth('callback_state_signature_invalid', req, {
+        browserSessionId,
+        stateRef: maskStateRef(state),
+      });
+      return res.redirect('/login?authError=oauth_session_expired');
     }
     if (!code) {
+      logGoogleOAuth('callback_code_missing', req, { browserSessionId, stateRef: maskStateRef(state) });
       return next({ status: 400, code: 'GOOGLE_CODE_MISSING', message: 'Authorization code missing' });
+    }
+
+    const stateUse = await withTransactionRetry(async (conn) => consumeGoogleAuthState(conn, state, browserSessionId, req.requestId));
+    if (!stateUse?.ok) {
+      logGoogleOAuth('callback_state_store_invalid', req, {
+        browserSessionId,
+        stateRef: maskStateRef(state),
+        reason: stateUse?.reason || 'unknown',
+      });
+      return res.redirect('/login?authError=oauth_session_expired');
     }
 
     const profile = await exchangeGoogleCodeForUser(code);
@@ -3994,9 +4163,15 @@ app.get('/auth/google/callback', async (req, res, next) => {
 
     await provisionWalletsBestEffort(userId);
 
-    res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { path: '/' });
+    res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
     res.cookie(COOKIE_NAME, token, sessionCookie);
-    const redirectUrl = resolveGoogleRedirectUrl(parsedState.redirect, parsedState.returnOrigin);
+    const redirectUrl = resolveGoogleRedirectUrl(stateUse.data.redirect, stateUse.data.returnOrigin);
+    logGoogleOAuth('callback_success', req, {
+      browserSessionId,
+      stateRef: maskStateRef(state),
+      userId,
+      redirectUrl,
+    });
     return res.redirect(redirectUrl);
   } catch (err) {
     if (isRetryableDbError(err)) {
@@ -4119,20 +4294,34 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
 
 app.get('/auth/logout', async (req, res) => {
   const token = req.cookies[COOKIE_NAME];
+  const browserSessionId = typeof req.cookies?.[GOOGLE_AUTH_BROWSER_SESSION_COOKIE] === 'string'
+    ? req.cookies[GOOGLE_AUTH_BROWSER_SESSION_COOKIE]
+    : '';
   if (token) {
     await pool.query('DELETE FROM sessions WHERE id = ?', [token]);
   }
-  res.clearCookie(COOKIE_NAME);
+  if (browserSessionId) {
+    await pool.query('DELETE FROM oauth_google_states WHERE browser_session_id=?', [browserSessionId]);
+  }
+  res.clearCookie(COOKIE_NAME, { ...sessionCookie, maxAge: 0 });
+  res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
   const nextPath = typeof req.query?.next === 'string' && req.query.next.startsWith('/') ? req.query.next : '/login?loggedOut=1';
   return res.redirect(nextPath);
 });
 
 app.post('/auth/logout', async (req, res) => {
   const token = req.cookies[COOKIE_NAME];
+  const browserSessionId = typeof req.cookies?.[GOOGLE_AUTH_BROWSER_SESSION_COOKIE] === 'string'
+    ? req.cookies[GOOGLE_AUTH_BROWSER_SESSION_COOKIE]
+    : '';
   if (token) {
     await pool.query('DELETE FROM sessions WHERE id = ?', [token]);
   }
-  res.clearCookie(COOKIE_NAME);
+  if (browserSessionId) {
+    await pool.query('DELETE FROM oauth_google_states WHERE browser_session_id=?', [browserSessionId]);
+  }
+  res.clearCookie(COOKIE_NAME, { ...sessionCookie, maxAge: 0 });
+  res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
   res.json({ ok: true });
 });
 
