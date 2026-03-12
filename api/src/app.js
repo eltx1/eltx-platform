@@ -3979,6 +3979,45 @@ async function exchangeGoogleCodeForUser(code) {
   };
 }
 
+async function resolveGoogleUserSession({ conn, profile, utm }) {
+  const [oauthRows] = await conn.query(
+    'SELECT user_id FROM user_oauth_accounts WHERE provider=? AND provider_sub=? LIMIT 1',
+    [GOOGLE_OAUTH_PROVIDER, profile.sub]
+  );
+  let currentUserId = oauthRows[0]?.user_id || null;
+
+  if (!currentUserId) {
+    const [usersByEmail] = await conn.query('SELECT id, language FROM users WHERE email=? LIMIT 1', [profile.email]);
+    if (usersByEmail.length) {
+      currentUserId = usersByEmail[0].id;
+    } else {
+      const username = await generateUsernameFromEmail(conn, profile.email);
+      const [newUser] = await conn.query('INSERT INTO users (email, username, language) VALUES (?, ?, ?)', [profile.email, username, 'en']);
+      currentUserId = newUser.insertId;
+      await ensureReferralCode(conn, currentUserId);
+    }
+    await conn.query(
+      `INSERT INTO user_oauth_accounts (user_id, provider, provider_sub, email, email_verified, picture_url, last_login_at)
+       VALUES (?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), email=VALUES(email), email_verified=VALUES(email_verified), picture_url=VALUES(picture_url), last_login_at=NOW()`,
+      [currentUserId, GOOGLE_OAUTH_PROVIDER, profile.sub, profile.email, profile.emailVerified ? 1 : 0, profile.picture]
+    );
+  } else {
+    await conn.query(
+      'UPDATE user_oauth_accounts SET email=?, email_verified=?, picture_url=?, last_login_at=NOW() WHERE provider=? AND provider_sub=?',
+      [profile.email, profile.emailVerified ? 1 : 0, profile.picture, GOOGLE_OAUTH_PROVIDER, profile.sub]
+    );
+  }
+
+  await storeFirstUtmSession(conn, currentUserId, utm);
+  const token = crypto.randomUUID();
+  await conn.query(
+    'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
+    [token, currentUserId, USER_SESSION_TTL_SECONDS]
+  );
+  return { userId: currentUserId, token };
+}
+
 async function issueUserSessionAndWallets(connLike, userId) {
   const token = crypto.randomUUID();
   await connLike.query(
@@ -4127,7 +4166,9 @@ app.get('/auth/google/callback', async (req, res, next) => {
         browserSessionId,
         reason: 'state_query_param_missing',
       });
-      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
+      if (!code) {
+        return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
+      }
     }
     if (!cookieState || state !== cookieState) {
       logGoogleOAuth('callback_state_cookie_mismatch_nonfatal', req, {
@@ -4136,72 +4177,58 @@ app.get('/auth/google/callback', async (req, res, next) => {
         cookieStateRef: maskStateRef(cookieState),
       });
     }
-    if (!parsedState) {
+    if (state && !parsedState) {
       logGoogleOAuth('callback_state_signature_invalid', req, {
         browserSessionId,
         stateRef: maskStateRef(state),
       });
-      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
+      if (!code) {
+        return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
+      }
     }
     if (!code) {
       logGoogleOAuth('callback_code_missing', req, { browserSessionId, stateRef: maskStateRef(state) });
       return next({ status: 400, code: 'GOOGLE_CODE_MISSING', message: 'Authorization code missing' });
     }
 
-    const stateUse = await withTransactionRetry(async (conn) => consumeGoogleAuthState(conn, state, {
-      browserSessionId,
-      requestId: req.requestId,
-    }));
-    if (!stateUse?.ok) {
-      logGoogleOAuth('callback_state_store_invalid', req, {
+    let stateUse = {
+      ok: true,
+      data: {
+        redirect: '/dashboard',
+        returnOrigin: parsedState?.returnOrigin || null,
+        mode: parsedState?.mode || 'login',
+        browserBinding: 'state_unavailable',
+        storedBrowserSessionId: '',
+      },
+    };
+    if (state) {
+      stateUse = await withTransactionRetry(async (conn) => consumeGoogleAuthState(conn, state, {
         browserSessionId,
-        stateRef: maskStateRef(state),
-        reason: stateUse?.reason || 'unknown',
-      });
-      return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
+        requestId: req.requestId,
+      }));
+      if (!stateUse?.ok) {
+        logGoogleOAuth('callback_state_store_invalid_nonfatal', req, {
+          browserSessionId,
+          stateRef: maskStateRef(state),
+          reason: stateUse?.reason || 'unknown',
+        });
+        stateUse = {
+          ok: true,
+          data: {
+            redirect: parsedState?.redirect || '/dashboard',
+            returnOrigin: parsedState?.returnOrigin || null,
+            mode: parsedState?.mode || 'login',
+            browserBinding: 'state_fallback',
+            storedBrowserSessionId: '',
+          },
+        };
+      }
     }
 
     const profile = await exchangeGoogleCodeForUser(code);
     const utm = parseUtmPayload(req.query || {});
 
-    const { userId, token } = await withTransactionRetry(async (conn) => {
-      const [oauthRows] = await conn.query(
-        'SELECT user_id FROM user_oauth_accounts WHERE provider=? AND provider_sub=? LIMIT 1',
-        [GOOGLE_OAUTH_PROVIDER, profile.sub]
-      );
-      let currentUserId = oauthRows[0]?.user_id || null;
-
-      if (!currentUserId) {
-        const [usersByEmail] = await conn.query('SELECT id, language FROM users WHERE email=? LIMIT 1', [profile.email]);
-        if (usersByEmail.length) {
-          currentUserId = usersByEmail[0].id;
-        } else {
-          const username = await generateUsernameFromEmail(conn, profile.email);
-          const [newUser] = await conn.query('INSERT INTO users (email, username, language) VALUES (?, ?, ?)', [profile.email, username, 'en']);
-          currentUserId = newUser.insertId;
-          await ensureReferralCode(conn, currentUserId);
-        }
-        await conn.query(
-          `INSERT INTO user_oauth_accounts (user_id, provider, provider_sub, email, email_verified, picture_url, last_login_at)
-           VALUES (?, ?, ?, ?, ?, ?, NOW())
-           ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), email=VALUES(email), email_verified=VALUES(email_verified), picture_url=VALUES(picture_url), last_login_at=NOW()`,
-          [currentUserId, GOOGLE_OAUTH_PROVIDER, profile.sub, profile.email, profile.emailVerified ? 1 : 0, profile.picture]
-        );
-      } else {
-        await conn.query(
-          'UPDATE user_oauth_accounts SET email=?, email_verified=?, picture_url=?, last_login_at=NOW() WHERE provider=? AND provider_sub=?',
-          [profile.email, profile.emailVerified ? 1 : 0, profile.picture, GOOGLE_OAUTH_PROVIDER, profile.sub]
-        );
-      }
-
-      await storeFirstUtmSession(conn, currentUserId, utm);
-      const token = crypto.randomUUID();
-      await conn.query(
-        'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
-        [token, currentUserId, USER_SESSION_TTL_SECONDS]
-      );
-      return { userId: currentUserId, token };
-    });
+    const { userId, token } = await withTransactionRetry(async (conn) => resolveGoogleUserSession({ conn, profile, utm }));
 
     await provisionWalletsBestEffort(userId);
 

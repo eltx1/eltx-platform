@@ -21,6 +21,7 @@ const testSchema = {
   premiumMonthlyPriceUsdt: '1',
   walletAddresses: {},
   oauthGoogleStates: {},
+  oauthAccounts: {},
 };
 
 const pool = {
@@ -36,6 +37,11 @@ const pool = {
       const email = params[0];
       const user = testSchema.users.find((u) => u.email === email);
       return [[user ? { id: user.id } : undefined].filter(Boolean)];
+    }
+    if (sql.includes('SELECT id, language FROM users WHERE email=? LIMIT 1')) {
+      const email = params[0];
+      const user = testSchema.users.find((u) => u.email === email);
+      return [user ? [{ id: user.id, language: 'en' }] : []];
     }
     if (sql.includes('INSERT INTO users (email, username, language) VALUES (?, ?, ?)')) {
       const email = params[0];
@@ -163,6 +169,33 @@ const pool = {
       return [{ affectedRows: 1 }];
     }
 
+    if (sql.includes('SELECT user_id FROM user_oauth_accounts WHERE provider=? AND provider_sub=? LIMIT 1')) {
+      const providerSub = String(params[1]);
+      const row = testSchema.oauthAccounts[providerSub];
+      return [row ? [{ user_id: row.user_id }] : []];
+    }
+    if (sql.includes('INSERT INTO user_oauth_accounts')) {
+      const [userId, _provider, providerSub, email, emailVerified, picture] = params;
+      testSchema.oauthAccounts[String(providerSub)] = {
+        user_id: Number(userId),
+        email: String(email),
+        email_verified: Number(emailVerified),
+        picture_url: picture ? String(picture) : null,
+      };
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('UPDATE user_oauth_accounts SET email=?, email_verified=?, picture_url=?, last_login_at=NOW() WHERE provider=? AND provider_sub=?')) {
+      const [email, emailVerified, picture, _provider, providerSub] = params;
+      const current = testSchema.oauthAccounts[String(providerSub)] || { user_id: 1 };
+      testSchema.oauthAccounts[String(providerSub)] = {
+        ...current,
+        email: String(email),
+        email_verified: Number(emailVerified),
+        picture_url: picture ? String(picture) : null,
+      };
+      return [{ affectedRows: 1 }];
+    }
+
     if (sql.includes('FROM sessions JOIN users')) return [[]];
     if (sql.includes('SELECT id, chain_id, address FROM wallets')) return [[{ id: 1, chain_id: 56, address: '0x1234' }]];
     if (sql.includes('INSERT INTO wallets')) return [{ insertId: 1 }];
@@ -185,6 +218,30 @@ const { app, server } = proxyquire('../src/app', {
 });
 
 const request = supertest(app);
+
+const originalFetch = global.fetch;
+
+global.fetch = async (url) => {
+  const asString = String(url);
+  if (asString.includes('oauth2.googleapis.com/token')) {
+    return {
+      ok: true,
+      json: async () => ({ access_token: 'test-google-access-token' }),
+    };
+  }
+  if (asString.includes('www.googleapis.com/oauth2/v3/userinfo') || asString.includes('openidconnect.googleapis.com/v1/userinfo')) {
+    return {
+      ok: true,
+      json: async () => ({
+        sub: 'google-sub-1',
+        email: 'google-user@example.com',
+        email_verified: true,
+        picture: 'https://example.com/avatar.png',
+      }),
+    };
+  }
+  throw new Error(`Unexpected fetch url in tests: ${asString}`);
+};
 
 function signState(payload, secret = process.env.SESSION_SECRET || process.env.JWT_SECRET || 'lordai-google-state') {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -319,6 +376,7 @@ test('POST /premium/subscribe handles fractional USDT totals without float artif
 
 
 test.after(async () => {
+  global.fetch = originalFetch;
   await new Promise((resolve) => server.close(resolve));
 });
 
@@ -344,6 +402,28 @@ test('GET /auth/google/callback accepts missing gstate cookie when state is vali
 
   assert.equal(res.status, 400);
   assert.equal(res.body?.error?.code, 'GOOGLE_CODE_MISSING');
+});
+
+test('GET /auth/google/callback creates a session when state is missing but code is present', async () => {
+  const res = await request
+    .get('/auth/google/callback?code=test-google-code')
+    .set('Cookie', 'goauth_sid=browser-missing-state');
+
+  assert.equal(res.status, 302);
+  assert.match(String(res.headers.location || ''), /\/dashboard$/);
+  const setCookie = res.headers['set-cookie'] || [];
+  assert.equal(setCookie.some((value) => String(value).startsWith('sid=')), true);
+});
+
+test('GET /auth/google/callback creates a session when state signature is invalid but code is present', async () => {
+  const res = await request
+    .get('/auth/google/callback?state=bad-state-signature&code=test-google-code')
+    .set('Cookie', 'gstate=bad-state-signature; goauth_sid=browser-invalid-state');
+
+  assert.equal(res.status, 302);
+  assert.match(String(res.headers.location || ''), /\/dashboard$/);
+  const setCookie = res.headers['set-cookie'] || [];
+  assert.equal(setCookie.some((value) => String(value).startsWith('sid=')), true);
 });
 
 test('POST /auth/logout clears oauth browser session cookie', async () => {
