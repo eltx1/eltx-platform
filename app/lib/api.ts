@@ -1,15 +1,13 @@
 'use client';
 
+import { getApiBaseForBrowser } from './api-base';
+
 export type ApiResponse<T> = {
   ok: boolean;
   data: T;
   status?: number;
   error?: string | null;
 };
-function normalizeBase(base: string | undefined) {
-  if (!base) return '';
-  return base.replace(/\/+$/, '');
-}
 
 function normalizePath(path: string) {
   if (!path.startsWith('/')) return `/${path}`;
@@ -17,7 +15,7 @@ function normalizePath(path: string) {
 }
 
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  const base = normalizeBase(process.env.NEXT_PUBLIC_API_BASE);
+  const base = getApiBaseForBrowser();
   const isAbsolute = /^https?:\/\//.test(path);
   const normalizedPath = isAbsolute ? path : normalizePath(path);
   const shouldBypassBase = isAbsolute || normalizedPath.startsWith('/api/');

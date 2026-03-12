@@ -2,14 +2,11 @@
 
 import { useEffect } from 'react';
 
-function getApiBase() {
-  const raw = process.env.NEXT_PUBLIC_API_BASE || '';
-  return raw.replace(/\/+$/, '');
-}
+import { getApiBaseForBrowser } from '../../../lib/api-base';
 
 export default function GoogleCallbackPage() {
   useEffect(() => {
-    const base = getApiBase();
+    const base = getApiBaseForBrowser();
     const search = typeof window !== 'undefined' ? window.location.search : '';
     window.location.replace(`${base}/auth/google/callback${search}`);
   }, []);
