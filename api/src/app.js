@@ -3816,15 +3816,17 @@ async function ensureGoogleBrowserSession(req, res) {
   return created;
 }
 
-async function consumeGoogleAuthState(conn, stateToken, browserSessionId, requestId) {
+async function consumeGoogleAuthState(conn, stateToken, context = {}) {
+  const browserSessionId = typeof context.browserSessionId === 'string' ? context.browserSessionId : '';
+  const requestId = context.requestId;
   const stateHash = hashGoogleStateToken(stateToken);
-  if (!stateHash || !browserSessionId) return { ok: false, reason: 'missing_state_or_browser_session' };
+  if (!stateHash) return { ok: false, reason: 'missing_state' };
   const [rows] = await conn.query(
-    `SELECT id, redirect_path, return_origin, mode, expires_at, consumed_at
+    `SELECT id, redirect_path, return_origin, mode, expires_at, consumed_at, browser_session_id
        FROM oauth_google_states
-      WHERE state_hash=? AND browser_session_id=?
+      WHERE state_hash=?
       LIMIT 1`,
-    [stateHash, browserSessionId]
+    [stateHash]
   );
   if (!rows.length) return { ok: false, reason: 'state_not_found' };
   const row = rows[0];
@@ -3840,12 +3842,25 @@ async function consumeGoogleAuthState(conn, stateToken, browserSessionId, reques
     [requestId, row.id]
   );
   if (!update.affectedRows) return { ok: false, reason: 'state_race_lost' };
+  const storedBrowserSessionId = row.browser_session_id ? String(row.browser_session_id) : '';
+  let browserBinding = 'none';
+  if (storedBrowserSessionId && browserSessionId && storedBrowserSessionId === browserSessionId) {
+    browserBinding = 'matched';
+  } else if (storedBrowserSessionId && browserSessionId && storedBrowserSessionId !== browserSessionId) {
+    browserBinding = 'mismatch';
+  } else if (storedBrowserSessionId && !browserSessionId) {
+    browserBinding = 'missing_on_callback';
+  } else if (!storedBrowserSessionId && browserSessionId) {
+    browserBinding = 'missing_on_state';
+  }
   return {
     ok: true,
     data: {
       redirect: row.redirect_path || '/dashboard',
       returnOrigin: row.return_origin || null,
       mode: row.mode || 'login',
+      browserBinding,
+      storedBrowserSessionId,
     },
   };
 }
@@ -4094,13 +4109,24 @@ app.get('/auth/google/callback', async (req, res, next) => {
     const parsedState = state ? resolveParsedGoogleState(state) : null;
     const loginFallback = resolveGoogleLoginUrl(parsedState?.returnOrigin || null);
 
+    logGoogleOAuth('callback_received', req, {
+      hasStateParam: !!state,
+      hasCodeParam: !!code,
+      hasProviderError: !!providerError,
+      stateRef: maskStateRef(state),
+      browserSessionId: browserSessionId ? String(browserSessionId).slice(0, 8) : null,
+    });
+
     if (providerError) {
       logGoogleOAuth('callback_provider_error', req, { providerError });
       res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
       return res.redirect(`${loginFallback}?authError=${encodeURIComponent(providerError)}`);
     }
     if (!state) {
-      logGoogleOAuth('callback_state_missing', req, { browserSessionId });
+      logGoogleOAuth('callback_state_missing', req, {
+        browserSessionId,
+        reason: 'state_query_param_missing',
+      });
       return res.redirect(`${loginFallback}?authError=oauth_session_expired`);
     }
     if (!cookieState || state !== cookieState) {
@@ -4122,7 +4148,10 @@ app.get('/auth/google/callback', async (req, res, next) => {
       return next({ status: 400, code: 'GOOGLE_CODE_MISSING', message: 'Authorization code missing' });
     }
 
-    const stateUse = await withTransactionRetry(async (conn) => consumeGoogleAuthState(conn, state, browserSessionId, req.requestId));
+    const stateUse = await withTransactionRetry(async (conn) => consumeGoogleAuthState(conn, state, {
+      browserSessionId,
+      requestId: req.requestId,
+    }));
     if (!stateUse?.ok) {
       logGoogleOAuth('callback_state_store_invalid', req, {
         browserSessionId,
@@ -4182,6 +4211,8 @@ app.get('/auth/google/callback', async (req, res, next) => {
     logGoogleOAuth('callback_success', req, {
       browserSessionId,
       stateRef: maskStateRef(state),
+      browserBinding: stateUse.data.browserBinding,
+      storedBrowserSessionRef: stateUse.data.storedBrowserSessionId ? String(stateUse.data.storedBrowserSessionId).slice(0, 8) : null,
       userId,
       redirectUrl,
     });

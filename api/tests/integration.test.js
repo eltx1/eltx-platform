@@ -149,11 +149,10 @@ const pool = {
       };
       return [{ affectedRows: 1 }];
     }
-    if (sql.includes('FROM oauth_google_states') && sql.includes('state_hash=? AND browser_session_id=?')) {
+    if (sql.includes('FROM oauth_google_states') && sql.includes('state_hash=?')) {
       const stateHash = String(params[0]);
-      const browserSessionId = String(params[1]);
       const row = testSchema.oauthGoogleStates[stateHash];
-      if (!row || row.browser_session_id !== browserSessionId) return [[]];
+      if (!row) return [[]];
       return [[row]];
     }
     if (sql.includes('UPDATE oauth_google_states') && sql.includes('consumed_at=NOW()')) {
