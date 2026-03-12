@@ -657,6 +657,8 @@ export const dict = {
         title: 'Join conversations, create content, and grow your audience with AI.',
         description:
           'LordAi.Net is built like modern social networks: clear onboarding, instant feed discovery, and direct sign up or sign in from the first screen.',
+        statement: 'Creators, freelancers, and brands: post faster, publish smarter, and earn more with AI-powered social tools.',
+        inlineCta: 'Ready to start now?',
         cardTitle: 'Start in seconds',
         cardSubtitle: 'Create your account to unlock your feed, AI assistant, and creator tools.',
         createAccount: 'Create account',
@@ -1779,6 +1781,8 @@ export const dict = {
         title: 'ابدأ المحادثة، اصنع محتوى، وكبّر جمهورك بمساعدة الذكاء الاصطناعي.',
         description:
           'LordAi.Net متصممة بنفس فكرة منصات التواصل الحديثة: بداية واضحة، اكتشاف سريع للمحتوى، وتسجيل مباشر من أول شاشة.',
+        statement: 'لصنّاع المحتوى، الفريلانسرز، والبراندات: انشر أسرع، قدّم محتوى أذكى، وحقّق عائد أعلى بأدوات سوشيال مدعومة بالذكاء الاصطناعي.',
+        inlineCta: 'جاهز تبدأ دلوقتي؟',
         cardTitle: 'ابدأ في ثواني',
         cardSubtitle: 'أنشئ حسابك وفعّل الصفحة الرئيسية والمساعد الذكي وأدوات صناع المحتوى.',
         createAccount: 'إنشاء حساب',
