@@ -27,19 +27,62 @@ const PROTECTED_PATH_PREFIXES = [
 
 const AUTH_PAGES = ['/login', '/signup'];
 
-export function middleware(request: NextRequest) {
+const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
+
+function pathMatches(pathname: string, candidates: string[]) {
+  return candidates.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+function authMeUrl(request: NextRequest) {
+  if (API_BASE) {
+    return `${API_BASE}/auth/me`;
+  }
+
+  return `${request.nextUrl.origin}/auth/me`;
+}
+
+async function hasValidSession(request: NextRequest) {
+  const cookieHeader = request.headers.get('cookie');
+  if (!cookieHeader) return false;
+
+  try {
+    const response = await fetch(authMeUrl(request), {
+      method: 'GET',
+      headers: {
+        cookie: cookieHeader,
+      },
+      cache: 'no-store',
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function middleware(request: NextRequest) {
   const actionId = request.headers.get('next-action');
   const pathname = request.nextUrl.pathname;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
+  const isProtectedPath = pathMatches(pathname, PROTECTED_PATH_PREFIXES);
+  const isAuthPage = pathMatches(pathname, AUTH_PAGES);
 
-  if (!hasSession && PROTECTED_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+  let isAuthenticated = false;
+  if (hasSession && (isProtectedPath || isAuthPage)) {
+    isAuthenticated = await hasValidSession(request);
+  }
+
+  if ((!hasSession || !isAuthenticated) && isProtectedPath) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = '/login';
     loginUrl.searchParams.set('next', pathname);
-    return NextResponse.redirect(loginUrl);
+    const response = NextResponse.redirect(loginUrl);
+    if (hasSession && !isAuthenticated) {
+      response.cookies.delete(SESSION_COOKIE_NAME);
+    }
+    return response;
   }
 
-  if (hasSession && AUTH_PAGES.some((path) => pathname === path || pathname.startsWith(`${path}/`))) {
+  if (isAuthenticated && isAuthPage) {
     const dashboardUrl = request.nextUrl.clone();
     dashboardUrl.pathname = '/dashboard';
     dashboardUrl.search = '';
