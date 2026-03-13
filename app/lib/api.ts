@@ -9,6 +9,27 @@ export type ApiResponse<T> = {
   error?: string | null;
 };
 
+function isHtmlPayload(value: string) {
+  const sample = value.trim().slice(0, 256).toLowerCase();
+  return sample.startsWith('<!doctype html') || sample.startsWith('<html') || sample.includes('<body');
+}
+
+function fallbackMessageByStatus(status: number) {
+  if (status === 503) return 'Service temporarily unavailable. Please try again in a few minutes.';
+  if (status >= 500) return 'Server error. Please try again shortly.';
+  return 'Request failed';
+}
+
+function normalizeErrorMessage(value: unknown, status: number) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (isHtmlPayload(trimmed)) return fallbackMessageByStatus(status);
+  const noTags = trimmed.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!noTags) return fallbackMessageByStatus(status);
+  return noTags.slice(0, 240);
+}
+
 function normalizePath(path: string) {
   if (!path.startsWith('/')) return `/${path}`;
   return path;
@@ -59,9 +80,9 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
       const message =
         data?.error?.message ||
         data?.message ||
-        (typeof data === 'string' ? data : null) ||
+        normalizeErrorMessage(data, res.status) ||
         parseError ||
-        (res.statusText || 'Request failed' || '');
+        (res.statusText || fallbackMessageByStatus(res.status));
       return {
         ok: false,
         data: data as T,
