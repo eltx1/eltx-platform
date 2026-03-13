@@ -11,6 +11,8 @@ process.env.TOKEN_USDT = '0x55d398326f99059fF775485246999027B3197955';
 process.env.TOKEN_USDT_DECIMALS = '18';
 process.env.MASTER_MNEMONIC = process.env.MASTER_MNEMONIC || 'test test test test test test test test test test test junk';
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'mysql://root@localhost/eltx_test';
+process.env.GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || 'test-google-client-id';
+process.env.GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || 'test-google-client-secret';
 
 const testSchema = {
   users: [{ id: 1, email: 'user@example.com', password_hash: '$argon2id$v=19$m=65536,t=3,p=4$0O4HViXmWtx2WnYIob2P0Q$5h6yA7yrWzXUOqYdW+awh7Y8/4Iv7pGGNqvLFxY2QWo' }],
@@ -278,6 +280,18 @@ test('GET /auth/google/callback does not fail only because cookie state mismatch
 
   assert.equal(res.status, 400);
   assert.equal(res.body?.error?.code, 'GOOGLE_CODE_MISSING');
+});
+
+test('GET /auth/google/start builds Google redirect_uri from the current API host when not configured', async () => {
+  const res = await request
+    .get('/auth/google/start?mode=login&redirect=/dashboard&return_origin=https://lordai.net')
+    .set('Host', 'localhost:4100');
+
+  assert.equal(res.status, 302);
+  const location = String(res.headers.location || '');
+  const url = new URL(location);
+  assert.equal(url.origin, 'https://accounts.google.com');
+  assert.equal(url.searchParams.get('redirect_uri'), 'http://localhost:4100/auth/google/callback');
 });
 
 test('GET /auth/google/callback returns GOOGLE_CODE_MISSING when state is valid and stored', async () => {
