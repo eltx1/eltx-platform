@@ -65,7 +65,8 @@ type Section =
   | 'feed'
   | 'premium'
   | 'analytics'
-  | 'ads';
+  | 'ads'
+  | 'seo';
 
 interface SummaryResponse {
   summary: {
@@ -194,6 +195,16 @@ type AdsFilesSettings = {
 };
 
 type AdsFilesSettingsResponse = { settings: AdsFilesSettings };
+
+type SeoSettings = {
+  sitemapRefreshHours: number;
+  indexNowEnabled: boolean;
+  indexNowKey: string;
+  indexNowKeyLocation: string;
+  includeRssInSitemap: boolean;
+};
+
+type SeoSettingsResponse = { settings: SeoSettings };
 
 type PremiumSettingsResponse = {
   ok: boolean;
@@ -383,6 +394,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'analytics', label: 'Analytics', icon: LineChart },
   { id: 'ads', label: 'Ads Files', icon: FileText },
+  { id: 'seo', label: 'SEO', icon: LineChart },
   { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
@@ -1911,6 +1923,136 @@ function AdsFilesPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               Save ads files
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+
+function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<SeoSettings>({
+    sitemapRefreshHours: 3,
+    indexNowEnabled: false,
+    indexNowKey: '',
+    indexNowKeyLocation: '',
+    includeRssInSitemap: true,
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<SeoSettingsResponse>('/api/admin/seo-settings');
+    if (res.ok && res.data?.settings) {
+      setForm(res.data.settings);
+    } else {
+      onNotify(res.error || 'Failed to load SEO settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    const res = await apiFetch<SeoSettingsResponse>('/api/admin/seo-settings', {
+      method: 'PUT',
+      body: JSON.stringify(form),
+    });
+
+    if (res.ok && res.data?.settings) {
+      setForm(res.data.settings);
+      onNotify('SEO settings updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to update SEO settings', 'error');
+    }
+
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">SEO settings</h2>
+        <p className="text-sm text-white/70">Control sitemap recrawl frequency and instant search engine pings (IndexNow-compatible) from admin panel.</p>
+      </div>
+
+      {loading ? (
+        <div className="x-card p-4 text-sm text-white/70">Loading SEO settings...</div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <label className="block text-sm text-white/70">
+            Sitemap refresh interval (hours)
+            <input
+              type="number"
+              min={1}
+              max={24}
+              value={form.sitemapRefreshHours}
+              onChange={(e) => setForm((prev) => ({ ...prev, sitemapRefreshHours: Number(e.target.value || 3) }))}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+
+          <label className="flex items-center gap-3 text-sm text-white/80">
+            <input
+              type="checkbox"
+              checked={form.includeRssInSitemap}
+              onChange={(e) => setForm((prev) => ({ ...prev, includeRssInSitemap: e.target.checked }))}
+              className="h-4 w-4"
+            />
+            Include RSS feed in sitemap
+          </label>
+
+          <label className="flex items-center gap-3 text-sm text-white/80">
+            <input
+              type="checkbox"
+              checked={form.indexNowEnabled}
+              onChange={(e) => setForm((prev) => ({ ...prev, indexNowEnabled: e.target.checked }))}
+              className="h-4 w-4"
+            />
+            Enable IndexNow ping on new posts
+          </label>
+
+          <label className="block text-sm text-white/70">
+            IndexNow key
+            <input
+              type="text"
+              value={form.indexNowKey}
+              onChange={(e) => setForm((prev) => ({ ...prev, indexNowKey: e.target.value }))}
+              placeholder="your-indexnow-key"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+
+          <label className="block text-sm text-white/70">
+            IndexNow key location URL (optional)
+            <input
+              type="url"
+              value={form.indexNowKeyLocation}
+              onChange={(e) => setForm((prev) => ({ ...prev, indexNowKeyLocation: e.target.value }))}
+              placeholder="https://lordai.net/your-indexnow-key.txt"
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+
+          <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-white/60">
+            Endpoints: <code>/sitemap.xml</code>, <code>/robots.txt</code>, <code>/rss.xml</code>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-60"
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save SEO settings
             </button>
           </div>
         </form>
@@ -5255,6 +5397,7 @@ export default function AdminApp() {
           {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
           {active === 'analytics' && <AnalyticsPanel onNotify={notify} />}
           {active === 'ads' && <AdsFilesPanel onNotify={notify} />}
+          {active === 'seo' && <SeoPanel onNotify={notify} />}
           {active === 'support' && <SupportPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}
           {active === 'pricing' && <PricingPanel onNotify={notify} />}
