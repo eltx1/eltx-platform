@@ -1,7 +1,6 @@
 import argon2 from 'argon2';
 import crypto from 'crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { NextResponse } from 'next/server';
 
 import { getDb } from '../../lib/db.server';
 
@@ -17,7 +16,6 @@ const GOOGLE_STATE_TTL_SECONDS = Number(process.env.GOOGLE_AUTH_STATE_TTL_SECOND
 const GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || '';
 const GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || '';
 const GOOGLE_OAUTH_REDIRECT_URI = process.env.GOOGLE_OAUTH_REDIRECT_URI || '';
-const AUTH_UPSTREAM_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
 
 export const cookieNames = {
   session: SESSION_COOKIE_NAME,
@@ -54,45 +52,6 @@ export const googleBrowserCookieOptions = {
 
 export function hasGoogleOAuthConfig() {
   return Boolean(GOOGLE_OAUTH_CLIENT_ID && GOOGLE_OAUTH_CLIENT_SECRET && GOOGLE_OAUTH_REDIRECT_URI);
-}
-
-export function hasAuthUpstream() {
-  return Boolean(AUTH_UPSTREAM_BASE);
-}
-
-export function upstreamAuthUrl(path: string, requestUrl: URL) {
-  const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-  if (!hasAuthUpstream()) return new URL(normalizedPath, requestUrl.origin);
-  return new URL(`${AUTH_UPSTREAM_BASE}${normalizedPath}`);
-}
-
-export async function proxyToAuthUpstream(request: Request, path: string) {
-  const requestUrl = new URL(request.url);
-  const upstreamUrl = upstreamAuthUrl(path, requestUrl);
-  upstreamUrl.search = requestUrl.search;
-  const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.text();
-  const upstream = await fetch(upstreamUrl.toString(), {
-    method: request.method,
-    headers: {
-      'Content-Type': 'application/json',
-      cookie: request.headers.get('cookie') || '',
-    },
-    body,
-    redirect: 'manual',
-    cache: 'no-store',
-  });
-
-  const responseHeaders = new Headers();
-  const contentType = upstream.headers.get('content-type');
-  const setCookie = upstream.headers.get('set-cookie');
-  const location = upstream.headers.get('location');
-
-  if (contentType) responseHeaders.set('content-type', contentType);
-  if (setCookie) responseHeaders.set('set-cookie', setCookie);
-  if (location) responseHeaders.set('location', location);
-
-  const payload = await upstream.text();
-  return new NextResponse(payload, { status: upstream.status, headers: responseHeaders });
 }
 
 export function parseUtm(payload: any) {

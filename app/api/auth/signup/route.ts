@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
 
-import { cookieNames, createSession, createUserWithPassword, hasAuthUpstream, parseUtm, proxyToAuthUpstream, sessionCookieOptions } from '../_lib';
+import { cookieNames, createSession, createUserWithPassword, parseUtm, sessionCookieOptions } from '../_lib';
 
 export async function POST(request: Request) {
-  if (hasAuthUpstream()) return proxyToAuthUpstream(request, '/auth/signup');
-
   try {
     const body = await request.json();
     const email = String(body?.email || '').trim().toLowerCase();

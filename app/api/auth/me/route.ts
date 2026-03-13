@@ -1,10 +1,9 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-import { cookieNames, findUserBySession, hasAuthUpstream, proxyToAuthUpstream, toPublicUser } from '../_lib';
+import { cookieNames, findUserBySession, toPublicUser } from '../_lib';
 
-export async function GET(request: Request) {
-  if (hasAuthUpstream()) return proxyToAuthUpstream(request, '/auth/me');
+export async function GET() {
   const token = cookies().get(cookieNames.session)?.value;
   if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 

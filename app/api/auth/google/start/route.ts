@@ -7,10 +7,8 @@ import {
   googleBrowserCookieOptions,
   googleConfig,
   googleCookieOptions,
-  hasAuthUpstream,
   hasGoogleOAuthConfig,
   storeGoogleState,
-  upstreamAuthUrl,
 } from '../../_lib';
 
 function safePath(value: string | null) {
@@ -21,12 +19,6 @@ function safePath(value: string | null) {
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const mode = requestUrl.searchParams.get('mode') === 'signup' ? 'signup' : 'login';
-  if (hasAuthUpstream()) {
-    const target = upstreamAuthUrl('/auth/google/start', requestUrl);
-    target.search = requestUrl.search;
-    return NextResponse.redirect(target);
-  }
-
   const redirectPath = safePath(requestUrl.searchParams.get('redirect'));
   const returnOrigin = requestUrl.searchParams.get('return_origin');
 

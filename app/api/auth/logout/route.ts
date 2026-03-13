@@ -1,11 +1,10 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
-import { cookieNames, googleBrowserCookieOptions, googleCookieOptions, hasAuthUpstream, proxyToAuthUpstream, sessionCookieOptions } from '../_lib';
+import { cookieNames, googleBrowserCookieOptions, googleCookieOptions, sessionCookieOptions } from '../_lib';
 import { getDb } from '../../../lib/db.server';
 
-export async function POST(request: Request) {
-  if (hasAuthUpstream()) return proxyToAuthUpstream(request, '/auth/logout');
+export async function POST() {
   const token = cookies().get(cookieNames.session)?.value;
   const browserSession = cookies().get(cookieNames.googleBrowserSession)?.value;
 

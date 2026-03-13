@@ -10,17 +10,10 @@ import {
   linkOrCreateGoogleUser,
   resolveGoogleUser,
   sessionCookieOptions,
-  hasAuthUpstream,
-  upstreamAuthUrl,
 } from '../../_lib';
 
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
-  if (hasAuthUpstream()) {
-    const target = upstreamAuthUrl('/auth/google/callback', requestUrl);
-    target.search = requestUrl.search;
-    return NextResponse.redirect(target);
-  }
   const code = requestUrl.searchParams.get('code');
   const error = requestUrl.searchParams.get('error');
   const state = requestUrl.searchParams.get('state') || cookies().get(cookieNames.googleState)?.value || '';
