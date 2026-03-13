@@ -20,11 +20,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { path: '/for-you', priority: 0.9 },
   ];
 
-  const changefreq = settings.sitemapRefreshHours <= 6 ? 'hourly' : 'daily';
+  const changeFrequency = settings.sitemapRefreshHours <= 6 ? 'hourly' : 'daily';
 
   const routes: MetadataRoute.Sitemap = staticRoutes.map((item) => ({
     url: `${baseUrl}${item.path}`,
-    changefreq,
+    changeFrequency,
     priority: item.priority,
     lastModified: new Date(),
   }));
@@ -33,7 +33,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     routes.push({
       url: `${baseUrl}/posts/${encodeURIComponent(post.id)}`,
       lastModified: post.lastmod,
-      changefreq,
+      changeFrequency,
       priority: 0.7,
     });
   });
@@ -42,7 +42,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     routes.push({
       url: `${baseUrl}/rss.xml`,
       lastModified: new Date(),
-      changefreq: 'daily',
+      changeFrequency: 'daily',
       priority: 0.4,
     });
   }
