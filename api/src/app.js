@@ -418,7 +418,7 @@ const GOOGLE_OAUTH_CLIENT_SECRET = firstNonEmptyEnv(
 const GOOGLE_OAUTH_REDIRECT_URI = firstNonEmptyEnv(
   process.env.GOOGLE_OAUTH_REDIRECT_URI,
   process.env.GOOGLE_REDIRECT_URI,
-  'https://lordai.net/auth/google/callback'
+  process.env.NEXT_PUBLIC_API_BASE ? `${String(process.env.NEXT_PUBLIC_API_BASE).replace(/\/+$/, '')}/auth/google/callback` : ''
 );
 const GOOGLE_OAUTH_SCOPES = ['openid', 'email', 'profile'];
 const GOOGLE_OAUTH_PROVIDER = 'google';
@@ -3902,10 +3902,45 @@ function logGoogleOAuth(event, req, details = {}) {
   console.log('[oauth/google]', JSON.stringify(payload));
 }
 
-function buildGoogleAuthUrl(state) {
+function resolveRequestOrigin(req) {
+  const forwardedProtoRaw = req.headers['x-forwarded-proto'];
+  const forwardedProto = Array.isArray(forwardedProtoRaw)
+    ? forwardedProtoRaw[0]
+    : typeof forwardedProtoRaw === 'string'
+      ? forwardedProtoRaw.split(',')[0]
+      : '';
+  const proto = (forwardedProto || req.protocol || 'https').trim();
+
+  const forwardedHostRaw = req.headers['x-forwarded-host'];
+  const forwardedHost = Array.isArray(forwardedHostRaw)
+    ? forwardedHostRaw[0]
+    : typeof forwardedHostRaw === 'string'
+      ? forwardedHostRaw.split(',')[0]
+      : '';
+  const host = (forwardedHost || req.headers.host || '').trim();
+  if (!host || /\s/.test(host)) return null;
+  return normalizeOrigin(`${proto}://${host}`);
+}
+
+function resolveGoogleOAuthRedirectUri(req, parsedState = null) {
+  const stateRedirectUri = normalizeOrigin(parsedState?.redirectUri);
+  if (stateRedirectUri) return `${stateRedirectUri}/auth/google/callback`;
+
+  const configured = normalizeOrigin(GOOGLE_OAUTH_REDIRECT_URI);
+  if (configured) return `${configured}/auth/google/callback`;
+
+  if (apiBaseOrigin) return `${apiBaseOrigin}/auth/google/callback`;
+
+  const requestOrigin = resolveRequestOrigin(req);
+  if (requestOrigin) return `${requestOrigin}/auth/google/callback`;
+
+  return 'https://api.lordai.net/auth/google/callback';
+}
+
+function buildGoogleAuthUrl(state, redirectUri) {
   const url = new URL(GOOGLE_OAUTH_URL);
   url.searchParams.set('client_id', GOOGLE_OAUTH_CLIENT_ID);
-  url.searchParams.set('redirect_uri', GOOGLE_OAUTH_REDIRECT_URI);
+  url.searchParams.set('redirect_uri', redirectUri);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('scope', GOOGLE_OAUTH_SCOPES.join(' '));
   url.searchParams.set('state', state);
@@ -3946,12 +3981,12 @@ function resolveGoogleRedirectUrl(redirectPath, returnOrigin) {
   return safePath;
 }
 
-async function exchangeGoogleCodeForUser(code) {
+async function exchangeGoogleCodeForUser(code, redirectUri) {
   const payload = new URLSearchParams({
     code,
     client_id: GOOGLE_OAUTH_CLIENT_ID,
     client_secret: GOOGLE_OAUTH_CLIENT_SECRET,
-    redirect_uri: GOOGLE_OAUTH_REDIRECT_URI,
+    redirect_uri: redirectUri,
     grant_type: 'authorization_code',
   });
   const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
@@ -4082,6 +4117,7 @@ app.get('/auth/google/start', async (req, res, next) => {
     }
 
     const mode = req.query?.mode === 'signup' ? 'signup' : 'login';
+    const redirectUri = resolveGoogleOAuthRedirectUri(req);
     const redirect = typeof req.query?.redirect === 'string' && req.query.redirect.startsWith('/') ? req.query.redirect : '/dashboard';
     const returnOrigin = typeof req.query?.return_origin === 'string' ? req.query.return_origin : '';
     const safeReturnOrigin = isSafeAbsoluteRedirect(returnOrigin) ? normalizeOrigin(returnOrigin) : null;
@@ -4104,7 +4140,14 @@ app.get('/auth/google/start', async (req, res, next) => {
       return res.redirect(resolveGoogleLoginUrl(safeReturnOrigin, 'authError=login_in_progress'));
     }
 
-    const state = signGoogleState({ nonce: crypto.randomUUID(), ts: Date.now(), mode, redirect, returnOrigin: safeReturnOrigin });
+    const state = signGoogleState({
+      nonce: crypto.randomUUID(),
+      ts: Date.now(),
+      mode,
+      redirect,
+      returnOrigin: safeReturnOrigin,
+      redirectUri,
+    });
     const stateHash = hashGoogleStateToken(state);
 
     await withTransactionRetry(async (conn) => {
@@ -4130,7 +4173,7 @@ app.get('/auth/google/start', async (req, res, next) => {
       redirect,
       mode,
     });
-    return res.redirect(buildGoogleAuthUrl(state));
+    return res.redirect(buildGoogleAuthUrl(state, redirectUri));
   } catch (err) {
     return next(err);
   }
@@ -4146,6 +4189,7 @@ app.get('/auth/google/callback', async (req, res, next) => {
       ? req.cookies[GOOGLE_AUTH_BROWSER_SESSION_COOKIE]
       : '';
     const parsedState = state ? resolveParsedGoogleState(state) : null;
+    const redirectUri = resolveGoogleOAuthRedirectUri(req, parsedState);
     const loginFallback = resolveGoogleLoginUrl(parsedState?.returnOrigin || null);
 
     logGoogleOAuth('callback_received', req, {
@@ -4225,7 +4269,7 @@ app.get('/auth/google/callback', async (req, res, next) => {
       }
     }
 
-    const profile = await exchangeGoogleCodeForUser(code);
+    const profile = await exchangeGoogleCodeForUser(code, redirectUri);
     const utm = parseUtmPayload(req.query || {});
 
     const { userId, token } = await withTransactionRetry(async (conn) => resolveGoogleUserSession({ conn, profile, utm }));
