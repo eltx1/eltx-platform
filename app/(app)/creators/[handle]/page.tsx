@@ -47,11 +47,11 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
       if (!cancelled) setPosts(loaded);
     };
     load();
-    setProfile(getProfile(user?.id));
+    setProfile(getProfile(user?.id, user));
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, user]);
 
   const creatorPosts = useMemo(
     () => posts.filter((post) => normalizeHandle(post.handle) === normalizedRouteHandle),

@@ -182,7 +182,7 @@ export default function ForYouPage() {
                   onComment={async (targetPost, content) => {
                     if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                     if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
-                    const profile = getProfile(user.id);
+                    const profile = getProfile(user.id, user);
                     const result = await addPostComment(targetPost, content, profile, user.id);
                     if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
                     const loaded = await fetchAllPosts(user?.id);

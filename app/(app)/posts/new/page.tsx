@@ -119,7 +119,7 @@ export default function NewPostPage() {
               }
               uploadedImageUrl = uploadResult.url;
             }
-            const profile = getProfile(user.id);
+            const profile = getProfile(user.id, user);
             const newPost = createPost({ content: content.trim(), imageUrl: uploadedImageUrl, profile });
             const saveResult = await savePost(newPost, user.id);
             if (!saveResult.ok) {
