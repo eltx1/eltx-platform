@@ -12,8 +12,7 @@ import {
   fetchAllPosts,
   getPostInteractionSummary,
   getProfile,
-  isFollowingHandle,
-  toggleFollowHandle,
+  toggleFollowUser,
   togglePostLike,
   togglePostRepost,
   type SocialPost,
@@ -39,6 +38,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [activeTab, setActiveTab] = useState<'posts' | 'media'>('posts');
+  const [followState, setFollowState] = useState<{ isFollowed: boolean; followers: number } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +74,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
     );
 
     return {
+      userId: Number(latestPost.profileId),
       handle: latestPost.handle,
       authorName: latestPost.authorName,
       avatarUrl: latestPost.avatarUrl || '/assets/img/logo-new.svg',
@@ -88,9 +89,19 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
   }, [creatorPosts, lang]);
 
   const isOwnProfile = Boolean(profile) && normalizeHandle(profile.handle) === normalizedRouteHandle;
-  const isFollowing = creatorData
-    ? isFollowingHandle(creatorData.handle, creatorData.followFallback, user?.id)
-    : false;
+  const isFollowing = followState ? followState.isFollowed : Boolean(creatorData?.followFallback);
+  const followersCount = followState ? followState.followers : Number(creatorData?.followers || 0);
+
+  useEffect(() => {
+    if (!creatorData) {
+      setFollowState(null);
+      return;
+    }
+    setFollowState({
+      isFollowed: Boolean(creatorData.followFallback),
+      followers: Number(creatorData.followers || 0),
+    });
+  }, [creatorData]);
 
   const postsWithMedia = creatorPosts.filter((post) => Boolean(post.imageUrl));
   const shownPosts = activeTab === 'posts' ? creatorPosts : postsWithMedia;
@@ -135,9 +146,11 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
                 <button
                   type="button"
                   onClick={async () => {
-                    const result = toggleFollowHandle(creatorData.handle, creatorData.followFallback, user?.id);
+                    if (!user?.id) return toast(t.dashboard.social.sessionMissing);
+                    const result = await toggleFollowUser(user.id, creatorData.userId);
                     if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                    const loaded = await fetchAllPosts(user?.id);
+                    setFollowState({ isFollowed: result.isFollowed, followers: result.followers });
+                    const loaded = await fetchAllPosts(user.id);
                     setPosts(loaded);
                     toast(result.isFollowed
                       ? (lang === 'ar' ? 'تمت المتابعة بنجاح.' : 'Following successfully.')
@@ -164,7 +177,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
                 <strong className="text-white">{creatorData.postsCount}</strong> {lang === 'ar' ? 'منشور' : 'Posts'}
               </span>
               <span>
-                <strong className="text-white">{creatorData.followers.toLocaleString()}</strong> {lang === 'ar' ? 'متابع' : 'Followers'}
+                <strong className="text-white">{followersCount.toLocaleString()}</strong> {lang === 'ar' ? 'متابع' : 'Followers'}
               </span>
               <span className="inline-flex items-center gap-1 text-white/55">
                 <Link2 className="h-3.5 w-3.5" /> lordai.net/{creatorData.handle.replace('@', '')}

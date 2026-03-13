@@ -47,6 +47,7 @@ type PostRow = RowDataPacket & {
   followers: number;
   viewer_liked: number;
   viewer_reposted: number;
+  viewer_followed: number;
 };
 
 type CommentRow = RowDataPacket & {
@@ -114,7 +115,8 @@ export async function GET(request: Request) {
               COALESCE(c.comments, 0) AS comments,
               COALESCE(r.reposts, 0) AS reposts,
               CASE WHEN vl.id IS NULL THEN 0 ELSE 1 END AS viewer_liked,
-              CASE WHEN vr.id IS NULL THEN 0 ELSE 1 END AS viewer_reposted
+              CASE WHEN vr.id IS NULL THEN 0 ELSE 1 END AS viewer_reposted,
+              CASE WHEN vf.id IS NULL THEN 0 ELSE 1 END AS viewer_followed
          FROM social_posts p
     LEFT JOIN users u ON u.id = p.user_id
     LEFT JOIN social_profiles sp ON sp.user_id = p.user_id
@@ -124,9 +126,14 @@ export async function GET(request: Request) {
     LEFT JOIN (SELECT followee_id, COUNT(*) AS followers FROM social_follows GROUP BY followee_id) f ON f.followee_id = p.user_id
     LEFT JOIN social_post_likes vl ON vl.post_id = p.id AND vl.user_id = ?
     LEFT JOIN social_post_reposts vr ON vr.post_id = p.id AND vr.user_id = ?
+    LEFT JOIN social_follows vf ON vf.followee_id = p.user_id AND vf.follower_id = ?
      ORDER BY p.created_at DESC
         LIMIT 500`,
-      [Number.isFinite(viewerId) ? viewerId : 0, Number.isFinite(viewerId) ? viewerId : 0],
+      [
+        Number.isFinite(viewerId) ? viewerId : 0,
+        Number.isFinite(viewerId) ? viewerId : 0,
+        Number.isFinite(viewerId) ? viewerId : 0,
+      ],
     );
 
     const commentsByPost = await loadComments(rows.map((row) => row.id));
@@ -146,6 +153,7 @@ export async function GET(request: Request) {
         reposts: Number(row.reposts || 0),
         views: 0,
         authorFollowers: Number(row.followers || 0),
+        isFollowed: Boolean(row.viewer_followed),
         isPremium: false,
         viewerLiked: Boolean(row.viewer_liked),
         viewerReposted: Boolean(row.viewer_reposted),

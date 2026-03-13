@@ -174,6 +174,26 @@ export function toggleFollowHandle(handle: string, fallback: boolean, userId?: U
   };
 }
 
+
+export async function toggleFollowUser(followerId: UserScopeId, followeeId: UserScopeId) {
+  const normalizedFollowerId = Number(followerId);
+  const normalizedFolloweeId = Number(followeeId);
+  if (!Number.isFinite(normalizedFollowerId) || !Number.isFinite(normalizedFolloweeId) || normalizedFollowerId <= 0 || normalizedFolloweeId <= 0) {
+    return { ok: false as const, reason: 'unknown' as const, isFollowed: false, followers: 0 };
+  }
+
+  const res = await apiFetch<{ isFollowed: boolean; followers: number }>(`/api/social/follows`, {
+    method: 'POST',
+    body: JSON.stringify({ followerId: normalizedFollowerId, followeeId: normalizedFolloweeId }),
+  });
+
+  if (!res.ok) {
+    return { ok: false as const, reason: 'unknown' as const, isFollowed: false, followers: 0 };
+  }
+
+  return { ok: true as const, isFollowed: Boolean(res.data.isFollowed), followers: Number(res.data.followers || 0) };
+}
+
 export function getPostInteractionSummary(post: SocialPost) {
   return {
     liked: Boolean(post.viewerLiked),
