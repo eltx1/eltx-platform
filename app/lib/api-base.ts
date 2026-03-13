@@ -56,3 +56,17 @@ export function getApiBaseForBrowser() {
 
   return configuredBase;
 }
+
+function normalizePath(path: string) {
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+export function resolveApiPath(path: string) {
+  const normalizedPath = normalizePath(path);
+  const base = getApiBaseForBrowser();
+
+  if (!base) return normalizedPath;
+
+  const toBackendPath = normalizedPath.startsWith('/api/') ? normalizedPath.replace(/^\/api/, '') : normalizedPath;
+  return `${base}${toBackendPath}`;
+}
