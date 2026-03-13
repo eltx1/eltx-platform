@@ -15,7 +15,8 @@ export default function NewPostPage() {
   const toast = useToast();
   const { user } = useAuth();
   const [content, setContent] = useState('');
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [wordLimit, setWordLimit] = useState(1000);
 
   useEffect(() => {
@@ -29,7 +30,8 @@ export default function NewPostPage() {
 
   const handleImage = (file?: File | null) => {
     if (!file) {
-      setImageUrl(null);
+      setImageFile(null);
+      setImagePreviewUrl(null);
       return;
     }
 
@@ -39,10 +41,26 @@ export default function NewPostPage() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => setImageUrl(reader.result as string);
-    reader.readAsDataURL(file);
+    setImageFile(file);
+    const objectUrl = URL.createObjectURL(file);
+    setImagePreviewUrl(objectUrl);
   };
+
+  useEffect(() => () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+  }, [imagePreviewUrl]);
+
+  async function uploadPostImage(file: File) {
+    const formData = new FormData();
+    formData.append('image', file);
+    const response = await fetch('/api/social/uploads', {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) return { ok: false as const, url: null };
+    const payload = await response.json() as { imageUrl?: string };
+    return { ok: Boolean(payload?.imageUrl), url: payload?.imageUrl || null };
+  }
 
   return (
     <div className="p-3 sm:p-4 space-y-4 max-w-3xl">
@@ -69,9 +87,9 @@ export default function NewPostPage() {
           className="block w-full text-xs text-white/60 file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-4 file:py-2 file:text-xs file:text-white hover:file:bg-white/20"
           onChange={(event) => handleImage(event.target.files?.[0])}
         />
-        {imageUrl && (
+        {imagePreviewUrl && (
           <div className="overflow-hidden rounded-2xl border border-white/10">
-            <Image src={imageUrl} alt="Post preview" width={960} height={540} className="h-auto w-full object-cover" />
+            <Image src={imagePreviewUrl} alt="Post preview" width={960} height={540} className="h-auto w-full object-cover" unoptimized />
           </div>
         )}
       </div>
@@ -92,8 +110,17 @@ export default function NewPostPage() {
               toast(t.dashboard.social.sessionMissing);
               return;
             }
+            let uploadedImageUrl: string | null = null;
+            if (imageFile) {
+              const uploadResult = await uploadPostImage(imageFile);
+              if (!uploadResult.ok || !uploadResult.url) {
+                toast(t.dashboard.social.quickPostStorageError);
+                return;
+              }
+              uploadedImageUrl = uploadResult.url;
+            }
             const profile = getProfile(user.id);
-            const newPost = createPost({ content: content.trim(), imageUrl, profile });
+            const newPost = createPost({ content: content.trim(), imageUrl: uploadedImageUrl, profile });
             const saveResult = await savePost(newPost, user.id);
             if (!saveResult.ok) {
               toast(t.dashboard.social.quickPostStorageError);
