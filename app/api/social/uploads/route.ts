@@ -1,7 +1,6 @@
-import { mkdir, writeFile } from 'fs/promises';
-import path from 'path';
 import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
+import { getSocialImagePublicUrl, saveSocialImage } from '../../../lib/social-image-storage';
 
 const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
@@ -35,14 +34,8 @@ export async function POST(request: Request) {
     const extension = extensionFromMime(file.type);
     const filename = `${Date.now()}-${randomUUID()}.${extension}`;
 
-    const relativeDir = path.join('uploads', 'social');
-    const publicDir = path.join(process.cwd(), 'public', relativeDir);
-    await mkdir(publicDir, { recursive: true });
-
-    const absolutePath = path.join(publicDir, filename);
-    await writeFile(absolutePath, bytes);
-
-    return NextResponse.json({ ok: true, imageUrl: `/${relativeDir}/${filename}` });
+    await saveSocialImage(filename, bytes);
+    return NextResponse.json({ ok: true, imageUrl: getSocialImagePublicUrl(filename) });
   } catch (error) {
     console.error('social upload POST failed', error);
     return NextResponse.json({ error: 'Failed to upload image' }, { status: 500 });
