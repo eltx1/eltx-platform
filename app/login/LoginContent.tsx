@@ -73,10 +73,19 @@ export default function LoginContent() {
         setError(res.error || t.auth.login.genericError);
       }
     } else {
-      await refresh();
-      trackEvent('login', { method: 'email' });
-      toast(t.auth.login.success);
-      router.push('/dashboard');
+      const refreshedUser = await refresh();
+      if (!refreshedUser) {
+        setError(t.auth.login.genericError);
+      } else {
+        trackEvent('login', { method: 'email' });
+        toast(t.auth.login.success);
+        const nextPath =
+          typeof window !== 'undefined'
+            ? new URLSearchParams(window.location.search).get('next') || '/dashboard'
+            : '/dashboard';
+        const safeNextPath = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/dashboard';
+        router.push(safeNextPath);
+      }
     }
     setLoading(false);
   };

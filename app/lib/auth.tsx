@@ -5,11 +5,11 @@ import { apiFetch } from './api';
 
 interface AuthContextType {
   user: any | null | undefined;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<any | null | undefined>;
   logout: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: undefined, refresh: async () => {}, logout: async () => {} });
+const AuthContext = createContext<AuthContextType>({ user: undefined, refresh: async () => undefined, logout: async () => {} });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const demoUser = useMemo(
@@ -18,9 +18,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
   const [user, setUser] = useState<any | null | undefined>(demoUser ?? undefined);
   const refresh = useCallback(async () => {
-    if (demoUser) return;
+    if (demoUser) return demoUser;
     const res = await apiFetch<any>('/auth/me');
-    setUser(res.ok ? res.data : null);
+    const nextUser = res.ok ? res.data : null;
+    setUser(nextUser);
+    return nextUser;
   }, [demoUser]);
   useEffect(() => {
     refresh();

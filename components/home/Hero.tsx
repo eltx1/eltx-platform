@@ -48,11 +48,18 @@ export default function Hero() {
       return;
     }
 
+    const refreshedUser = await refresh();
+
     if (authTab === 'signup') {
       setAuthTab('login');
     }
-    await refresh();
-    router.push('/dashboard');
+
+    if (refreshedUser) {
+      router.push('/dashboard');
+    } else if (authTab === 'login') {
+      setError(t.auth.login.genericError);
+    }
+
     setLoading(false);
   };
 
