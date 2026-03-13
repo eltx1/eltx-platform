@@ -56,12 +56,49 @@ export type PersistResult = {
   reason?: 'quota' | 'unknown';
 };
 
+const DEFAULT_AVATAR_URL = '/assets/img/logo-new.svg';
+
 const defaultProfile: SocialProfile = {
-  publicName: 'LordAI Creator',
-  handle: '@lordai_creator',
-  bio: 'Building, trading, and sharing on LordAi.Net.',
-  avatarUrl: '/assets/img/logo-new.svg',
+  publicName: 'Creator',
+  handle: '@creator',
+  bio: '',
+  avatarUrl: DEFAULT_AVATAR_URL,
 };
+
+type ProfileSeed = {
+  name?: string | null;
+  username?: string | null;
+  email?: string | null;
+};
+
+function sanitizeHandleToken(value: string) {
+  return value
+    .trim()
+    .replace(/^@+/, '')
+    .replace(/[^a-zA-Z0-9_.-]/g, '_')
+    .toLowerCase();
+}
+
+function buildDefaultProfile(userId?: UserScopeId, seed?: ProfileSeed): SocialProfile {
+  const normalizedUserId = userId == null ? '' : String(userId).trim();
+  const emailPrefix = String(seed?.email || '').split('@')[0] || '';
+  const handleToken = sanitizeHandleToken(String(seed?.username || '').trim())
+    || sanitizeHandleToken(emailPrefix)
+    || sanitizeHandleToken(`user${normalizedUserId}`)
+    || 'creator';
+
+  const publicName = String(seed?.name || '').trim()
+    || String(seed?.username || '').trim()
+    || (emailPrefix ? emailPrefix.replace(/[._-]+/g, ' ') : '')
+    || (normalizedUserId ? `User ${normalizedUserId}` : defaultProfile.publicName);
+
+  return {
+    publicName,
+    handle: `@${handleToken}`,
+    bio: '',
+    avatarUrl: DEFAULT_AVATAR_URL,
+  };
+}
 
 function safeParse<T>(value: string | null, fallback: T): T {
   if (!value) return fallback;
@@ -123,11 +160,11 @@ function isAllowedRemoteAvatarUrl(rawUrl: string) {
 
 export function normalizeAvatarUrl(rawUrl: string) {
   const value = rawUrl.trim();
-  if (!value) return defaultProfile.avatarUrl;
+  if (!value) return DEFAULT_AVATAR_URL;
   if (value.startsWith('/')) return value;
   if (value.startsWith('data:image/')) return value;
 
-  return isAllowedRemoteAvatarUrl(value) ? value : defaultProfile.avatarUrl;
+  return isAllowedRemoteAvatarUrl(value) ? value : DEFAULT_AVATAR_URL;
 }
 
 export function isValidAvatarUrl(rawUrl: string) {
@@ -248,10 +285,11 @@ export function getPostWordLimit() {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1000;
 }
 
-export function getProfile(userId?: UserScopeId): SocialProfile {
-  if (typeof window === 'undefined') return defaultProfile;
+export function getProfile(userId?: UserScopeId, seed?: ProfileSeed): SocialProfile {
+  const fallbackProfile = buildDefaultProfile(userId, seed);
+  if (typeof window === 'undefined') return fallbackProfile;
   const stored = safeParse<SocialProfile | null>(window.localStorage.getItem(getScopedKey(PROFILE_KEY, userId)), null);
-  return stored ? { ...defaultProfile, ...stored, avatarUrl: normalizeAvatarUrl(stored.avatarUrl || '') } : defaultProfile;
+  return stored ? { ...fallbackProfile, ...stored, avatarUrl: normalizeAvatarUrl(stored.avatarUrl || '') } : fallbackProfile;
 }
 
 export function saveProfile(profile: SocialProfile, userId?: UserScopeId): PersistResult {
@@ -432,7 +470,7 @@ export async function savePost(post: SocialPost, userId?: UserScopeId): Promise<
       profile: {
         publicName: post.authorName,
         handle: post.handle,
-        avatarUrl: post.avatarUrl || defaultProfile.avatarUrl,
+        avatarUrl: post.avatarUrl || DEFAULT_AVATAR_URL,
       },
     }),
   });

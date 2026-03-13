@@ -21,8 +21,8 @@ export default function EditProfilePage() {
 
   useEffect(() => {
     if (!user?.id) return;
-    setProfile(getProfile(user.id));
-  }, [user?.id]);
+    setProfile(getProfile(user.id, user));
+  }, [user?.id, user]);
 
   const handleAvatarUpload = (file?: File | null) => {
     if (!file || !profile) return;

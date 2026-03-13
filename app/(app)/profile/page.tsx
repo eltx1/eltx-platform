@@ -10,6 +10,10 @@ import PostCard from '../../../components/social/PostCard';
 import { addPostComment, fetchAllPosts, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
 import { useToast } from '../../lib/toast';
 
+function normalizeHandle(value: string) {
+  return value.trim().replace(/^@+/, '').toLowerCase();
+}
+
 export default function ProfilePage() {
   const { lang } = useLang();
   const { user } = useAuth();
@@ -25,16 +29,17 @@ export default function ProfilePage() {
       const loaded = await fetchAllPosts(user.id);
       if (!cancelled) setPosts(loaded);
     };
-    setProfile(getProfile(user.id));
+    setProfile(getProfile(user.id, user));
     load();
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, user]);
 
   const userPosts = useMemo(() => {
     if (!profile) return [];
-    return posts.filter((post) => post.handle === profile.handle);
+    const currentUserHandle = normalizeHandle(profile.handle);
+    return posts.filter((post) => normalizeHandle(post.handle) === currentUserHandle);
   }, [posts, profile]);
 
   if (!profile) {
