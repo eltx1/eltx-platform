@@ -259,6 +259,14 @@ export default function DashboardPage() {
                   />
                 );
               })}
+              {activeFeedTab === 'for-you' && (
+                <Link
+                  href="/for-you"
+                  className="mt-2 inline-flex w-full items-center justify-center rounded-2xl border border-[#c9a75c]/70 bg-[#c9a75c]/20 px-4 py-3 text-sm font-semibold text-[#f4deae] transition hover:bg-[#c9a75c]/30 hover:border-[#c9a75c]"
+                >
+                  {lang === 'ar' ? 'عرض المزيد من منشورات For You' : 'Show More from For You'}
+                </Link>
+              )}
             </div>
           </section>
         </main>

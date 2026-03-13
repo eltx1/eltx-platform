@@ -11,13 +11,18 @@ import AppShell from '../../components/layout/AppShell';
 import AppBottomNav from '../../components/layout/AppBottomNav';
 import { apiFetch } from '../lib/api';
 import {
+  addPostComment,
   fetchAllPosts,
   getForYouFeedPage,
+  getProfile,
   getPostInteractionSummary,
+  togglePostLike,
+  togglePostRepost,
   type SocialPost,
 } from '../lib/social-store';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../lib/feed-algorithm';
 import { trackPostView } from '../lib/monetization';
+import { useToast } from '../lib/toast';
 
 const FALLBACK_BATCH_SIZE = 50;
 
@@ -26,6 +31,7 @@ export default function ForYouPage() {
   const router = useRouter();
   const { lang } = useLang();
   const t = dict[lang];
+  const toast = useToast();
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [feedSettings, setFeedSettings] = useState<FeedAlgorithmSettings>(DEFAULT_FEED_ALGORITHM_SETTINGS);
   const [visible, setVisible] = useState<SocialPost[]>([]);
@@ -153,12 +159,35 @@ export default function ForYouPage() {
                   commentPlaceholder={t.dashboard.social.commentPlaceholder}
                   commentSubmitLabel={t.dashboard.social.commentSubmit}
                   labels={t.dashboard.social.postMeta}
+                  onLike={async (targetPost) => {
+                    const result = await togglePostLike(targetPost, user?.id);
+                    if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
+                    const loaded = await fetchAllPosts(user?.id);
+                    setPosts(loaded);
+                  }}
+                  onRepost={async (targetPost) => {
+                    const result = await togglePostRepost(targetPost, user?.id);
+                    if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
+                    const loaded = await fetchAllPosts(user?.id);
+                    setPosts(loaded);
+                    toast(result.reposted ? t.dashboard.social.repostSuccess : t.dashboard.social.repostRemoved);
+                  }}
                   onViewed={async (targetPost) => {
                     const counted = trackPostView(targetPost.id, user?.id);
                     if (counted) {
                       const loaded = await fetchAllPosts(user?.id);
                       setPosts(loaded);
                     }
+                  }}
+                  onComment={async (targetPost, content) => {
+                    if (!user?.id) return toast(t.dashboard.social.sessionMissing);
+                    if (!content.trim()) return toast(t.dashboard.social.commentEmpty);
+                    const profile = getProfile(user.id);
+                    const result = await addPostComment(targetPost, content, profile, user.id);
+                    if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
+                    const loaded = await fetchAllPosts(user?.id);
+                    setPosts(loaded);
+                    toast(t.dashboard.social.commentSuccess);
                   }}
                 />
               );
