@@ -8948,7 +8948,7 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       const sym = (row.asset || '').toUpperCase();
       if (!sym) continue;
       const meta = tokenMetaBySymbol[sym];
-      const decimals = meta ? meta.decimals : 18;
+      const decimals = meta ? meta.decimals : getSymbolDecimals(sym);
       const contract = meta ? meta.contract : null;
       const chainId = meta?.chainId ?? DEFAULT_CHAIN_BY_SYMBOL[sym] ?? null;
       const rawWei = row.balance_wei?.toString() || '0';
@@ -9280,11 +9280,7 @@ app.post('/wallet/transfer', walletLimiter, async (req, res, next) => {
     const fromUserId = await requireUser(req);
     const { to_user_id, asset, amount } = TransferSchema.parse(req.body);
     if (to_user_id === fromUserId) throw { status: 400, message: 'Cannot transfer to self' };
-    const meta =
-      asset === 'BNB' || asset === 'ETH'
-        ? { decimals: 18 }
-        : tokenMetaBySymbol[asset] || (asset === ELTX_SYMBOL ? { decimals: getSymbolDecimals(asset) } : null);
-    if (!meta) throw { status: 400, message: 'Unsupported asset' };
+    const meta = asset === 'BNB' || asset === 'ETH' ? { decimals: 18 } : { decimals: getSymbolDecimals(asset) };
     let amtWei;
     try {
       amtWei = ethers.parseUnits(amount, meta.decimals);
