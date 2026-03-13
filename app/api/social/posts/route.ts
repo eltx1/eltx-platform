@@ -223,7 +223,10 @@ export async function POST(request: Request) {
        ON DUPLICATE KEY UPDATE
          public_name = VALUES(public_name),
          handle = VALUES(handle),
-         avatar_url = VALUES(avatar_url)`,
+         avatar_url = CASE
+           WHEN VALUES(avatar_url) = '/assets/img/logo-new.svg' AND avatar_url IS NOT NULL AND avatar_url <> '' THEN avatar_url
+           ELSE VALUES(avatar_url)
+         END`,
       [
         userId,
         String(profile.publicName || `User ${userId}`),

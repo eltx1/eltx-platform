@@ -7,7 +7,7 @@ import { dict, useLang } from '../../lib/i18n';
 import { BadgeCheck } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import PostCard from '../../../components/social/PostCard';
-import { addPostComment, fetchAllPosts, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
+import { addPostComment, fetchAllPosts, fetchProfile, getPostInteractionSummary, getProfile, togglePostLike, togglePostRepost, type SocialPost, type SocialProfile } from '../../lib/social-store';
 import { useToast } from '../../lib/toast';
 
 function normalizeHandle(value: string) {
@@ -30,6 +30,9 @@ export default function ProfilePage() {
       if (!cancelled) setPosts(loaded);
     };
     setProfile(getProfile(user.id, user));
+    fetchProfile(user.id, user).then((result) => {
+      if (!cancelled) setProfile(result.profile);
+    });
     load();
     return () => {
       cancelled = true;

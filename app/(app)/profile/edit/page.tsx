@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation';
 import { Upload } from 'lucide-react';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
+import { apiFetch } from '../../../lib/api';
 import { useAuth } from '../../../lib/auth';
-import { getProfile, isValidAvatarUrl, saveProfile, type SocialProfile } from '../../../lib/social-store';
+import { fetchProfile, getProfile, isValidAvatarUrl, saveProfileRemote, type SocialProfile } from '../../../lib/social-store';
 
 const MAX_AVATAR_SIZE = 2 * 1024 * 1024;
 
@@ -21,10 +22,19 @@ export default function EditProfilePage() {
 
   useEffect(() => {
     if (!user?.id) return;
+    let cancelled = false;
+
     setProfile(getProfile(user.id, user));
+    fetchProfile(user.id, user).then((result) => {
+      if (!cancelled) setProfile(result.profile);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id, user]);
 
-  const handleAvatarUpload = (file?: File | null) => {
+  const handleAvatarUpload = async (file?: File | null) => {
     if (!file || !profile) return;
     if (!file.type.startsWith('image/')) {
       toast(t.dashboard.social.profileAvatarInvalid);
@@ -35,12 +45,28 @@ export default function EditProfilePage() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setProfile({ ...profile, avatarUrl: String(reader.result || '') });
-      toast(t.dashboard.social.avatarUploaded);
-    };
-    reader.readAsDataURL(file);
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const res = await apiFetch<{ imageUrl: string }>('/api/social/uploads', {
+      method: 'POST',
+      body: formData,
+      headers: {},
+    });
+
+    if (!res.ok || !res.data?.imageUrl) {
+      toast(t.dashboard.social.quickPostStorageError);
+      return;
+    }
+
+    const nextProfile = { ...profile, avatarUrl: res.data.imageUrl };
+    setProfile(nextProfile);
+    const persistResult = await saveProfileRemote(nextProfile, user?.id);
+    if (!persistResult.ok) {
+      toast(t.dashboard.social.quickPostStorageError);
+      return;
+    }
+    toast(t.dashboard.social.avatarUploaded);
   };
 
   if (!profile) return null;
@@ -66,7 +92,9 @@ export default function EditProfilePage() {
         <label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-white/20 bg-black/20 px-4 py-3 text-xs text-white/80 hover:bg-black/35">
           <Upload className="h-4 w-4" />
           {t.dashboard.social.uploadAvatarCta}
-          <input type="file" accept="image/*" className="hidden" onChange={(event) => handleAvatarUpload(event.target.files?.[0])} />
+          <input type="file" accept="image/*" className="hidden" onChange={(event) => {
+              void handleAvatarUpload(event.target.files?.[0]);
+            }} />
         </label>
 
         <div className="space-y-2">
@@ -115,10 +143,12 @@ export default function EditProfilePage() {
             onClick={() => {
               if (!user?.id) return toast(t.dashboard.social.sessionMissing);
               if (!isValidAvatarUrl(profile.avatarUrl)) return toast(t.dashboard.social.profileAvatarInvalid);
-              const saveResult = saveProfile(profile, user.id);
-              if (!saveResult.ok) return toast(t.dashboard.social.quickPostStorageError);
-              toast(t.dashboard.social.profileUpdated);
-              router.push('/profile');
+              void (async () => {
+                const saveResult = await saveProfileRemote(profile, user.id);
+                if (!saveResult.ok) return toast(t.dashboard.social.quickPostStorageError);
+                toast(t.dashboard.social.profileUpdated);
+                router.push('/profile');
+              })();
             }}
           >
             {t.common.save || 'Save'}

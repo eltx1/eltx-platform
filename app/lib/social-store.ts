@@ -292,10 +292,66 @@ export function getProfile(userId?: UserScopeId, seed?: ProfileSeed): SocialProf
   return stored ? { ...fallbackProfile, ...stored, avatarUrl: normalizeAvatarUrl(stored.avatarUrl || '') } : fallbackProfile;
 }
 
+export async function fetchProfile(userId?: UserScopeId, seed?: ProfileSeed) {
+  const fallbackProfile = getProfile(userId, seed);
+  const normalizedUserId = Number(userId);
+  if (!Number.isFinite(normalizedUserId) || normalizedUserId <= 0) {
+    return { ok: true as const, profile: fallbackProfile, source: 'local' as const };
+  }
+
+  const res = await apiFetch<{ profile?: Partial<SocialProfile> | null }>(`/api/social/profile?userId=${encodeURIComponent(String(normalizedUserId))}`);
+  if (!res.ok) {
+    return { ok: false as const, profile: fallbackProfile, source: 'local' as const };
+  }
+
+  const remoteProfile = res.data?.profile;
+  if (!remoteProfile) {
+    return { ok: true as const, profile: fallbackProfile, source: 'local' as const };
+  }
+
+  const normalizedProfile: SocialProfile = {
+    publicName: String(remoteProfile.publicName || fallbackProfile.publicName).trim() || fallbackProfile.publicName,
+    handle: String(remoteProfile.handle || fallbackProfile.handle).trim() || fallbackProfile.handle,
+    bio: String(remoteProfile.bio || ''),
+    avatarUrl: normalizeAvatarUrl(String(remoteProfile.avatarUrl || fallbackProfile.avatarUrl)),
+  };
+
+  saveProfile(normalizedProfile, normalizedUserId);
+  return { ok: true as const, profile: normalizedProfile, source: 'remote' as const };
+}
+
 export function saveProfile(profile: SocialProfile, userId?: UserScopeId): PersistResult {
   if (typeof window === 'undefined') return { ok: false, reason: 'unknown' };
   const sanitizedProfile = { ...profile, avatarUrl: normalizeAvatarUrl(profile.avatarUrl) };
   return safeSetItem(getScopedKey(PROFILE_KEY, userId), JSON.stringify(sanitizedProfile));
+}
+
+export async function saveProfileRemote(profile: SocialProfile, userId?: UserScopeId) {
+  const normalizedUserId = Number(userId);
+  const normalizedProfile = { ...profile, avatarUrl: normalizeAvatarUrl(profile.avatarUrl) };
+  const localPersist = saveProfile(normalizedProfile, userId);
+
+  if (!Number.isFinite(normalizedUserId) || normalizedUserId <= 0) {
+    return { ok: localPersist.ok, profile: normalizedProfile, source: 'local-only' as const, reason: localPersist.reason };
+  }
+
+  const res = await apiFetch<{ profile?: SocialProfile }>('/api/social/profile', {
+    method: 'POST',
+    body: JSON.stringify({ userId: normalizedUserId, profile: normalizedProfile }),
+  });
+
+  if (!res.ok) {
+    return { ok: false as const, profile: normalizedProfile, source: 'local-only' as const, reason: 'unknown' as const };
+  }
+
+  const savedProfile: SocialProfile = {
+    publicName: String(res.data?.profile?.publicName || normalizedProfile.publicName),
+    handle: String(res.data?.profile?.handle || normalizedProfile.handle),
+    bio: String(res.data?.profile?.bio || normalizedProfile.bio),
+    avatarUrl: normalizeAvatarUrl(String(res.data?.profile?.avatarUrl || normalizedProfile.avatarUrl)),
+  };
+  saveProfile(savedProfile, normalizedUserId);
+  return { ok: true as const, profile: savedProfile, source: 'remote' as const };
 }
 
 function getViewBucket() {
