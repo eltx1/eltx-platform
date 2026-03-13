@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { BadgeCheck, Eye, Heart, MessageCircle, Repeat2, Send, ShieldCheck } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { BadgeCheck, Eye, Heart, MessageCircle, Repeat2, Send, Share2, ShieldCheck } from 'lucide-react';
 import type { SocialComment, SocialPost } from '../../app/lib/social-store';
 import { dict, useLang } from '../../app/lib/i18n';
+import { useToast } from '../../app/lib/toast';
 
 type PostCardProps = {
   post: SocialPost;
@@ -25,7 +27,11 @@ type PostCardProps = {
     trustNew?: string;
     followers?: string;
     mediaAlt?: string;
+    share?: string;
+    shareSuccess?: string;
+    openPost?: string;
   };
+  postHref?: string;
 };
 
 export default function PostCard({
@@ -40,9 +46,12 @@ export default function PostCard({
   commentSubmitLabel = 'Reply',
   onViewed,
   labels,
+  postHref,
 }: PostCardProps) {
+  const router = useRouter();
   const { lang } = useLang();
   const t = dict[lang];
+  const toast = useToast();
   const [openComposer, setOpenComposer] = useState(false);
   const [commentDraft, setCommentDraft] = useState('');
   const [localLikeState, setLocalLikeState] = useState({ liked: false, likes: post.likes });
@@ -80,6 +89,7 @@ export default function PostCard({
   }, [lang, post.createdAt]);
 
   const profileHref = `/creators/${encodeURIComponent(post.handle.replace(/^@/, '').trim())}`;
+  const resolvedPostHref = postHref || `/posts/${encodeURIComponent(post.id)}`;
 
   const articleRef = useRef<HTMLElement | null>(null);
   const viewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -122,7 +132,25 @@ export default function PostCard({
   }, [onViewed, post]);
 
   return (
-    <article ref={articleRef} className="rounded-3xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#121417]">
+    <article
+      ref={articleRef}
+      className="cursor-pointer rounded-3xl border border-[#2f3336] bg-black p-4 space-y-3 transition hover:bg-[#121417]"
+      onClick={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.closest('button, a, input, textarea')) return;
+        router.push(resolvedPostHref);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const target = event.target as HTMLElement;
+        if (target.closest('button, a, input, textarea')) return;
+        event.preventDefault();
+        router.push(resolvedPostHref);
+      }}
+      role="link"
+      tabIndex={0}
+      aria-label={labels?.openPost || (lang === 'ar' ? 'فتح المنشور' : 'Open post')}
+    >
       <div className="flex items-start gap-3">
         <Link href={profileHref} className="h-10 w-10 overflow-hidden rounded-full border border-[#2f3336] bg-[#111] transition hover:border-[#c9a75c]/60">
           <Image src={post.avatarUrl || '/assets/img/logo-new.svg'} alt={post.authorName} width={40} height={40} className="h-full w-full object-cover" />
@@ -183,6 +211,26 @@ export default function PostCard({
         >
           <Repeat2 className="h-4 w-4" />
           <span>{effectiveRepostState.reposts}</span>
+        </button>
+        <button
+          className="inline-flex items-center gap-2 transition hover:text-[#1d9bf0]"
+          onClick={async () => {
+            const shareUrl = `${window.location.origin}${resolvedPostHref}`;
+            if (navigator.share) {
+              try {
+                await navigator.share({ url: shareUrl, title: post.authorName, text: post.content.slice(0, 120) });
+                return;
+              } catch {
+                return;
+              }
+            }
+            await navigator.clipboard.writeText(shareUrl);
+            toast(labels?.shareSuccess || (lang === 'ar' ? 'تم نسخ رابط المنشور' : 'Post link copied'));
+          }}
+          aria-label={labels?.share || (lang === 'ar' ? 'مشاركة المنشور' : 'Share post')}
+          title={labels?.share || (lang === 'ar' ? 'مشاركة المنشور' : 'Share post')}
+        >
+          <Share2 className="h-4 w-4" />
         </button>
       </div>
 
