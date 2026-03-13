@@ -2,6 +2,36 @@ import { NextResponse } from 'next/server';
 import { RowDataPacket } from 'mysql2';
 import { getDb } from '../../../lib/db.server';
 
+const isSocialDemoMode =
+  process.env.DEMO_MODE === '1'
+  || process.env.DEMO_MODE === 'true'
+  || !process.env.DATABASE_URL
+  || !process.env.DB_HOST
+  || !process.env.DB_USER
+  || !process.env.DB_NAME;
+
+const demoSocialPosts = [
+  {
+    id: 'demo-post-1',
+    profileId: '1',
+    authorName: 'LordAI Creator',
+    handle: '@lordai_creator',
+    content: 'Demo mode: social post media rendering check ✅',
+    createdAt: '2026-03-13T09:15:00.000Z',
+    avatarUrl: '/assets/img/logo-new.svg',
+    imageUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
+    likes: 7,
+    comments: 2,
+    reposts: 1,
+    views: 123,
+    authorFollowers: 340,
+    isPremium: false,
+    viewerLiked: false,
+    viewerReposted: false,
+    commentsList: [],
+  },
+];
+
 type PostRow = RowDataPacket & {
   id: number;
   user_id: number;
@@ -65,6 +95,10 @@ async function loadComments(postIds: number[]) {
 }
 
 export async function GET(request: Request) {
+  if (isSocialDemoMode) {
+    return NextResponse.json({ posts: demoSocialPosts });
+  }
+
   try {
     const db = getDb();
     const viewerIdParam = new URL(request.url).searchParams.get('viewerId');
@@ -125,6 +159,19 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (isSocialDemoMode) {
+    const body = await request.json();
+    const userId = Number(body?.userId);
+    const content = String(body?.content || '').trim();
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return NextResponse.json({ error: 'Valid userId is required' }, { status: 400 });
+    }
+    if (!content) {
+      return NextResponse.json({ error: 'Content is required' }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true, demoMode: true });
+  }
+
   try {
     const body = await request.json();
     const userId = Number(body?.userId);

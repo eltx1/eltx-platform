@@ -80,6 +80,12 @@ export default function PostCard({
     return labels?.trustNew || (lang === 'ar' ? 'صانع محتوى جديد' : 'New creator');
   }, [labels?.trustGrowing, labels?.trustHigh, labels?.trustNew, labels?.trustTrusted, lang, post.authorFollowers]);
 
+  const isExternalMedia = useMemo(() => {
+    const value = String(post.imageUrl || '').trim();
+    if (!value) return false;
+    return /^https?:\/\//i.test(value) || value.startsWith('data:image/');
+  }, [post.imageUrl]);
+
   const dateLabel = useMemo(() => {
     try {
       return new Date(post.createdAt).toLocaleString(lang === 'ar' ? 'ar-EG' : 'en-US');
@@ -166,7 +172,17 @@ export default function PostCard({
           <p className="mt-2 text-sm text-white/85 leading-relaxed whitespace-pre-wrap">{post.content}</p>
           {post.imageUrl && (
             <div className="mt-3 overflow-hidden rounded-2xl border border-[#2f3336]">
-              <Image src={post.imageUrl} alt={labels?.mediaAlt || (lang === 'ar' ? 'وسائط المنشور' : 'Post media')} width={680} height={380} className="h-auto w-full object-cover" />
+              {isExternalMedia ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={post.imageUrl}
+                  alt={labels?.mediaAlt || (lang === 'ar' ? 'وسائط المنشور' : 'Post media')}
+                  className="h-auto w-full object-cover"
+                  loading="lazy"
+                />
+              ) : (
+                <Image src={post.imageUrl} alt={labels?.mediaAlt || (lang === 'ar' ? 'وسائط المنشور' : 'Post media')} width={680} height={380} className="h-auto w-full object-cover" />
+              )}
             </div>
           )}
         </div>
