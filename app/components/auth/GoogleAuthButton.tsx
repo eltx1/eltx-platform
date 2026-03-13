@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { dict, useLang } from '../../lib/i18n';
-import { resolveApiPath } from '../../lib/api-base';
+import { getConfiguredApiOriginForBrowser } from '../../lib/api-base';
 
 type Props = {
   mode: 'login' | 'signup';
@@ -17,7 +17,8 @@ export default function GoogleAuthButton({ mode, className = '' }: Props) {
   const [pending, setPending] = useState(false);
 
   const href = useMemo(() => {
-    const url = new URL(resolveApiPath('/api/auth/google/start'), typeof window !== 'undefined' ? window.location.origin : 'https://lordai.net');
+    const base = getConfiguredApiOriginForBrowser();
+    const url = new URL(`${base}/auth/google/start`, typeof window !== 'undefined' ? window.location.origin : 'https://lordai.net');
     url.searchParams.set('mode', mode);
     url.searchParams.set('redirect', '/dashboard');
     if (typeof window !== 'undefined') {

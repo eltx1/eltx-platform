@@ -62,7 +62,7 @@ export default function LoginContent() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const res = await apiFetch<any>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password, ...getOrStoreFirstUtm() }) });
+    const res = await apiFetch<any>('/auth/login', { method: 'POST', body: JSON.stringify({ email, password, ...getOrStoreFirstUtm() }) });
     if (!res.ok) {
       const err = (res.data as any)?.error;
       if (err?.code === 'INVALID_CREDENTIALS') {
