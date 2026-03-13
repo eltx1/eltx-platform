@@ -1086,7 +1086,7 @@ export const dict = {
     messages: {
       kicker: 'Direct messaging',
       title: 'Messages inbox',
-      subtitle: 'X-style messaging with requests, approvals, and live updates.',
+      subtitle: 'Smart messaging with requests, approvals, and live updates.',
       newRequest: 'Start a new request',
       usernamePlaceholder: 'Recipient username',
       requestPlaceholder: 'Write a short intro message…',
@@ -2217,7 +2217,7 @@ export const dict = {
     messages: {
       kicker: 'مراسلة مباشرة',
       title: 'صندوق الرسائل',
-      subtitle: 'ستايل قريب من X مع طلبات مراسلة وموافقة وتحديث لحظي.',
+      subtitle: 'مراسلة ذكية بطلبات وموافقة وتحديث لحظي.',
       newRequest: 'ابدأ طلب مراسلة جديد',
       usernamePlaceholder: 'اسم المستخدم المستلم',
       requestPlaceholder: 'اكتب مقدمة قصيرة للطلب…',

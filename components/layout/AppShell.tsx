@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Home, Search, Bell, Mail, UserRound, Sparkles, Wallet, ShieldCheck, CircleDollarSign } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
+import { useMessageUnread } from '../../app/lib/useMessageUnread';
 
 const items = [
   { href: '/dashboard', key: 'home', icon: Home },
@@ -22,6 +23,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { lang } = useLang();
   const t = dict[lang];
+  const { hasUnread } = useMessageUnread();
 
   const labels: Record<(typeof items)[number]['key'], string> = {
     home: t.appNav.home,
@@ -45,13 +47,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               const active = pathname === href || pathname?.startsWith(`${href}/`);
               return (
                 <Link key={href} href={href} className={`x-nav-item ${active ? 'is-active' : ''}`}>
-                  <Icon className="h-5 w-5" />
+                  <span className="relative">
+                    <Icon className="h-5 w-5" />
+                    {href === '/messages' && hasUnread && !active && <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-black" aria-hidden="true" />}
+                  </span>
                   <span>{labels[key]}</span>
                 </Link>
               );
             })}
           </div>
-          <div className="x-card p-4 text-sm text-white/70">{lang === 'ar' ? 'تجربة حديثة على ستايل X مع المحافظة على كل وظائف المنصة.' : 'Modern X-inspired experience while keeping the full platform features.'}</div>
+          <div className="x-card p-4 text-sm text-white/70">{lang === 'ar' ? 'تجربة حديثة مع المحافظة على كل وظائف المنصة.' : 'Modern experience while keeping the full platform features.'}</div>
         </aside>
 
         <main className="min-w-0 space-y-4">{children}</main>

@@ -7,6 +7,7 @@ import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
+import { writeUnreadTotal } from '../../lib/useMessageUnread';
 
 type MessageUser = { id: number; username: string | null };
 type MessageThread = {
@@ -27,6 +28,11 @@ type MessageEntry = {
   body: string;
   created_at?: string;
 };
+
+
+function totalUnread(threads: MessageThread[] = []) {
+  return threads.reduce((sum, thread) => sum + Number(thread.unread_count || 0), 0);
+}
 
 function wsBaseFromApiBase(apiBase?: string) {
   if (!apiBase) return 'ws://localhost:4000';
@@ -71,7 +77,9 @@ export default function MessagesPage() {
       return;
     }
 
-    setInbox(inboxRes.data.threads || []);
+    const threads = inboxRes.data.threads || [];
+    setInbox(threads);
+    writeUnreadTotal(totalUnread(threads));
     setIncomingRequests(requestsRes.data.incoming || []);
 
     if (!selectedThreadId && inboxRes.data.threads?.length) {
@@ -88,7 +96,11 @@ export default function MessagesPage() {
       }
       setSelectedThreadId(threadId);
       setMessages(res.data.messages || []);
-      setInbox((prev) => prev.map((thread) => (thread.id === threadId ? { ...thread, unread_count: 0 } : thread)));
+      setInbox((prev) => {
+        const next = prev.map((thread) => (thread.id === threadId ? { ...thread, unread_count: 0 } : thread));
+        writeUnreadTotal(totalUnread(next));
+        return next;
+      });
     },
     [t.common.genericError, toast]
   );
@@ -124,8 +136,8 @@ export default function MessagesPage() {
           const incoming = packet.payload?.message as MessageEntry | undefined;
           const threadId = Number(packet.payload?.thread_id || incoming?.thread_id || 0);
           if (!incoming || !threadId) return;
-          setInbox((prev) =>
-            prev.map((thread) =>
+          setInbox((prev) => {
+            const next = prev.map((thread) =>
               thread.id === threadId
                 ? {
                     ...thread,
@@ -134,8 +146,10 @@ export default function MessagesPage() {
                     unread_count: selectedThreadId === threadId ? 0 : (thread.unread_count || 0) + 1,
                   }
                 : thread
-            )
-          );
+            );
+            writeUnreadTotal(totalUnread(next));
+            return next;
+          });
           setMessages((prev) => (selectedThreadId === threadId ? [...prev, incoming] : prev));
         }
         if (packet?.type === 'message:request' || packet?.type === 'message:request:update') {
@@ -193,13 +207,15 @@ export default function MessagesPage() {
     }
     setMessages((prev) => [...prev, res.data.message]);
     setReply('');
-    setInbox((prev) =>
-      prev.map((thread) =>
+    setInbox((prev) => {
+      const next = prev.map((thread) =>
         thread.id === selectedThreadId
           ? { ...thread, last_message_preview: res.data.message.body, last_message_at: res.data.message.created_at }
           : thread
-      )
-    );
+      );
+      writeUnreadTotal(totalUnread(next));
+      return next;
+    });
   };
 
   return (

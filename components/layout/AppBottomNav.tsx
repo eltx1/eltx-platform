@@ -4,8 +4,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { CandlestickChart, Coins, Home, Mail, Wallet } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
+import { useMessageUnread } from '../../app/lib/useMessageUnread';
 
-function NavItem({ href, label, icon: Icon, active }: { href: string; label: string; icon: typeof Home; active: boolean }) {
+function NavItem({ href, label, icon: Icon, active, showUnread }: { href: string; label: string; icon: typeof Home; active: boolean; showUnread?: boolean }) {
   return (
     <Link
       href={href}
@@ -23,6 +24,7 @@ function NavItem({ href, label, icon: Icon, active }: { href: string; label: str
         }`}
       >
         <Icon className="h-[18px] w-[18px]" strokeWidth={2.2} />
+        {showUnread && <span className="absolute right-[calc(50%-17px)] top-[calc(50%-18px)] h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-black" aria-hidden="true" />}
       </div>
 
       <span className="line-clamp-1 text-center leading-tight">{label}</span>
@@ -34,6 +36,7 @@ export default function AppBottomNav() {
   const pathname = usePathname();
   const { lang } = useLang();
   const t = dict[lang];
+  const { hasUnread } = useMessageUnread();
 
   const isActive = (href: string) => pathname === href || pathname?.startsWith(`${href}/`);
 
@@ -56,6 +59,7 @@ export default function AppBottomNav() {
               label={item.label}
               icon={item.icon}
               active={isActive(item.activeRoot ?? item.href)}
+              showUnread={item.href === '/messages' && hasUnread && !isActive('/messages')}
             />
           ))}
         </div>
