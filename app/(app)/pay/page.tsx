@@ -48,17 +48,31 @@ export default function PayPage() {
     if (user === null) router.replace('/login');
   }, [user, router]);
 
+  const sortPayAssets = useCallback((list: Asset[]) => {
+    const priority = ['USDT'];
+    return [...list].sort((a, b) => {
+      const aSym = (a.symbol || '').toUpperCase();
+      const bSym = (b.symbol || '').toUpperCase();
+      const aIndex = priority.indexOf(aSym);
+      const bIndex = priority.indexOf(bSym);
+      const aRank = aIndex === -1 ? priority.length : aIndex;
+      const bRank = bIndex === -1 ? priority.length : bIndex;
+      if (aRank !== bRank) return aRank - bRank;
+      return aSym.localeCompare(bSym);
+    });
+  }, []);
+
   const fetchAssets = useCallback(() => {
     apiFetch<{ assets: Asset[]; transfer_fee_bps?: number }>('/wallet/assets').then((res) => {
       if (res.ok) {
-        setAssets(res.data.assets);
-        const preferred =
-          res.data.assets.find((token) => token.symbol === 'BNB')?.symbol || res.data.assets[0]?.symbol || '';
+        const sortedAssets = sortPayAssets(res.data.assets);
+        setAssets(sortedAssets);
+        const preferred = sortedAssets.find((token) => token.symbol === 'USDT')?.symbol || sortedAssets[0]?.symbol || '';
         setAsset((prev) => prev || preferred);
         setTransferFeeBps(Number(res.data.transfer_fee_bps ?? 0));
       }
     });
-  }, []);
+  }, [sortPayAssets]);
 
   useEffect(() => {
     fetchAssets();
@@ -69,7 +83,7 @@ export default function PayPage() {
   useEffect(() => {
     if (asset && assets.some((token) => token.symbol === asset)) return;
     if (!assets.length) return;
-    const fallback = assets.find((token) => token.symbol === 'BNB')?.symbol || assets[0].symbol;
+    const fallback = assets.find((token) => token.symbol === 'USDT')?.symbol || assets[0].symbol;
     setAsset(fallback);
   }, [asset, assets]);
 

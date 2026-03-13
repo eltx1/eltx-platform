@@ -15,7 +15,7 @@ process.env.GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || 'test
 process.env.GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || 'test-google-client-secret';
 
 const testSchema = {
-  users: [{ id: 1, email: 'user@example.com', password_hash: '$argon2id$v=19$m=65536,t=3,p=4$0O4HViXmWtx2WnYIob2P0Q$5h6yA7yrWzXUOqYdW+awh7Y8/4Iv7pGGNqvLFxY2QWo' }],
+  users: [{ id: 1, email: 'user@example.com', password_hash: '$argon2id$v=19$m=65536,t=3,p=4$0O4HViXmWtx2WnYIob2P0Q$5h6yA7yrWzXUOqYdW+awh7Y8/4Iv7pGGNqvLFxY2QWo' }, { id: 2, email: 'recipient@example.com', password_hash: '' }],
   sessions: [{ id: 'valid-session', user_id: 1 }],
   premium: { is_premium: 0, premium_expires_at: null },
   balances: { '1:USDT': '1000000' },
@@ -100,6 +100,11 @@ const pool = {
     if (sql.includes("SELECT value FROM platform_settings WHERE name='premium_monthly_price_usdt'")) {
       return [[{ value: testSchema.premiumMonthlyPriceUsdt }]];
     }
+    if (sql.includes('SELECT value FROM platform_settings WHERE name=?')) {
+      const name = String(params[0] || '');
+      if (name === 'transfer_fee_bps') return [[{ value: '10' }]];
+      return [[{ value: '0' }]];
+    }
     if (sql.includes('SELECT asset, balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
       const balance = testSchema.balances[key];
@@ -126,6 +131,32 @@ const pool = {
       testSchema.balances[key] = String(params[2]);
       return [{ affectedRows: 1 }];
     }
+    if (sql.includes('SELECT id FROM users WHERE id=? FOR UPDATE')) {
+      const userId = Number(params[0]);
+      const user = testSchema.users.find((u) => u.id === userId);
+      return [user ? [{ id: userId }] : []];
+    }
+    if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND asset=? FOR UPDATE')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      const balance = testSchema.balances[key];
+      return [balance ? [{ balance_wei: balance }] : []];
+    }
+    if (sql.includes('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND asset=?')) {
+      const key = `${Number(params[1])}:${String(params[2]).toUpperCase()}`;
+      const current = BigInt(testSchema.balances[key] || '0');
+      testSchema.balances[key] = (current - BigInt(params[0])).toString();
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      const current = BigInt(testSchema.balances[key] || '0');
+      testSchema.balances[key] = (current + BigInt(params[2])).toString();
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO wallet_transfers')) {
+      return [{ insertId: 1, affectedRows: 1 }];
+    }
+
     if (sql.includes('UPDATE users SET is_premium=1, premium_expires_at=? WHERE id=?')) {
       testSchema.premium = { is_premium: 1, premium_expires_at: params[0] };
       return [{ affectedRows: 1 }];
@@ -341,6 +372,21 @@ test('GET /wallet/usdt-balance keeps 18-decimal balances unchanged when already 
   assert.equal(res.body?.balance, '1.000000000000000000');
 });
 
+
+test('POST /wallet/transfer allows USDT transfers for authenticated users', async () => {
+  testSchema.balances['1:USDT'] = '10000000000000000000';
+  testSchema.balances['2:USDT'] = '0';
+
+  const res = await request
+    .post('/wallet/transfer')
+    .set('Cookie', 'sid=valid-session')
+    .send({ to_user_id: 2, asset: 'USDT', amount: '10' });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(testSchema.balances['1:USDT'], '0');
+  assert.equal(testSchema.balances['2:USDT'], '9990000000000000000');
+});
 test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {
   const res = await request.get('/fiat/stripe/rate');
   assert.equal(res.status, 401);
