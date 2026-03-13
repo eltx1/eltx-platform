@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
-import { resolveApiPath } from '../../../lib/api-base';
+import { getConfiguredApiOriginForBrowser } from '../../../lib/api-base';
 import { dict, useLang } from '../../../lib/i18n';
 
 const CALLBACK_REDIRECT_TIMEOUT_MS = 8000;
@@ -15,8 +15,9 @@ export default function GoogleCallbackPage() {
   const [target, setTarget] = useState('');
 
   useEffect(() => {
+    const base = getConfiguredApiOriginForBrowser();
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const callbackUrl = `${resolveApiPath('/api/auth/google/callback')}${search}`;
+    const callbackUrl = `${base}/auth/google/callback${search}`;
     setTarget(callbackUrl);
 
     const timer = window.setTimeout(() => {
