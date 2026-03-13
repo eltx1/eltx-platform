@@ -38,7 +38,7 @@ function authMeUrl(request: NextRequest) {
     return `${API_BASE}/auth/me`;
   }
 
-  return `${request.nextUrl.origin}/auth/me`;
+  return `${request.nextUrl.origin}/api/auth/me`;
 }
 
 async function hasValidSession(request: NextRequest) {

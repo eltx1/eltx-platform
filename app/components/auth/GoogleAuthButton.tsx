@@ -18,7 +18,7 @@ export default function GoogleAuthButton({ mode, className = '' }: Props) {
 
   const href = useMemo(() => {
     const base = getConfiguredApiOriginForBrowser();
-    const url = new URL(`${base}/auth/google/start`, typeof window !== 'undefined' ? window.location.origin : 'https://lordai.net');
+    const url = new URL(`${base}/api/auth/google/start`, typeof window !== 'undefined' ? window.location.origin : 'https://lordai.net');
     url.searchParams.set('mode', mode);
     url.searchParams.set('redirect', '/dashboard');
     if (typeof window !== 'undefined') {
