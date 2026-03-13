@@ -65,6 +65,15 @@ function normalizeHandle(handle?: string | null, fallback?: string) {
   return `@${raw.toLowerCase()}`;
 }
 
+function normalizePostImageUrl(rawValue?: string | null) {
+  const value = String(rawValue || '').trim();
+  if (!value || value === 'about:blank') return null;
+  if (value.startsWith('/')) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('data:image/')) return value;
+  return null;
+}
+
 async function loadComments(postIds: number[]) {
   if (!postIds.length) return new Map<number, any[]>();
   const db = getDb();
@@ -148,7 +157,7 @@ export async function GET(request: Request) {
         content: row.content,
         createdAt: new Date(row.created_at).toISOString(),
         avatarUrl: row.avatar_url,
-        imageUrl: row.image_url,
+        imageUrl: normalizePostImageUrl(row.image_url),
         likes: Number(row.likes || 0),
         comments: Number(row.comments || 0),
         reposts: Number(row.reposts || 0),
@@ -185,7 +194,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const userId = Number(body?.userId);
     const content = String(body?.content || '').trim();
-    const imageUrl = body?.imageUrl ? String(body.imageUrl) : null;
+    const imageUrl = normalizePostImageUrl(body?.imageUrl ? String(body.imageUrl) : null);
     const profile = body?.profile || {};
 
     if (!Number.isFinite(userId) || userId <= 0) {
