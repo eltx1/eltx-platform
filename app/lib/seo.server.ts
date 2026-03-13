@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { randomBytes } from 'crypto';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { getDb } from './db.server';
 
@@ -35,9 +36,13 @@ export function normalizeSeoSettings(input: Partial<SeoSettings> | null | undefi
     sitemapRefreshHours: Number.isFinite(refresh) ? Math.min(24, Math.max(1, Math.round(refresh))) : DEFAULT_SEO_SETTINGS.sitemapRefreshHours,
     indexNowEnabled: Boolean(input?.indexNowEnabled),
     indexNowKey: String(input?.indexNowKey || '').trim(),
-    indexNowKeyLocation: String(input?.indexNowKeyLocation || '/indexnow-key.txt').trim(),
+    indexNowKeyLocation: '/indexnow-key.txt',
     includeRssInSitemap: input?.includeRssInSitemap !== false,
   };
+}
+
+function createIndexNowKey() {
+  return randomBytes(16).toString('hex');
 }
 
 async function readFromDb(): Promise<SeoSettings | null> {
@@ -78,6 +83,10 @@ export async function readSeoSettings(): Promise<SeoSettings> {
 
 export async function writeSeoSettings(input: Partial<SeoSettings> | null | undefined): Promise<SeoSettings> {
   const settings = normalizeSeoSettings(input);
+  if (settings.indexNowEnabled && !settings.indexNowKey) {
+    settings.indexNowKey = createIndexNowKey();
+  }
+  settings.indexNowKeyLocation = '/indexnow-key.txt';
   try {
     const db = getDb();
     await db.query<ResultSetHeader>(
@@ -120,9 +129,7 @@ export async function notifySearchEnginesForPost(postUrl: string): Promise<{ sen
   }
 
   const base = getBaseUrl();
-  const keyLocation = settings.indexNowKeyLocation?.startsWith('http')
-    ? settings.indexNowKeyLocation
-    : `${base}${settings.indexNowKeyLocation || '/indexnow-key.txt'}`;
+  const keyLocation = `${base}${settings.indexNowKeyLocation || '/indexnow-key.txt'}`;
   try {
     const response = await fetch('https://api.indexnow.org/indexnow', {
       method: 'POST',
