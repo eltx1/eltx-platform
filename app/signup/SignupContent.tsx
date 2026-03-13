@@ -35,7 +35,7 @@ export default function SignupContent() {
     const payload: Record<string, string> = { email: sanitizedEmail, password, language: lang, username, ...getOrStoreFirstUtm() };
     if (referralCode) payload.referral_code = referralCode;
 
-    const res = await apiFetch<any>('/auth/signup', {
+    const res = await apiFetch<any>('/api/auth/signup', {
       method: 'POST',
       body: JSON.stringify(payload),
     });

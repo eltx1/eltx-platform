@@ -19,7 +19,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<any | null | undefined>(demoUser ?? undefined);
   const refresh = useCallback(async () => {
     if (demoUser) return demoUser;
-    const res = await apiFetch<any>('/auth/me');
+    const res = await apiFetch<any>('/api/auth/me');
     const nextUser = res.ok ? res.data : null;
     setUser(nextUser);
     return nextUser;
@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       return;
     }
-    await apiFetch('/auth/logout', { method: 'POST' });
+    await apiFetch('/api/auth/logout', { method: 'POST' });
     setUser(null);
     if (typeof window !== 'undefined') {
       window.location.assign('/login?loggedOut=1');

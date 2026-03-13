@@ -17,7 +17,7 @@ export default function GoogleCallbackPage() {
   useEffect(() => {
     const base = getConfiguredApiOriginForBrowser();
     const search = typeof window !== 'undefined' ? window.location.search : '';
-    const callbackUrl = `${base}/auth/google/callback${search}`;
+    const callbackUrl = `${base}/api/auth/google/callback${search}`;
     setTarget(callbackUrl);
 
     const timer = window.setTimeout(() => {
