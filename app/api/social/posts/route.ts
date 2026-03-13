@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { getDb } from '../../../lib/db.server';
+import { getBaseUrl, notifySearchEnginesForPost } from '../../../lib/seo.server';
 
 const isSocialDemoMode =
   process.env.DEMO_MODE === '1'
@@ -195,7 +196,7 @@ export async function POST(request: Request) {
     }
 
     const db = getDb();
-    await db.query(
+    const [insertResult] = await db.query<ResultSetHeader>(
       `INSERT INTO social_posts (user_id, content, image_url, word_count)
        VALUES (?, ?, ?, ?)`,
       [userId, content, imageUrl, content.split(/\s+/).filter(Boolean).length],
@@ -216,7 +217,21 @@ export async function POST(request: Request) {
       ],
     );
 
-    return NextResponse.json({ ok: true });
+    const postId = Number(insertResult.insertId || 0);
+    if (postId > 0) {
+      const postUrl = `${getBaseUrl()}/posts/${encodeURIComponent(String(postId))}`;
+      notifySearchEnginesForPost(postUrl)
+        .then((result) => {
+          if (!result.sent) {
+            console.warn('search ping skipped', { postId, details: result.details });
+          }
+        })
+        .catch((pingError) => {
+          console.error('search ping failed', pingError);
+        });
+    }
+
+    return NextResponse.json({ ok: true, postId });
   } catch (error) {
     console.error('social posts POST failed', error);
     return NextResponse.json({ error: 'Failed to create post' }, { status: 500 });
