@@ -204,6 +204,17 @@ type SeoSettings = {
   includeRssInSitemap: boolean;
 };
 
+function generateIndexNowKey() {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes)
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+  }
+  return Math.random().toString(16).slice(2) + Date.now().toString(16);
+}
+
 type SeoSettingsResponse = { settings: SeoSettings };
 
 type PremiumSettingsResponse = {
@@ -1980,7 +1991,7 @@ function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">SEO settings</h2>
-        <p className="text-sm text-white/70">Control sitemap recrawl frequency and instant search engine pings (IndexNow-compatible) from admin panel.</p>
+        <p className="text-sm text-white/70">Control sitemap refresh and IndexNow. We automatically publish your key at <code>/indexnow-key.txt</code> once enabled.</p>
       </div>
 
       {loading ? (
@@ -2030,16 +2041,16 @@ function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
             />
           </label>
 
-          <label className="block text-sm text-white/70">
-            IndexNow key location URL (optional)
-            <input
-              type="url"
-              value={form.indexNowKeyLocation}
-              onChange={(e) => setForm((prev) => ({ ...prev, indexNowKeyLocation: e.target.value }))}
-              placeholder="https://lordai.net/your-indexnow-key.txt"
-              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 text-sm focus:border-blue-500 focus:outline-none"
-            />
-          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setForm((prev) => ({ ...prev, indexNowKey: generateIndexNowKey(), indexNowEnabled: true }))}
+              className="rounded-full border border-white/20 px-3 py-1.5 text-xs text-white/80 hover:border-white/40"
+            >
+              Auto-generate secure key
+            </button>
+            <span className="text-xs text-white/60">Public key URL: <code>/indexnow-key.txt</code></span>
+          </div>
 
           <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-white/60">
             Endpoints: <code>/sitemap.xml</code>, <code>/robots.txt</code>, <code>/rss.xml</code>
