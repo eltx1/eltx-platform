@@ -41,13 +41,15 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   const normalizedPath = isAbsolute ? path : normalizePath(path);
   const shouldBypassBase = isAbsolute || normalizedPath.startsWith('/api/');
   const url = shouldBypassBase ? normalizedPath : `${base}${normalizedPath}`;
+  const isFormDataBody = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const defaultHeaders = isFormDataBody ? {} : { 'Content-Type': 'application/json' };
   try {
     const res = await fetch(url, {
       credentials: 'include',
       cache: 'no-store',
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        ...defaultHeaders,
         ...(options.headers || {}),
       },
     });
