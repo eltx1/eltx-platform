@@ -183,6 +183,8 @@ export const dict = {
         profileBioPlaceholder: 'Tell people about you.',
         profileUpdated: 'Profile updated.',
         profileBadges: ['Public profile', 'Creator mode', 'Wallet connected'],
+        profileFollowersLabel: 'Followers',
+        profileFollowingLabel: 'Following',
         profileEmpty: 'You have not posted yet. Share your first update.',
       },
       aiChat: {
@@ -1317,6 +1319,8 @@ export const dict = {
         profileBioPlaceholder: 'احكي للناس عنك.',
         profileUpdated: 'تم تحديث البروفايل.',
         profileBadges: ['بروفايل عام', 'وضع المبدع', 'المحفظة متصلة'],
+        profileFollowersLabel: 'المتابعين',
+        profileFollowingLabel: 'المتابَعين',
         profileEmpty: 'لسه ما نشرتش بوست. شارك أول تحديث ليك.',
       },
       aiChat: {
