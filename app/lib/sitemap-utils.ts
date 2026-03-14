@@ -5,6 +5,10 @@ export type SitemapEntry = {
   lastmod: string;
   changefreq: 'always' | 'hourly' | 'daily' | 'weekly' | 'monthly' | 'yearly' | 'never';
   priority: number;
+  alternates: Array<{
+    hreflang: 'en' | 'ar' | 'x-default';
+    href: string;
+  }>;
 };
 
 const staticRoutes: Array<{ path: string; priority: number }> = [
@@ -35,6 +39,20 @@ function normalizeLastmod(value: string | Date) {
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
 }
 
+function withLangParam(url: string, lang: 'en' | 'ar') {
+  const parsed = new URL(url);
+  parsed.searchParams.set('lang', lang);
+  return parsed.toString();
+}
+
+function buildAlternates(loc: string): SitemapEntry['alternates'] {
+  return [
+    { hreflang: 'en', href: withLangParam(loc, 'en') },
+    { hreflang: 'ar', href: withLangParam(loc, 'ar') },
+    { hreflang: 'x-default', href: loc },
+  ];
+}
+
 export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
   const baseUrl = getBaseUrl();
   const settings = await readSeoSettings();
@@ -51,6 +69,7 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
       lastmod: now,
       changefreq,
       priority: route.priority,
+      alternates: buildAlternates(loc),
     });
   });
 
@@ -63,6 +82,7 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
       lastmod: normalizeLastmod(post.lastmod),
       changefreq,
       priority: 0.7,
+      alternates: buildAlternates(loc),
     });
   });
 
@@ -72,9 +92,14 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
 export function renderSitemapXml(entries: SitemapEntry[]) {
   const rows = entries
     .map(
-      (entry) => `  <url>\n    <loc>${xmlEscape(entry.loc)}</loc>\n    <lastmod>${xmlEscape(entry.lastmod)}</lastmod>\n    <changefreq>${entry.changefreq}</changefreq>\n    <priority>${entry.priority.toFixed(1)}</priority>\n  </url>`,
+      (entry) => `  <url>\n    <loc>${xmlEscape(entry.loc)}</loc>\n${entry.alternates
+        .map(
+          (alternate) =>
+            `    <xhtml:link rel="alternate" hreflang="${alternate.hreflang}" href="${xmlEscape(alternate.href)}" />`,
+        )
+        .join('\n')}\n    <lastmod>${xmlEscape(entry.lastmod)}</lastmod>\n    <changefreq>${entry.changefreq}</changefreq>\n    <priority>${entry.priority.toFixed(1)}</priority>\n  </url>`,
     )
     .join('\n');
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${rows}\n</urlset>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${rows}\n</urlset>\n`;
 }
