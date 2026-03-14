@@ -30,6 +30,8 @@ export type SocialProfile = {
   handle: string;
   bio: string;
   avatarUrl: string;
+  followersCount?: number;
+  followingCount?: number;
 };
 
 export type SocialComment = {
@@ -314,6 +316,8 @@ export async function fetchProfile(userId?: UserScopeId, seed?: ProfileSeed) {
     handle: String(remoteProfile.handle || fallbackProfile.handle).trim() || fallbackProfile.handle,
     bio: String(remoteProfile.bio || ''),
     avatarUrl: normalizeAvatarUrl(String(remoteProfile.avatarUrl || fallbackProfile.avatarUrl)),
+    followersCount: Number(remoteProfile.followersCount || 0),
+    followingCount: Number(remoteProfile.followingCount || 0),
   };
 
   saveProfile(normalizedProfile, normalizedUserId);

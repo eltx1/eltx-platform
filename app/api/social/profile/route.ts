@@ -20,6 +20,8 @@ type ProfileRow = RowDataPacket & {
   avatar_url: string | null;
 };
 
+type CountRow = RowDataPacket & { total: number };
+
 function normalizeHandle(handle?: string | null, fallback?: string) {
   const raw = String(handle || fallback || 'user').trim().replace(/^@+/, '') || 'user';
   return `@${raw.toLowerCase()}`;
@@ -53,6 +55,8 @@ export async function GET(request: Request) {
         handle: `@user${userId}`,
         bio: '',
         avatarUrl: DEFAULT_AVATAR_URL,
+        followersCount: 0,
+        followingCount: 0,
       },
       demoMode: true,
     });
@@ -73,12 +77,24 @@ export async function GET(request: Request) {
       return NextResponse.json({ profile: null });
     }
 
+    const [[followersCountRow]] = await db.query<CountRow[]>(
+      'SELECT COUNT(*) AS total FROM social_follows WHERE followee_id = ?',
+      [userId],
+    );
+
+    const [[followingCountRow]] = await db.query<CountRow[]>(
+      'SELECT COUNT(*) AS total FROM social_follows WHERE follower_id = ?',
+      [userId],
+    );
+
     return NextResponse.json({
       profile: {
         publicName: String(row.public_name || `User ${row.user_id}`),
         handle: normalizeHandle(row.handle, `user${row.user_id}`),
         bio: String(row.bio || ''),
         avatarUrl: normalizeAvatarUrl(row.avatar_url),
+        followersCount: Number(followersCountRow?.total || 0),
+        followingCount: Number(followingCountRow?.total || 0),
       },
     });
   } catch (error) {

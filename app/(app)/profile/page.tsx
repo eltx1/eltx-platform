@@ -62,6 +62,17 @@ export default function ProfilePage() {
           </div>
         </div>
         <p className="text-sm text-white/70">{profile.bio}</p>
+
+        <div className="flex flex-wrap gap-3">
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2">
+            <p className="text-[11px] text-white/50">{t.dashboard.social.profileFollowersLabel}</p>
+            <p className="text-base font-semibold text-white">{Number(profile.followersCount || 0).toLocaleString()}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2">
+            <p className="text-[11px] text-white/50">{t.dashboard.social.profileFollowingLabel}</p>
+            <p className="text-base font-semibold text-white">{Number(profile.followingCount || 0).toLocaleString()}</p>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2 text-xs text-white/60">
           {t.dashboard.social.profileBadges.map((badge) => (
             <span key={badge} className="rounded-full border border-white/10 px-3 py-1">
