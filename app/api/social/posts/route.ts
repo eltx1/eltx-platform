@@ -26,6 +26,7 @@ const demoSocialPosts = [
     reposts: 1,
     views: 123,
     authorFollowers: 340,
+    authorPremiumFollowers: 36,
     isPremium: false,
     viewerLiked: false,
     viewerReposted: false,
@@ -46,6 +47,7 @@ type PostRow = RowDataPacket & {
   handle: string;
   avatar_url: string | null;
   followers: number;
+  premium_followers: number;
   viewer_liked: number;
   viewer_reposted: number;
   viewer_followed: number;
@@ -127,6 +129,7 @@ export async function GET(request: Request) {
               COALESCE(sp.handle, u.username, CONCAT('user', p.user_id)) AS handle,
               COALESCE(sp.avatar_url, '/assets/img/logo-new.svg') AS avatar_url,
               COALESCE(f.followers, 0) AS followers,
+              COALESCE(pf.premium_followers, 0) AS premium_followers,
               COALESCE(l.likes, 0) AS likes,
               COALESCE(c.comments, 0) AS comments,
               COALESCE(r.reposts, 0) AS reposts,
@@ -140,6 +143,15 @@ export async function GET(request: Request) {
     LEFT JOIN (SELECT post_id, COUNT(*) AS comments FROM social_post_comments GROUP BY post_id) c ON c.post_id = p.id
     LEFT JOIN (SELECT post_id, COUNT(*) AS reposts FROM social_post_reposts GROUP BY post_id) r ON r.post_id = p.id
     LEFT JOIN (SELECT followee_id, COUNT(*) AS followers FROM social_follows GROUP BY followee_id) f ON f.followee_id = p.user_id
+    LEFT JOIN (
+      SELECT sf.followee_id, COUNT(*) AS premium_followers
+        FROM social_follows sf
+        JOIN users fu ON fu.id = sf.follower_id
+       WHERE fu.is_premium = 1
+         AND fu.premium_expires_at IS NOT NULL
+         AND fu.premium_expires_at > NOW()
+    GROUP BY sf.followee_id
+    ) pf ON pf.followee_id = p.user_id
     LEFT JOIN social_post_likes vl ON vl.post_id = p.id AND vl.user_id = ?
     LEFT JOIN social_post_reposts vr ON vr.post_id = p.id AND vr.user_id = ?
     LEFT JOIN social_follows vf ON vf.followee_id = p.user_id AND vf.follower_id = ?
@@ -169,6 +181,7 @@ export async function GET(request: Request) {
         reposts: Number(row.reposts || 0),
         views: 0,
         authorFollowers: Number(row.followers || 0),
+        authorPremiumFollowers: Number(row.premium_followers || 0),
         isFollowed: Boolean(row.viewer_followed),
         isPremium: false,
         viewerLiked: Boolean(row.viewer_liked),

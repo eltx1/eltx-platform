@@ -18,6 +18,7 @@ export type SocialPost = {
   reposts: number;
   views: number;
   authorFollowers?: number;
+  authorPremiumFollowers?: number;
   isFollowed?: boolean;
   isPremium?: boolean;
   viewerLiked?: boolean;
@@ -511,6 +512,7 @@ export function createPost({
     reposts: 0,
     views: 0,
     authorFollowers: 15,
+    authorPremiumFollowers: 0,
     isFollowed: true,
     isPremium: Boolean(isPremium),
     viewerLiked: false,
