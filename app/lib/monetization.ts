@@ -97,21 +97,30 @@ export function resolveCreatorPremiumFollowers(params: {
   userHandle?: string | null;
   userId?: string | number | null;
 }) {
-  const normalized = String(params.userHandle || '').trim().toLowerCase();
+  const normalizedHandle = String(params.userHandle || '').trim().toLowerCase();
+  const normalizedUserId = params.userId == null ? '' : String(params.userId).trim();
   const persisted = getPremiumFollowersCount(params.userId);
-  if (!normalized) return persisted;
+  const hasMatchedPosts = params.posts.some((post) => {
+    const profileId = String(post.profileId || '').trim();
+    if (normalizedUserId && profileId && profileId === normalizedUserId) return true;
+    return normalizedHandle ? post.handle.trim().toLowerCase() === normalizedHandle : false;
+  });
+
+  if (!hasMatchedPosts) return persisted;
 
   const derived = params.posts.reduce((maxFollowers, post) => {
-    if (post.handle.trim().toLowerCase() !== normalized) return maxFollowers;
-    return Math.max(maxFollowers, Math.floor(Number(post.authorFollowers || 0)));
+    const profileId = String(post.profileId || '').trim();
+    const matchesUserId = Boolean(normalizedUserId && profileId && profileId === normalizedUserId);
+    const matchesHandle = normalizedHandle ? post.handle.trim().toLowerCase() === normalizedHandle : false;
+    if (!matchesUserId && !matchesHandle) return maxFollowers;
+    return Math.max(maxFollowers, Math.floor(Number(post.authorPremiumFollowers ?? 0)));
   }, 0);
 
-  if (derived > persisted) {
+  if (derived !== persisted) {
     setPremiumFollowersCount(derived, params.userId);
-    return derived;
   }
 
-  return persisted;
+  return derived;
 }
 
 function monthKeyFor(date: Date) {
