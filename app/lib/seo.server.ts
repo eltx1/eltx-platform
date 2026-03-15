@@ -121,6 +121,41 @@ export async function loadPublicSitemapPosts(limit = 1000) {
   }
 }
 
+export async function countPublicSitemapPosts() {
+  try {
+    const db = getDb();
+    const [rows] = await db.query<Array<RowDataPacket & { total: number }>>(
+      `SELECT COUNT(*) AS total FROM social_posts`,
+    );
+    return Number(rows[0]?.total || 0);
+  } catch {
+    return 0;
+  }
+}
+
+export async function loadPublicSitemapPostsPage(page: number, pageSize: number) {
+  const safePage = Number.isFinite(page) ? Math.max(1, Math.floor(page)) : 1;
+  const safePageSize = Number.isFinite(pageSize) ? Math.min(50000, Math.max(1, Math.floor(pageSize))) : 1000;
+  const offset = (safePage - 1) * safePageSize;
+
+  try {
+    const db = getDb();
+    const [rows] = await db.query<PostRow[]>(
+      `SELECT id, created_at, updated_at
+         FROM social_posts
+     ORDER BY created_at DESC
+        LIMIT ? OFFSET ?`,
+      [safePageSize, offset],
+    );
+    return rows.map((row) => ({
+      id: String(row.id),
+      lastmod: new Date(row.updated_at || row.created_at).toISOString(),
+    }));
+  } catch {
+    return [] as Array<{ id: string; lastmod: string }>;
+  }
+}
+
 export async function notifySearchEnginesForPost(postUrl: string): Promise<{ sent: boolean; details: string[] }> {
   const settings = await readSeoSettings();
   const details: string[] = [];
