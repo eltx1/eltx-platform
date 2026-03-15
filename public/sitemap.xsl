@@ -28,37 +28,58 @@
           This sitemap includes English and Arabic alternates for language switching.
         </p>
 
-        <table>
-          <thead>
-            <tr>
-              <th>URL</th>
-              <th>Last Modified</th>
-              <th>Change Frequency</th>
-              <th>Priority</th>
-              <th>Alternates (en/ar/x-default)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <xsl:for-each select="s:urlset/s:url">
+        <xsl:if test="s:sitemapindex">
+          <table>
+            <thead>
               <tr>
-                <td><code><xsl:value-of select="s:loc"/></code></td>
-                <td><xsl:value-of select="s:lastmod"/></td>
-                <td><xsl:value-of select="s:changefreq"/></td>
-                <td><xsl:value-of select="s:priority"/></td>
-                <td>
-                  <ul>
-                    <xsl:for-each select="xhtml:link">
-                      <li>
-                        <strong><xsl:value-of select="@hreflang"/>:</strong>
-                        <code><xsl:value-of select="@href"/></code>
-                      </li>
-                    </xsl:for-each>
-                  </ul>
-                </td>
+                <th>Sitemap File</th>
+                <th>Last Modified</th>
               </tr>
-            </xsl:for-each>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <xsl:for-each select="s:sitemapindex/s:sitemap">
+                <tr>
+                  <td><code><xsl:value-of select="s:loc"/></code></td>
+                  <td><xsl:value-of select="s:lastmod"/></td>
+                </tr>
+              </xsl:for-each>
+            </tbody>
+          </table>
+        </xsl:if>
+
+        <xsl:if test="s:urlset">
+          <table>
+            <thead>
+              <tr>
+                <th>URL</th>
+                <th>Last Modified</th>
+                <th>Change Frequency</th>
+                <th>Priority</th>
+                <th>Alternates (en/ar/x-default)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <xsl:for-each select="s:urlset/s:url">
+                <tr>
+                  <td><code><xsl:value-of select="s:loc"/></code></td>
+                  <td><xsl:value-of select="s:lastmod"/></td>
+                  <td><xsl:value-of select="s:changefreq"/></td>
+                  <td><xsl:value-of select="s:priority"/></td>
+                  <td>
+                    <ul>
+                      <xsl:for-each select="xhtml:link">
+                        <li>
+                          <strong><xsl:value-of select="@hreflang"/>:</strong>
+                          <code><xsl:value-of select="@href"/></code>
+                        </li>
+                      </xsl:for-each>
+                    </ul>
+                  </td>
+                </tr>
+              </xsl:for-each>
+            </tbody>
+          </table>
+        </xsl:if>
       </body>
     </html>
   </xsl:template>

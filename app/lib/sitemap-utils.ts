@@ -1,4 +1,4 @@
-import { getBaseUrl, loadPublicSitemapPosts, readSeoSettings } from './seo.server';
+import { countPublicSitemapPosts, getBaseUrl, loadPublicSitemapPostsPage, readSeoSettings } from './seo.server';
 
 export type SitemapEntry = {
   loc: string;
@@ -10,6 +10,13 @@ export type SitemapEntry = {
     href: string;
   }>;
 };
+
+export type SitemapFileEntry = {
+  loc: string;
+  lastmod: string;
+};
+
+export const SITEMAP_POSTS_PAGE_SIZE = 1000;
 
 const staticRoutes: Array<{ path: string; priority: number }> = [
   { path: '', priority: 1 },
@@ -53,10 +60,9 @@ function buildAlternates(loc: string): SitemapEntry['alternates'] {
   ];
 }
 
-export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
+export async function buildBaseSitemapEntries(): Promise<SitemapEntry[]> {
   const baseUrl = getBaseUrl();
   const settings = await readSeoSettings();
-  const posts = await loadPublicSitemapPosts(5000);
   const changefreq: SitemapEntry['changefreq'] = settings.sitemapRefreshHours <= 6 ? 'hourly' : 'daily';
 
   const entries = new Map<string, SitemapEntry>();
@@ -73,6 +79,16 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
     });
   });
 
+  return [...entries.values()];
+}
+
+export async function buildPostSitemapEntries(page: number): Promise<SitemapEntry[]> {
+  const baseUrl = getBaseUrl();
+  const settings = await readSeoSettings();
+  const posts = await loadPublicSitemapPostsPage(page, SITEMAP_POSTS_PAGE_SIZE);
+  const changefreq: SitemapEntry['changefreq'] = settings.sitemapRefreshHours <= 6 ? 'hourly' : 'daily';
+
+  const entries = new Map<string, SitemapEntry>();
   posts.forEach((post) => {
     const postId = String(post.id || '').trim();
     if (!postId) return;
@@ -89,6 +105,26 @@ export async function buildSitemapEntries(): Promise<SitemapEntry[]> {
   return [...entries.values()];
 }
 
+export async function buildSitemapIndexEntries(): Promise<SitemapFileEntry[]> {
+  const baseUrl = getBaseUrl();
+  const now = new Date().toISOString();
+  const totalPosts = await countPublicSitemapPosts();
+  const postsPages = Math.ceil(totalPosts / SITEMAP_POSTS_PAGE_SIZE);
+
+  const files: SitemapFileEntry[] = [
+    { loc: `${baseUrl}/sitemap-static.xml`, lastmod: now },
+  ];
+
+  for (let page = 1; page <= postsPages; page += 1) {
+    files.push({
+      loc: `${baseUrl}/sitemap-posts/${page}`,
+      lastmod: now,
+    });
+  }
+
+  return files;
+}
+
 export function renderSitemapXml(entries: SitemapEntry[]) {
   const rows = entries
     .map(
@@ -102,4 +138,14 @@ export function renderSitemapXml(entries: SitemapEntry[]) {
     .join('\n');
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n${rows}\n</urlset>\n`;
+}
+
+export function renderSitemapIndexXml(files: SitemapFileEntry[]) {
+  const rows = files
+    .map(
+      (file) => `  <sitemap>\n    <loc>${xmlEscape(file.loc)}</loc>\n    <lastmod>${xmlEscape(file.lastmod)}</lastmod>\n  </sitemap>`,
+    )
+    .join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${rows}\n</sitemapindex>\n`;
 }
