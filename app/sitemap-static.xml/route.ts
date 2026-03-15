@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { buildSitemapIndexEntries, renderSitemapIndexXml } from '../lib/sitemap-utils';
+import { buildBaseSitemapEntries, renderSitemapXml } from '../lib/sitemap-utils';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const files = await buildSitemapIndexEntries();
-  const xml = renderSitemapIndexXml(files);
+  const entries = await buildBaseSitemapEntries();
+  const xml = renderSitemapXml(entries);
 
   return new NextResponse(xml, {
     headers: {
