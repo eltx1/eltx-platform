@@ -6,6 +6,8 @@ import { getDb } from './db.server';
 
 const DB_SETTING_NAME = 'seo_settings_json';
 const filePath = path.join(process.cwd(), 'data', 'seo-settings.json');
+const DEFAULT_POST_PING_ENDPOINTS = ['https://rpc.pingomatic.com/'];
+const DEFAULT_POST_PING_TIMEOUT_MS = 1500;
 
 export type SeoSettings = {
   sitemapRefreshHours: number;
@@ -13,6 +15,8 @@ export type SeoSettings = {
   indexNowKey: string;
   indexNowKeyLocation: string;
   includeRssInSitemap: boolean;
+  postPublishPingEnabled: boolean;
+  postPublishPingUrls: string[];
 };
 
 export const DEFAULT_SEO_SETTINGS: SeoSettings = {
@@ -21,6 +25,8 @@ export const DEFAULT_SEO_SETTINGS: SeoSettings = {
   indexNowKey: '',
   indexNowKeyLocation: '/indexnow-key.txt',
   includeRssInSitemap: true,
+  postPublishPingEnabled: false,
+  postPublishPingUrls: DEFAULT_POST_PING_ENDPOINTS,
 };
 
 type SettingRow = RowDataPacket & { value: string };
@@ -30,14 +36,31 @@ export function getBaseUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'https://lordai.net').replace(/\/$/, '');
 }
 
+function normalizePingUrls(input: unknown) {
+  const values = Array.isArray(input)
+    ? input
+    : typeof input === 'string'
+      ? input.split(/\r?\n|,/)
+      : [];
+
+  return [...new Set(values
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .filter((value) => /^https?:\/\//i.test(value)))]
+    .slice(0, 10);
+}
+
 export function normalizeSeoSettings(input: Partial<SeoSettings> | null | undefined): SeoSettings {
   const refresh = Number(input?.sitemapRefreshHours);
+  const pingUrls = normalizePingUrls(input?.postPublishPingUrls);
   return {
     sitemapRefreshHours: Number.isFinite(refresh) ? Math.min(24, Math.max(1, Math.round(refresh))) : DEFAULT_SEO_SETTINGS.sitemapRefreshHours,
     indexNowEnabled: Boolean(input?.indexNowEnabled),
     indexNowKey: String(input?.indexNowKey || '').trim(),
     indexNowKeyLocation: '/indexnow-key.txt',
     includeRssInSitemap: input?.includeRssInSitemap !== false,
+    postPublishPingEnabled: Boolean(input?.postPublishPingEnabled),
+    postPublishPingUrls: pingUrls.length ? pingUrls : [...DEFAULT_POST_PING_ENDPOINTS],
   };
 }
 
@@ -156,11 +179,33 @@ export async function loadPublicSitemapPostsPage(page: number, pageSize: number)
   }
 }
 
-export async function notifySearchEnginesForPost(postUrl: string): Promise<{ sent: boolean; details: string[] }> {
-  const settings = await readSeoSettings();
-  const details: string[] = [];
+function escapeXml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function createXmlRpcPingBody(postUrl: string, baseUrl: string) {
+  const rssUrl = `${baseUrl}/rss.xml`;
+  return `<?xml version="1.0"?>
+<methodCall>
+  <methodName>weblogUpdates.extendedPing</methodName>
+  <params>
+    <param><value><string>LordAi.Net</string></value></param>
+    <param><value><string>${escapeXml(baseUrl)}</string></value></param>
+    <param><value><string>${escapeXml(postUrl)}</string></value></param>
+    <param><value><string>${escapeXml(rssUrl)}</string></value></param>
+  </params>
+</methodCall>`;
+}
+
+async function pingIndexNow(postUrl: string, settings: SeoSettings, details: string[]) {
   if (!settings.indexNowEnabled || !settings.indexNowKey) {
-    return { sent: false, details: ['IndexNow disabled'] };
+    details.push('IndexNow skipped: disabled');
+    return false;
   }
 
   const base = getBaseUrl();
@@ -176,11 +221,65 @@ export async function notifySearchEnginesForPost(postUrl: string): Promise<{ sen
         urlList: [postUrl],
       }),
       cache: 'no-store',
+      signal: AbortSignal.timeout(DEFAULT_POST_PING_TIMEOUT_MS),
     });
     details.push(`IndexNow status ${response.status}`);
-    return { sent: response.ok, details };
+    return response.ok;
   } catch (error) {
     details.push(`IndexNow error: ${error instanceof Error ? error.message : 'unknown error'}`);
-    return { sent: false, details };
+    return false;
   }
+}
+
+async function pingXmlRpcEndpoint(endpoint: string, postUrl: string, details: string[]) {
+  const baseUrl = getBaseUrl();
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/xml; charset=utf-8',
+        'User-Agent': 'LordAi.Net Search Ping',
+      },
+      body: createXmlRpcPingBody(postUrl, baseUrl),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(DEFAULT_POST_PING_TIMEOUT_MS),
+    });
+    details.push(`XML-RPC ${endpoint} -> ${response.status}`);
+    return response.ok;
+  } catch (error) {
+    details.push(`XML-RPC ${endpoint} -> ${error instanceof Error ? error.message : 'unknown error'}`);
+    return false;
+  }
+}
+
+export async function notifySearchEnginesForPost(postUrl: string): Promise<{ sent: boolean; details: string[] }> {
+  const settings = await readSeoSettings();
+  const details: string[] = [];
+  const tasks: Promise<boolean>[] = [pingIndexNow(postUrl, settings, details)];
+
+  if (settings.postPublishPingEnabled) {
+    settings.postPublishPingUrls.forEach((endpoint) => {
+      tasks.push(pingXmlRpcEndpoint(endpoint, postUrl, details));
+    });
+  } else {
+    details.push('XML-RPC ping skipped: disabled');
+  }
+
+  const settled = await Promise.allSettled(tasks);
+  const sent = settled.some((result) => result.status === 'fulfilled' && result.value);
+  return { sent, details };
+}
+
+export function queuePostPublishSearchNotification(postUrl: string) {
+  setTimeout(() => {
+    notifySearchEnginesForPost(postUrl)
+      .then((result) => {
+        if (!result.sent) {
+          console.warn('search ping skipped', { postUrl, details: result.details });
+        }
+      })
+      .catch((error) => {
+        console.error('search ping failed', { postUrl, error });
+      });
+  }, 0);
 }
