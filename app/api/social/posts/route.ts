@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { getDb } from '../../../lib/db.server';
 import { getBaseUrl, queuePostPublishSearchNotification } from '../../../lib/seo.server';
+import { normalizeHandle, normalizePostImageUrl } from '../../../lib/social-posts.shared';
 
 const isSocialDemoMode =
   process.env.DEMO_MODE === '1'
