@@ -2,7 +2,14 @@ import 'server-only';
 
 import { RowDataPacket } from 'mysql2';
 import { getDb } from './db.server';
-import { demoSocialPosts, isSocialDemoMode, normalizeHandle, normalizePostImageUrl } from './social-posts.shared';
+
+const isSocialDemoMode =
+  process.env.DEMO_MODE === '1'
+  || process.env.DEMO_MODE === 'true'
+  || !process.env.DATABASE_URL
+  || !process.env.DB_HOST
+  || !process.env.DB_USER
+  || !process.env.DB_NAME;
 
 export type PublicSocialPost = {
   id: string;
@@ -26,13 +33,45 @@ type PostRow = RowDataPacket & {
   avatar_url: string | null;
 };
 
+const demoSocialPosts: PublicSocialPost[] = [
+  {
+    id: 'demo-post-1',
+    profileId: '1',
+    authorName: 'LordAI Creator',
+    handle: '@lordai_creator',
+    content: 'Demo mode: social post media rendering check ✅',
+    createdAt: '2026-03-13T09:15:00.000Z',
+    avatarUrl: '/assets/img/logo-new.svg',
+    imageUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
+  },
+];
+
+function normalizeHandle(handle?: string | null, fallback?: string) {
+  const raw = String(handle || fallback || 'user').trim().replace(/^@+/, '') || 'user';
+  return `@${raw.toLowerCase()}`;
+}
+
+function normalizePostImageUrl(rawValue?: string | null) {
+  const value = String(rawValue || '').trim();
+  if (!value || value === 'about:blank') return null;
+
+  const legacySocialUploadMatch = value.match(/^\/uploads\/social\/([^/?#]+)$/i);
+  if (legacySocialUploadMatch?.[1]) {
+    return `/api/social/uploads/${encodeURIComponent(legacySocialUploadMatch[1])}`;
+  }
+
+  if (value.startsWith('/')) return value;
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('data:image/')) return value;
+  return null;
+}
+
 export async function getPublicSocialPostById(postId: string) {
   const normalizedPostId = String(postId || '').trim();
   if (!normalizedPostId) return null;
 
   if (isSocialDemoMode) {
-    const demoPost = demoSocialPosts.find((post) => post.id === normalizedPostId);
-    return demoPost ? { ...demoPost } : null;
+    return demoSocialPosts.find((post) => post.id === normalizedPostId) || null;
   }
 
   try {

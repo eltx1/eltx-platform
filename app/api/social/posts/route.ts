@@ -2,7 +2,37 @@ import { NextResponse } from 'next/server';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { getDb } from '../../../lib/db.server';
 import { getBaseUrl, queuePostPublishSearchNotification } from '../../../lib/seo.server';
-import { demoSocialPosts, isSocialDemoMode, normalizeHandle, normalizePostImageUrl } from '../../../lib/social-posts.shared';
+
+const isSocialDemoMode =
+  process.env.DEMO_MODE === '1'
+  || process.env.DEMO_MODE === 'true'
+  || !process.env.DATABASE_URL
+  || !process.env.DB_HOST
+  || !process.env.DB_USER
+  || !process.env.DB_NAME;
+
+const demoSocialPosts = [
+  {
+    id: 'demo-post-1',
+    profileId: '1',
+    authorName: 'LordAI Creator',
+    handle: '@lordai_creator',
+    content: 'Demo mode: social post media rendering check ✅',
+    createdAt: '2026-03-13T09:15:00.000Z',
+    avatarUrl: '/assets/img/logo-new.svg',
+    imageUrl: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=1200&q=80',
+    likes: 7,
+    comments: 2,
+    reposts: 1,
+    views: 123,
+    authorFollowers: 340,
+    authorPremiumFollowers: 36,
+    isPremium: false,
+    viewerLiked: false,
+    viewerReposted: false,
+    commentsList: [],
+  },
+];
 
 type PostRow = RowDataPacket & {
   id: number;
