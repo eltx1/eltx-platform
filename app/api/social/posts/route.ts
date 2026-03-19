@@ -62,26 +62,6 @@ type CommentRow = RowDataPacket & {
   handle: string;
 };
 
-function normalizeHandle(handle?: string | null, fallback?: string) {
-  const raw = String(handle || fallback || 'user').trim().replace(/^@+/, '') || 'user';
-  return `@${raw.toLowerCase()}`;
-}
-
-function normalizePostImageUrl(rawValue?: string | null) {
-  const value = String(rawValue || '').trim();
-  if (!value || value === 'about:blank') return null;
-
-  const legacySocialUploadMatch = value.match(/^\/uploads\/social\/([^/?#]+)$/i);
-  if (legacySocialUploadMatch?.[1]) {
-    return `/api/social/uploads/${encodeURIComponent(legacySocialUploadMatch[1])}`;
-  }
-
-  if (value.startsWith('/')) return value;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (value.startsWith('data:image/')) return value;
-  return null;
-}
-
 async function loadComments(postIds: number[]) {
   if (!postIds.length) return new Map<number, any[]>();
   const db = getDb();
