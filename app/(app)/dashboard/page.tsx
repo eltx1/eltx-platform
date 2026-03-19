@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
@@ -23,6 +23,8 @@ import {
   Send,
   Bot,
   CircleDollarSign,
+  Compass,
+  ChevronDown,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { dict, useLang } from '../../lib/i18n';
@@ -54,6 +56,7 @@ export default function DashboardPage() {
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
+  const shortcutsRef = useRef<HTMLElement | null>(null);
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [quickPost, setQuickPost] = useState('');
   const [aiQuestion, setAiQuestion] = useState('');
@@ -106,40 +109,55 @@ export default function DashboardPage() {
   const followingFeed = useMemo(() => getFollowingFeed(posts), [posts]);
   const activeFeed = activeFeedTab === 'for-you' ? forYouFeed : followingFeed;
 
+  const scrollToShortcuts = () => {
+    shortcutsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   return (
-    <div className="space-y-2.5">
-      <div className="grid gap-2.5 lg:grid-cols-[230px,minmax(0,1fr),300px] lg:items-start">
-        <aside className="x-card space-y-2 p-2.5 lg:sticky lg:top-20">
+    <div className="space-y-2">
+      <div className="grid gap-2 lg:grid-cols-[220px,minmax(0,1fr),290px] lg:items-start">
+        <aside className="x-card space-y-2 p-2 lg:sticky lg:top-20">
           <div className="grid grid-cols-3 gap-1.5">
-            <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} />
-            <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} />
-            <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} />
-            <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} />
-            <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} />
-            <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} />
+            <SectionCard title={lang === 'ar' ? 'اكسبلور' : 'Explore'} href="/for-you" icon={Compass} compact />
+            <button
+              type="button"
+              onClick={scrollToShortcuts}
+              className="group relative flex items-center gap-1.5 rounded-xl border border-[#2f3336] bg-black px-1.5 py-1.5 text-left shadow-sm transition hover:border-[#c9a75c]/60 hover:bg-[#16181c]"
+            >
+              <div className="flex h-6 w-6 items-center justify-center rounded-full border border-[#2f3336] bg-[#16181c] text-white transition group-hover:border-[#c9a75c]/70">
+                <ChevronDown className="h-3 w-3" />
+              </div>
+              <span className="truncate text-[0.72rem] font-semibold leading-tight text-white">{lang === 'ar' ? 'المزيد..' : 'More..'}</span>
+            </button>
+            <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} compact />
+            <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} compact />
+            <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} compact />
+            <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} compact />
+            <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
+            <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
           </div>
           <button
             type="button"
             onClick={() => router.push('/ai')}
-            className="w-full rounded-xl border border-[#c9a75c]/40 bg-gradient-to-r from-[#0e1528] to-[#10161f] p-2.5 text-left transition hover:border-[#c9a75c]/70 hover:brightness-110"
+            className="w-full rounded-xl border border-[#c9a75c]/35 bg-gradient-to-r from-[#0e1528] to-[#10161f] p-2 text-left transition hover:border-[#c9a75c]/65 hover:brightness-110"
           >
-            <p className="flex items-center gap-2 text-xs font-semibold text-[#f4deae]"><Bot className="h-3.5 w-3.5" /> {lang === 'ar' ? 'اسأل LordAI 🤖' : 'Ask LordAI 🤖'}</p>
-            <p className="mt-1 text-[11px] text-white/70">{lang === 'ar' ? 'مساعد ذكي سريع للأفكار، الإجابات، وتحسين محتواك.' : 'Get instant help, ideas, and smart answers for your next move.'}</p>
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#f4deae]"><Bot className="h-3 w-3" /> {lang === 'ar' ? 'اسأل LordAI 🤖' : 'Ask LordAI 🤖'}</p>
+            <p className="mt-1 text-[10px] leading-4 text-white/70">{lang === 'ar' ? 'مساعد سريع للأفكار، الإجابات، وتحسين المحتوى.' : 'Fast help for ideas, answers, and content polish.'}</p>
           </button>
         </aside>
 
-        <main className="space-y-2.5">
-          <section className="x-card space-y-2 p-2.5">
-            <h2 className="text-sm font-semibold">{t.dashboard.social.askAiTitle}</h2>
-            <div className="flex flex-col gap-2.5">
+        <main className="space-y-2">
+          <section className="x-card space-y-1.5 p-2">
+            <h2 className="text-xs font-semibold sm:text-sm">{t.dashboard.social.askAiTitle}</h2>
+            <div className="flex flex-col gap-2">
               <input
-                className="x-input px-3 py-2.5 text-sm placeholder:text-white/40"
+                className="x-input px-3 py-2 text-xs sm:text-sm placeholder:text-white/40"
                 placeholder={t.dashboard.social.askAiPlaceholder}
                 value={aiQuestion}
                 onChange={(event) => setAiQuestion(event.target.value)}
               />
               <button
-                className="btn btn-primary px-3 py-2 text-xs"
+                className="btn btn-primary px-3 py-1.5 text-[11px]"
                 onClick={async () => {
                   if (!aiQuestion.trim()) return toast(t.dashboard.social.askAiEmpty);
                   router.push(`/ai?q=${encodeURIComponent(aiQuestion.trim())}`);
@@ -151,26 +169,26 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="x-card space-y-2.5 p-2.5">
-            <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <section className="x-card space-y-2 p-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p className="text-[11px] uppercase tracking-[0.24em] text-white/60">{t.dashboard.social.quickPostKicker}</p>
-                <h2 className="text-sm font-semibold">{t.dashboard.social.quickPostTitle}</h2>
+                <p className="text-[10px] uppercase tracking-[0.22em] text-white/60">{t.dashboard.social.quickPostKicker}</p>
+                <h2 className="text-xs font-semibold sm:text-sm">{t.dashboard.social.quickPostTitle}</h2>
               </div>
-              <span className="text-[11px] text-white/50">
+              <span className="text-[10px] text-white/50">
                 {wordCount}/{wordLimit} {t.dashboard.social.words}
               </span>
             </div>
             <textarea
-              className="x-input min-h-[96px] p-3 text-sm placeholder:text-white/40"
+              className="x-input min-h-[82px] p-2.5 text-xs sm:text-sm placeholder:text-white/40"
               placeholder={t.dashboard.social.quickPostPlaceholder}
               value={quickPost}
               onChange={(event) => setQuickPost(event.target.value)}
             />
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[11px] text-white/60">{t.dashboard.social.quickPostHint}</div>
+              <div className="text-[10px] text-white/60">{t.dashboard.social.quickPostHint}</div>
               <button
-                className="btn btn-primary px-3 py-2 text-xs"
+                className="btn btn-primary px-3 py-1.5 text-[11px]"
                 onClick={async () => {
                   if (!quickPost.trim()) return toast(t.dashboard.social.quickPostEmpty);
                   if (wordCount > wordLimit) return toast(t.dashboard.social.quickPostLimit);
@@ -185,7 +203,7 @@ export default function DashboardPage() {
                   toast(t.dashboard.social.quickPostSuccess);
                 }}
               >
-                <Send className="h-4 w-4" />
+                <Send className="h-3.5 w-3.5" />
                 {t.dashboard.social.quickPostCta}
               </button>
             </div>
@@ -193,22 +211,22 @@ export default function DashboardPage() {
 
           <section className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-              <button
-                className={`rounded-full border px-3 py-1 text-[11px] ${activeFeedTab === 'for-you' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
-                onClick={() => setActiveFeedTab('for-you')}
-              >
-                {t.dashboard.social.forYouTitle}
-              </button>
-              <button
-                className={`rounded-full border px-3 py-1 text-[11px] ${activeFeedTab === 'following' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
-                onClick={() => setActiveFeedTab('following')}
-              >
-                {t.dashboard.social.followingTitle}
-              </button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  className={`rounded-full border px-2.5 py-1 text-[10px] sm:text-[11px] ${activeFeedTab === 'for-you' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
+                  onClick={() => setActiveFeedTab('for-you')}
+                >
+                  {t.dashboard.social.forYouTitle}
+                </button>
+                <button
+                  className={`rounded-full border px-2.5 py-1 text-[10px] sm:text-[11px] ${activeFeedTab === 'following' ? 'border-[#c9a75c] bg-[#c9a75c]/20 text-[#f4deae]' : 'border-white/15 text-white/70 hover:border-white/30'}`}
+                  onClick={() => setActiveFeedTab('following')}
+                >
+                  {t.dashboard.social.followingTitle}
+                </button>
               </div>
               {activeFeedTab === 'for-you' && (
-                <Link href="/for-you" className="rounded-full border border-white/20 px-3 py-1 text-[11px] text-white/80 hover:border-[#c9a75c]/60 hover:text-[#f4deae]">
+                <Link href="/for-you" className="rounded-full border border-white/20 px-2.5 py-1 text-[10px] sm:text-[11px] text-white/80 hover:border-[#c9a75c]/60 hover:text-[#f4deae]">
                   {lang === 'ar' ? 'عرض المزيد' : 'Show More'}
                 </Link>
               )}
@@ -225,7 +243,7 @@ export default function DashboardPage() {
                     commentsState={{ comments: summary.comments, commentsList: summary.commentsList }}
                     commentPlaceholder={t.dashboard.social.commentPlaceholder}
                     commentSubmitLabel={t.dashboard.social.commentSubmit}
-                labels={t.dashboard.social.postMeta}
+                    labels={t.dashboard.social.postMeta}
                     onLike={async (targetPost) => {
                       const result = await togglePostLike(targetPost, user?.id);
                       if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
@@ -262,7 +280,7 @@ export default function DashboardPage() {
               {activeFeedTab === 'for-you' && (
                 <Link
                   href="/for-you"
-                  className="mt-2 inline-flex w-full items-center justify-center rounded-2xl border border-[#c9a75c]/70 bg-[#c9a75c]/20 px-4 py-3 text-sm font-semibold text-[#f4deae] transition hover:bg-[#c9a75c]/30 hover:border-[#c9a75c]"
+                  className="mt-2 inline-flex w-full items-center justify-center rounded-2xl border border-[#c9a75c]/70 bg-[#c9a75c]/20 px-3 py-2.5 text-xs font-semibold text-[#f4deae] transition hover:bg-[#c9a75c]/30 hover:border-[#c9a75c] sm:text-sm"
                 >
                   {lang === 'ar' ? 'عرض المزيد من منشورات For You' : 'Show More from For You'}
                 </Link>
@@ -271,23 +289,23 @@ export default function DashboardPage() {
           </section>
         </main>
 
-        <aside className="space-y-2.5 lg:sticky lg:top-20">
-          <section className="x-card p-2.5 space-y-2">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
+        <aside ref={shortcutsRef} className="space-y-2 lg:sticky lg:top-20">
+          <section id="dashboard-shortcuts" className="x-card space-y-2 p-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
             <div className="grid grid-cols-3 gap-1.5">
-              <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} />
-              <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} />
-              <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} />
-              <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} />
-              <SectionCard title="Staking" href="/staking" icon={Coins} />
-              <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} />
-              <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} />
-              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} />
-            <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} />
-              <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} />
-              <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} />
-              <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} />
-              <SectionCard title={t.dashboard.cards.kyc.title} href="/kyc" icon={ShieldCheck} />
+              <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} compact />
+              <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} compact />
+              <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} compact />
+              <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} compact />
+              <SectionCard title="Staking" href="/staking" icon={Coins} compact />
+              <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} compact />
+              <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} compact />
+              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
+              <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
+              <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} compact />
+              <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} compact />
+              <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} compact />
+              <SectionCard title={t.dashboard.cards.kyc.title} href="/kyc" icon={ShieldCheck} compact />
             </div>
           </section>
         </aside>
