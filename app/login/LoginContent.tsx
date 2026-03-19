@@ -85,6 +85,15 @@ export default function LoginContent() {
             : '/dashboard';
         const safeNextPath = nextPath.startsWith('/') && !nextPath.startsWith('//') ? nextPath : '/dashboard';
         router.push(safeNextPath);
+        router.refresh();
+        if (typeof window !== 'undefined') {
+          window.setTimeout(() => {
+            const isStillOnLogin = window.location.pathname === '/login';
+            if (isStillOnLogin) {
+              window.location.assign(safeNextPath);
+            }
+          }, 150);
+        }
       }
     }
     setLoading(false);
