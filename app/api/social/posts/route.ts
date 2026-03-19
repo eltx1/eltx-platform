@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { getDb } from '../../../lib/db.server';
-import { getBaseUrl, notifySearchEnginesForPost } from '../../../lib/seo.server';
+import { getBaseUrl, queuePostPublishSearchNotification } from '../../../lib/seo.server';
 
 const isSocialDemoMode =
   process.env.DEMO_MODE === '1'
@@ -251,15 +251,7 @@ export async function POST(request: Request) {
     const postId = Number(insertResult.insertId || 0);
     if (postId > 0) {
       const postUrl = `${getBaseUrl()}/posts/${encodeURIComponent(String(postId))}`;
-      notifySearchEnginesForPost(postUrl)
-        .then((result) => {
-          if (!result.sent) {
-            console.warn('search ping skipped', { postId, details: result.details });
-          }
-        })
-        .catch((pingError) => {
-          console.error('search ping failed', pingError);
-        });
+      queuePostPublishSearchNotification(postUrl);
     }
 
     return NextResponse.json({ ok: true, postId });
