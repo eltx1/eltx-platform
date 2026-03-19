@@ -202,6 +202,8 @@ type SeoSettings = {
   indexNowKey: string;
   indexNowKeyLocation: string;
   includeRssInSitemap: boolean;
+  postPublishPingEnabled: boolean;
+  postPublishPingUrls: string[];
 };
 
 function generateIndexNowKey() {
@@ -1952,6 +1954,8 @@ function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
     indexNowKey: '',
     indexNowKeyLocation: '',
     includeRssInSitemap: true,
+    postPublishPingEnabled: false,
+    postPublishPingUrls: ['https://rpc.pingomatic.com/'],
   });
 
   const load = useCallback(async () => {
@@ -1991,7 +1995,7 @@ function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">SEO settings</h2>
-        <p className="text-sm text-white/70">Control sitemap refresh and IndexNow. We automatically publish your key at <code>/indexnow-key.txt</code> once enabled.</p>
+        <p className="text-sm text-white/70">Control sitemap refresh, IndexNow, and async XML-RPC search pings. We automatically publish your key at <code>/indexnow-key.txt</code> once enabled.</p>
       </div>
 
       {loading ? (
@@ -2041,6 +2045,34 @@ function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
             />
           </label>
 
+          <label className="flex items-center gap-3 text-sm text-white/80">
+            <input
+              type="checkbox"
+              checked={form.postPublishPingEnabled}
+              onChange={(e) => setForm((prev) => ({ ...prev, postPublishPingEnabled: e.target.checked }))}
+              className="h-4 w-4"
+            />
+            Enable async XML-RPC search ping on new posts
+          </label>
+
+          <label className="block text-sm text-white/70">
+            XML-RPC ping endpoints (one per line)
+            <textarea
+              value={form.postPublishPingUrls.join('\n')}
+              onChange={(e) => setForm((prev) => ({
+                ...prev,
+                postPublishPingUrls: e.target.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
+              }))}
+              rows={4}
+              placeholder={'https://rpc.pingomatic.com/'}
+              className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+            />
+          </label>
+
+          <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-white/60">
+            These pings run asynchronously after publish with a short timeout, so they never block or slow down post publishing.
+          </div>
+
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
@@ -2053,7 +2085,7 @@ function SeoPanel({ onNotify }: { onNotify: (message: string, variant?: 'success
           </div>
 
           <div className="rounded-lg border border-white/10 bg-black/30 p-3 text-xs text-white/60">
-            Endpoints: <code>/sitemap.xml</code>, <code>/robots.txt</code>, <code>/rss.xml</code>
+            Discovery endpoints: <code>/sitemap.xml</code>, <code>/robots.txt</code>, <code>/rss.xml</code>. Default XML-RPC service: <code>https://rpc.pingomatic.com/</code>
           </div>
 
           <div className="flex justify-end">
