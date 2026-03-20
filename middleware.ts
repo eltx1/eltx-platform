@@ -28,6 +28,7 @@ const PROTECTED_PATH_PREFIXES = [
 const AUTH_PAGES = ['/login', '/signup'];
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
+const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_DEMO_MODE === '1' || process.env.DEMO_MODE === 'true';
 
 function pathMatches(pathname: string, candidates: string[]) {
   return candidates.some((path) => pathname === path || pathname.startsWith(`${path}/`));
@@ -60,6 +61,10 @@ async function hasValidSession(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
+  if (DEMO_MODE_ENABLED) {
+    return NextResponse.next();
+  }
+
   const actionId = request.headers.get('next-action');
   const pathname = request.nextUrl.pathname;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
