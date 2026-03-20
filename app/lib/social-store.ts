@@ -3,6 +3,7 @@
 import { imageRemotePatterns } from './image-remote-patterns.mjs';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, normalizeFeedAlgorithmSettings, type FeedAlgorithmSettings } from './feed-algorithm';
 import { apiFetch } from './api';
+import { validatePostImage as validatePostImageFile } from './social-image-client';
 
 export type SocialPost = {
   id: string;
@@ -48,7 +49,6 @@ const PROFILE_KEY = 'lordai.social.profile';
 const WORD_LIMIT_KEY = 'lordai.social.postWordLimit';
 const FOLLOWING_KEY = 'lordai.social.following';
 const USER_SCOPE_KEY = 'guest';
-const MAX_IMAGE_FILE_SIZE_BYTES = 3 * 1024 * 1024;
 const VIEW_BUCKET_KEY = 'lordai.social.view-bucket';
 
 type FollowingMap = Record<string, boolean>;
@@ -273,12 +273,8 @@ export async function addPostComment(post: SocialPost, content: string, profile:
   return { ok: true as const, ...res.data };
 }
 
-export function validatePostImage(file?: File | null) {
-  if (!file) return { ok: true as const };
-  if (file.size > MAX_IMAGE_FILE_SIZE_BYTES) {
-    return { ok: false as const, reason: 'file-too-large' as const };
-  }
-  return { ok: true as const };
+export function validatePostImage(file?: File | null, options?: { maxImageUploadMb?: number | null }) {
+  return validatePostImageFile(file, options);
 }
 
 export function getPostWordLimit() {

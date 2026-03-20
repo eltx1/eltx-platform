@@ -8,9 +8,9 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: 'npm run dev',
+    command: 'NEXT_PUBLIC_DEMO_MODE=1 npm run dev',
     url: 'http://127.0.0.1:3000/login',
     timeout: 120_000,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
   },
 });

@@ -235,6 +235,12 @@ type MonetizationSettingsResponse = {
   };
 };
 
+type SocialUploadSettingsResponse = {
+  settings: {
+    maxImageUploadMb: number;
+  };
+};
+
 type AdminKycRequest = {
   id: number;
   user_id: number;
@@ -2584,6 +2590,7 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     social_feed_regular_ratio: '20',
     requiredPremiumFollowers: '10',
     payoutPerThousandViews: '0.01',
+    maxImageUploadMb: '15',
   });
 
   const load = useCallback(async () => {
@@ -2595,12 +2602,14 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       return;
     }
     const monetizationRes = await apiFetch<MonetizationSettingsResponse>('/api/admin/monetization-settings');
+    const socialUploadRes = await apiFetch<SocialUploadSettingsResponse>('/api/admin/social-upload-settings');
     setForm({
       premium_monthly_price_usdt: String(res.data.settings.premium_monthly_price_usdt || '1'),
       social_feed_premium_ratio: String(res.data.settings.social_feed_premium_ratio || '80'),
       social_feed_regular_ratio: String(res.data.settings.social_feed_regular_ratio || '20'),
       requiredPremiumFollowers: String(monetizationRes.data?.settings?.requiredPremiumFollowers || '10'),
       payoutPerThousandViews: String(monetizationRes.data?.settings?.payoutPerThousandViews || '0.01'),
+      maxImageUploadMb: String(socialUploadRes.data?.settings?.maxImageUploadMb || '15'),
     });
     setLoading(false);
   }, [onNotify]);
@@ -2622,10 +2631,16 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
         payoutPerThousandViews: Number(form.payoutPerThousandViews || 0.01),
       }),
     });
+    const socialUploadRes = await apiFetch<SocialUploadSettingsResponse>('/api/admin/social-upload-settings', {
+      method: 'PUT',
+      body: JSON.stringify({
+        maxImageUploadMb: Number(form.maxImageUploadMb || 15),
+      }),
+    });
 
     setSaving(false);
-    if (!res.ok || !res.data?.settings || !monetizationRes.ok) {
-      onNotify(res.error || monetizationRes.error || 'Failed to save premium settings', 'error');
+    if (!res.ok || !res.data?.settings || !monetizationRes.ok || !socialUploadRes.ok) {
+      onNotify(res.error || monetizationRes.error || socialUploadRes.error || 'Failed to save premium settings', 'error');
       return;
     }
     setForm({
@@ -2634,6 +2649,7 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       social_feed_regular_ratio: String(res.data.settings.social_feed_regular_ratio || '20'),
       requiredPremiumFollowers: String(monetizationRes.data?.settings?.requiredPremiumFollowers || '10'),
       payoutPerThousandViews: String(monetizationRes.data?.settings?.payoutPerThousandViews || '0.01'),
+      maxImageUploadMb: String(socialUploadRes.data?.settings?.maxImageUploadMb || '15'),
     });
     onNotify('Premium & monetization settings saved', 'success');
   };
@@ -2703,6 +2719,17 @@ function PremiumPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
             className="x-input w-full px-3 py-2 text-sm"
             value={form.payoutPerThousandViews}
             onChange={(event) => setForm((prev) => ({ ...prev, payoutPerThousandViews: event.target.value }))}
+          />
+        </label>
+        <label className="space-y-2 text-xs text-white/70">
+          <span>Social post image limit (MB)</span>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            className="x-input w-full px-3 py-2 text-sm"
+            value={form.maxImageUploadMb}
+            onChange={(event) => setForm((prev) => ({ ...prev, maxImageUploadMb: event.target.value }))}
           />
         </label>
       </div>
