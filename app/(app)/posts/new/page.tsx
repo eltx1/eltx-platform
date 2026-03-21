@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { AlertCircle, CheckCircle2, ImagePlus, Loader2, Sparkles, Wand2 } from 'lucide-react';
+import { AlertCircle, ImagePlus, Loader2, Sparkles } from 'lucide-react';
 import { dict, useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
 import { useAuth } from '../../../lib/auth';
@@ -151,31 +151,31 @@ export default function NewPostPage() {
   return (
     <div className="mx-auto max-w-4xl p-3 sm:p-6">
       <div className="overflow-hidden rounded-[32px] border border-white/10 bg-[radial-gradient(circle_at_top,_rgba(217,70,239,0.18),_transparent_32%),linear-gradient(135deg,rgba(15,23,42,0.96),rgba(2,6,23,0.98))] shadow-[0_24px_80px_rgba(0,0,0,0.45)]">
-        <div className="border-b border-white/10 px-4 py-5 sm:px-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-3">
-              <p className="text-xs uppercase tracking-[0.35em] text-fuchsia-200/80">{t.dashboard.social.quickPostKicker}</p>
+        <div className="border-b border-white/10 px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[10px] uppercase tracking-[0.32em] text-fuchsia-200/70">{t.dashboard.social.quickPostKicker}</p>
               <div>
-                <h1 className="text-2xl font-semibold sm:text-3xl">{t.dashboard.social.newPostCta}</h1>
-                <p className="mt-2 max-w-2xl text-sm text-white/65">{t.dashboard.social.quickPostHint}</p>
+                <h1 className="text-lg font-semibold sm:text-xl">{t.dashboard.social.newPostCta}</h1>
+                <p className="mt-1 max-w-xl text-xs text-white/60 sm:text-sm">{t.dashboard.social.quickPostHint}</p>
               </div>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:w-[340px]">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-white/45">{t.dashboard.social.words}</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{wordCount}<span className="text-sm text-white/45">/{wordLimit}</span></p>
+            <div className="grid gap-2 sm:grid-cols-2 lg:w-[280px]">
+              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2.5">
+                <p className="text-[10px] uppercase tracking-[0.24em] text-white/45">{t.dashboard.social.words}</p>
+                <p className="mt-1 text-lg font-semibold text-white">{wordCount}<span className="text-xs text-white/45">/{wordLimit}</span></p>
               </div>
-              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-emerald-100/70">Media</p>
-                <p className="mt-2 text-2xl font-semibold text-white">{uploadLimitLabel}</p>
-                <p className="mt-1 text-xs text-white/55">{t.dashboard.social.uploadLimitHint(uploadLimitLabel)}</p>
+              <div className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-3 py-2.5">
+                <p className="text-[10px] uppercase tracking-[0.24em] text-emerald-100/70">Media</p>
+                <p className="mt-1 text-lg font-semibold text-white">{uploadLimitLabel}</p>
+                <p className="mt-0.5 text-[11px] text-white/55">{t.dashboard.social.uploadLimitHint(uploadLimitLabel)}</p>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="grid gap-6 px-4 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="px-4 py-5 sm:px-5">
           <section className="space-y-4">
             <div className="rounded-[28px] border border-white/10 bg-black/30 p-4 shadow-inner shadow-black/20 sm:p-5">
               <div className="mb-3 flex items-center gap-2 text-sm text-fuchsia-200/80">
@@ -248,18 +248,6 @@ export default function NewPostPage() {
           </section>
 
           <aside className="space-y-4">
-            <div className="rounded-[28px] border border-white/10 bg-white/[0.05] p-5">
-              <div className="flex items-center gap-2 text-sm font-medium text-white">
-                <Wand2 className="h-4 w-4 text-fuchsia-200" />
-                Publish flow
-              </div>
-              <ul className="mt-4 space-y-3 text-sm text-white/65">
-                <li className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-300" />Client-side image preparation before upload.</li>
-                <li className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-300" />Visible progress during image transfer and post publishing.</li>
-                <li className="flex items-start gap-3"><CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-300" />Single-click protection prevents duplicate publish requests.</li>
-              </ul>
-            </div>
-
             <div className="rounded-[28px] border border-white/10 bg-black/25 p-5">
               <div className="flex items-center gap-2 text-sm font-medium text-white">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin text-fuchsia-200" /> : <AlertCircle className="h-4 w-4 text-amber-200" />}
