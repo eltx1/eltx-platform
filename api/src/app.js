@@ -567,6 +567,17 @@ const LoginSchema = z.object({
   ...UtmSchemaFields,
 });
 
+const ActivityHeartbeatSchema = z.object({
+  session_id: z.string().trim().min(8).max(96),
+  path: z
+    .string()
+    .trim()
+    .min(1)
+    .max(255)
+    .transform((value) => (value.startsWith('/') ? value : `/${value}`)),
+  event: z.enum(['page_view', 'heartbeat']).default('heartbeat'),
+});
+
 const DeleteAccountSchema = z.object({
   password: z.string().min(8),
 });
@@ -4020,6 +4031,7 @@ async function resolveGoogleUserSession({ conn, profile, utm }) {
     [GOOGLE_OAUTH_PROVIDER, profile.sub]
   );
   let currentUserId = oauthRows[0]?.user_id || null;
+  let isNewUser = false;
 
   if (!currentUserId) {
     const [usersByEmail] = await conn.query('SELECT id, language FROM users WHERE email=? LIMIT 1', [profile.email]);
@@ -4029,6 +4041,7 @@ async function resolveGoogleUserSession({ conn, profile, utm }) {
       const username = await generateUsernameFromEmail(conn, profile.email);
       const [newUser] = await conn.query('INSERT INTO users (email, username, language) VALUES (?, ?, ?)', [profile.email, username, 'en']);
       currentUserId = newUser.insertId;
+      isNewUser = true;
       await ensureReferralCode(conn, currentUserId);
     }
     await conn.query(
@@ -4050,7 +4063,7 @@ async function resolveGoogleUserSession({ conn, profile, utm }) {
     'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))',
     [token, currentUserId, USER_SESSION_TTL_SECONDS]
   );
-  return { userId: currentUserId, token };
+  return { userId: currentUserId, token, isNewUser };
 }
 
 async function issueUserSessionAndWallets(connLike, userId) {
@@ -4108,6 +4121,40 @@ async function withTransactionRetry(work, { maxAttempts = 3, retryDelayMs = 150 
   }
   throw lastErr;
 }
+
+function getTodayRangeSql() {
+  return { start: 'DATE(NOW())', end: 'DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)' };
+}
+
+async function recordUserActivity({ sessionId, userId = null, eventType, authMethod = null, pagePath = null }) {
+  try {
+    await pool.query(
+      `INSERT INTO user_activity_events (session_id, user_id, event_type, auth_method, page_path, occurred_at)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [sessionId, userId, eventType, authMethod, pagePath]
+    );
+  } catch (err) {
+    console.warn('user-activity-record-failed', err?.code || err?.message || err);
+  }
+}
+
+async function upsertUserPresence({ sessionId, userId = null, pagePath = null }) {
+  try {
+    await pool.query(
+      `INSERT INTO user_presence (session_id, user_id, current_path, first_seen_at, last_seen_at)
+       VALUES (?, ?, ?, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE
+         user_id = COALESCE(VALUES(user_id), user_presence.user_id),
+         current_path = VALUES(current_path),
+         last_seen_at = NOW()`,
+      [sessionId, userId, pagePath]
+    );
+  } catch (err) {
+    console.warn('user-presence-upsert-failed', err?.code || err?.message || err);
+  }
+}
+
+
 
 
 app.get('/auth/google/start', async (req, res, next) => {
@@ -4272,9 +4319,20 @@ app.get('/auth/google/callback', async (req, res, next) => {
     const profile = await exchangeGoogleCodeForUser(code, redirectUri);
     const utm = parseUtmPayload(req.query || {});
 
-    const { userId, token } = await withTransactionRetry(async (conn) => resolveGoogleUserSession({ conn, profile, utm }));
+    const { userId, token, isNewUser } = await withTransactionRetry(async (conn) =>
+      resolveGoogleUserSession({ conn, profile, utm })
+    );
 
     await provisionWalletsBestEffort(userId);
+
+    await recordUserActivity({
+      sessionId: token,
+      userId,
+      eventType: isNewUser ? 'signup' : 'login',
+      authMethod: 'google',
+      pagePath: '/auth/google/callback',
+    });
+    await upsertUserPresence({ sessionId: token, userId, pagePath: '/dashboard' });
 
     res.clearCookie(GOOGLE_AUTH_STATE_COOKIE, { ...googleStateCookie, maxAge: 0 });
     res.cookie(COOKIE_NAME, token, sessionCookie);
@@ -4334,6 +4392,14 @@ app.post('/auth/signup', async (req, res, next) => {
     });
 
     const wallets = await provisionWalletsBestEffort(userId);
+    await recordUserActivity({
+      sessionId: token,
+      userId,
+      eventType: 'signup',
+      authMethod: 'email',
+      pagePath: '/auth/signup',
+    });
+    await upsertUserPresence({ sessionId: token, userId, pagePath: '/dashboard' });
     enqueueEmail({
       kind: 'welcome',
       to: email,
@@ -4386,6 +4452,14 @@ app.post('/auth/login', loginLimiter, async (req, res, next) => {
         );
         await pool.query('INSERT INTO login_attempts (user_id, ip, success) VALUES (?, ?, 1)', [userId, req.ip]);
         await storeFirstUtmSession(pool, userId, utm);
+        await recordUserActivity({
+          sessionId: token,
+          userId,
+          eventType: 'login',
+          authMethod: 'email',
+          pagePath: '/auth/login',
+        });
+        await upsertUserPresence({ sessionId: token, userId, pagePath: '/dashboard' });
         const wallets = [];
         for (const cid of SUPPORTED_CHAINS) {
           wallets.push(await provisionUserAddress(pool, userId, cid));
@@ -6276,6 +6350,46 @@ app.post('/p2p/trades/:id/dispute', walletLimiter, async (req, res, next) => {
     if (conn) conn.release();
   }
 });
+app.post('/activity/heartbeat', async (req, res, next) => {
+  try {
+    const payload = ActivityHeartbeatSchema.parse(req.body || {});
+    const token = req.cookies?.[COOKIE_NAME];
+    let userId = null;
+    if (token) {
+      const [rows] = await pool.query(
+        'SELECT user_id FROM sessions WHERE id=? AND expires_at > NOW() LIMIT 1',
+        [token]
+      );
+      if (rows.length) userId = Number(rows[0].user_id || 0) || null;
+    }
+
+    if (payload.event === 'page_view') {
+      await recordUserActivity({
+        sessionId: payload.session_id,
+        userId,
+        eventType: 'page_view',
+        pagePath: payload.path,
+      });
+    } else {
+      await recordUserActivity({
+        sessionId: payload.session_id,
+        userId,
+        eventType: 'heartbeat',
+        pagePath: payload.path,
+      });
+    }
+    await upsertUserPresence({ sessionId: payload.session_id, userId, pagePath: payload.path });
+
+    return res.json({ ok: true });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid activity payload', details: err.flatten() });
+    }
+    return next(err);
+  }
+});
+
+
 
 app.post('/admin/auth/login', loginLimiter, async (req, res, next) => {
   try {
@@ -6337,20 +6451,79 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
       [[spotRow]],
       [[fiatRow]],
       [[depositRow]],
+      [[postsTotalRow]],
+      [[postsTodayRow]],
+      [[commentsTotalRow]],
+      [[commentsTodayRow]],
+      loginRows,
+      signupRows,
+      [[topPostRow]],
+      topPagesRows,
+      avgDurationRows,
+      [[activeNowRow]],
     ] = await Promise.all([
       pool.query('SELECT COUNT(*) AS total_users FROM users'),
       pool.query('SELECT COUNT(*) AS total_admins FROM admin_users WHERE is_active = 1'),
       pool.query("SELECT COALESCE(SUM(balance_wei),0) AS eltx_balance_wei FROM user_balances WHERE UPPER(asset)='ELTX'"),
       pool.query("SELECT COUNT(*) AS active_staking FROM staking_positions WHERE status='active'"),
-      pool.query(
-        'SELECT COUNT(*) AS swap_count, COALESCE(SUM(eltx_amount_wei),0) AS eltx_volume_wei FROM trade_swaps'
-      ),
+      pool.query('SELECT COUNT(*) AS swap_count, COALESCE(SUM(eltx_amount_wei),0) AS eltx_volume_wei FROM trade_swaps'),
       pool.query('SELECT COUNT(*) AS spot_trades FROM spot_trades'),
+      pool.query("SELECT COUNT(*) AS fiat_completed, COALESCE(SUM(usd_amount),0) AS fiat_volume_usd FROM fiat_purchases WHERE status='succeeded'"),
+      pool.query("SELECT COUNT(*) AS confirmed_deposits FROM wallet_deposits WHERE status IN ('confirmed','swept')"),
+      pool.query('SELECT COUNT(*) AS total_posts FROM social_posts'),
+      pool.query('SELECT COUNT(*) AS today_posts FROM social_posts WHERE created_at >= DATE(NOW()) AND created_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)'),
+      pool.query('SELECT COUNT(*) AS total_comments FROM social_post_comments'),
+      pool.query('SELECT COUNT(*) AS today_comments FROM social_post_comments WHERE created_at >= DATE(NOW()) AND created_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)'),
       pool.query(
-        "SELECT COUNT(*) AS fiat_completed, COALESCE(SUM(usd_amount),0) AS fiat_volume_usd FROM fiat_purchases WHERE status='succeeded'"
+        `SELECT auth_method, COUNT(*) AS count
+           FROM user_activity_events
+          WHERE event_type='login'
+            AND occurred_at >= DATE(NOW())
+            AND occurred_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)
+          GROUP BY auth_method`
       ),
       pool.query(
-        "SELECT COUNT(*) AS confirmed_deposits FROM wallet_deposits WHERE status IN ('confirmed','swept')"
+        `SELECT auth_method, COUNT(*) AS count
+           FROM user_activity_events
+          WHERE event_type='signup'
+            AND occurred_at >= DATE(NOW())
+            AND occurred_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)
+          GROUP BY auth_method`
+      ),
+      pool.query(
+        `SELECT v.post_id, COUNT(*) AS views_today
+           FROM social_post_unique_views v
+          WHERE v.created_at >= DATE(NOW())
+            AND v.created_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)
+          GROUP BY v.post_id
+          ORDER BY views_today DESC
+          LIMIT 1`
+      ),
+      pool.query(
+        `SELECT page_path, COUNT(*) AS visits
+           FROM user_activity_events
+          WHERE event_type='page_view'
+            AND page_path IS NOT NULL
+            AND occurred_at >= DATE(NOW())
+            AND occurred_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)
+          GROUP BY page_path
+          ORDER BY visits DESC
+          LIMIT 3`
+      ),
+      pool.query(
+        `SELECT AVG(session_seconds) AS avg_seconds
+           FROM (
+             SELECT GREATEST(0, TIMESTAMPDIFF(SECOND, MIN(occurred_at), MAX(occurred_at))) AS session_seconds
+               FROM user_activity_events
+              WHERE occurred_at >= DATE(NOW())
+                AND occurred_at < DATE_ADD(DATE(NOW()), INTERVAL 1 DAY)
+              GROUP BY session_id
+           ) sessions_today`
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS active_now
+           FROM user_presence
+          WHERE last_seen_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE)`
       ),
     ]);
 
@@ -6358,6 +6531,16 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
     const eltxBalance = trimDecimal(formatUnitsStr(eltxBalanceWei.toString(), getSymbolDecimals(ELTX_SYMBOL)));
     const swapVolumeWei = bigIntFromValue(swapRow?.eltx_volume_wei || 0);
     const swapVolume = trimDecimal(formatUnitsStr(swapVolumeWei.toString(), getSymbolDecimals(ELTX_SYMBOL)));
+
+    const byMethod = (rows) => {
+      const base = { email: 0, google: 0, unknown: 0 };
+      for (const row of rows || []) {
+        const key = row?.auth_method || 'unknown';
+        if (Object.prototype.hasOwnProperty.call(base, key)) base[key] = Number(row?.count || 0);
+        else base.unknown += Number(row?.count || 0);
+      }
+      return base;
+    };
 
     res.json({
       ok: true,
@@ -6380,6 +6563,26 @@ app.get('/admin/dashboard/summary', async (req, res, next) => {
           usd: formatDecimalValue(fiatRow?.fiat_volume_usd || 0, 2),
         },
         confirmed_deposits: Number(depositRow?.confirmed_deposits || 0),
+        today_logins: byMethod(loginRows),
+        today_signups: byMethod(signupRows),
+        social: {
+          total_posts: Number(postsTotalRow?.total_posts || 0),
+          today_posts: Number(postsTodayRow?.today_posts || 0),
+          total_comments: Number(commentsTotalRow?.total_comments || 0),
+          today_comments: Number(commentsTodayRow?.today_comments || 0),
+          top_post_today: topPostRow
+            ? {
+                post_id: Number(topPostRow.post_id),
+                views: Number(topPostRow.views_today || 0),
+              }
+            : null,
+          top_pages_today: (topPagesRows || []).map((row) => ({
+            path: row.page_path || '/',
+            visits: Number(row.visits || 0),
+          })),
+          avg_session_seconds_today: Math.round(Number(avgDurationRows?.[0]?.avg_seconds || 0)),
+          active_users_now: Number(activeNowRow?.active_now || 0),
+        },
       },
     });
   } catch (err) {

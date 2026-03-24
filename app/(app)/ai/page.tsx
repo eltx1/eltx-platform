@@ -63,7 +63,7 @@ function AIPageInner() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialQ = searchParams.get('q');
+  const initialQ = searchParams?.get('q') || '';
   const { lang } = useLang();
   const t = dict[lang].dashboard.aiChat;
 
