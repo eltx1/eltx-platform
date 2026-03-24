@@ -22,7 +22,8 @@
         "name": "next"
       }
     ],
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "strictNullChecks": false
   },
   "include": [
     "next-env.d.ts",

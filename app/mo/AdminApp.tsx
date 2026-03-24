@@ -78,6 +78,18 @@ interface SummaryResponse {
     spot_trades: number;
     fiat_completed: { count: number; usd: string };
     confirmed_deposits: number;
+    today_logins: { email: number; google: number; unknown: number };
+    today_signups: { email: number; google: number; unknown: number };
+    social: {
+      total_posts: number;
+      today_posts: number;
+      total_comments: number;
+      today_comments: number;
+      top_post_today: { post_id: number; views: number } | null;
+      top_pages_today: Array<{ path: string; visits: number }>;
+      avg_session_seconds_today: number;
+      active_users_now: number;
+    };
   };
 }
 
@@ -2796,7 +2808,56 @@ function OverviewPanel({ onError }: { onError: (message: string) => void }) {
           subtitle="Positions currently earning rewards"
           icon={Layers}
         />
+        <StatCard
+          title="Today logins"
+          value={(summary.today_logins.email + summary.today_logins.google + summary.today_logins.unknown).toLocaleString()}
+          subtitle={`Email ${summary.today_logins.email} • Google ${summary.today_logins.google}`}
+          icon={Users}
+        />
+        <StatCard
+          title="Today signups"
+          value={(summary.today_signups.email + summary.today_signups.google + summary.today_signups.unknown).toLocaleString()}
+          subtitle={`Email ${summary.today_signups.email} • Google ${summary.today_signups.google}`}
+          icon={UserPlus}
+        />
+        <StatCard title="Total posts" value={summary.social.total_posts.toLocaleString()} subtitle={`New today ${summary.social.today_posts.toLocaleString()}`} icon={FileText} />
+        <StatCard title="Total comments" value={summary.social.total_comments.toLocaleString()} subtitle={`New today ${summary.social.today_comments.toLocaleString()}`} icon={MessageCircle} />
+        <StatCard
+          title="Top viewed post today"
+          value={summary.social.top_post_today ? `#${summary.social.top_post_today.post_id}` : 'N/A'}
+          subtitle={summary.social.top_post_today ? `${summary.social.top_post_today.views.toLocaleString()} views` : 'No views yet today'}
+          icon={LineChart}
+        />
+        <StatCard
+          title="Avg session time today"
+          value={`${Math.floor(summary.social.avg_session_seconds_today / 60)}m ${summary.social.avg_session_seconds_today % 60}s`}
+          subtitle="Average visit duration"
+          icon={RefreshCw}
+        />
+        <StatCard
+          title="Active now"
+          value={summary.social.active_users_now.toLocaleString()}
+          subtitle="Visitors active in last 5 minutes"
+          icon={Sparkles}
+        />
       </div>
+
+      <section className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+        <h3 className="text-sm font-semibold text-white/90">Top visited pages today</h3>
+        <div className="mt-3 space-y-2 text-sm">
+          {summary.social.top_pages_today.length ? (
+            summary.social.top_pages_today.map((row, index) => (
+              <div key={`${row.path}-${index}`} className="flex items-center justify-between rounded-lg border border-white/10 px-3 py-2">
+                <span className="text-white/80">{index + 1}. {row.path}</span>
+                <span className="text-white/60">{row.visits.toLocaleString()} visits</span>
+              </div>
+            ))
+          ) : (
+            <p className="text-white/60">No page visits tracked yet today.</p>
+          )}
+        </div>
+      </section>
+
       <button
         onClick={load}
         className="flex items-center gap-2 rounded-full border border-white/10 px-4 py-2 text-sm text-white/70 transition hover:border-white/30 hover:text-white"

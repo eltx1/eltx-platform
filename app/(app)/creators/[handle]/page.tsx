@@ -88,7 +88,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
     };
   }, [creatorPosts, lang]);
 
-  const isOwnProfile = Boolean(profile) && normalizeHandle(profile.handle) === normalizedRouteHandle;
+  const isOwnProfile = Boolean(profile?.handle) && normalizeHandle(profile?.handle || '') === normalizedRouteHandle;
   const isFollowing = followState ? followState.isFollowed : Boolean(creatorData?.followFallback);
   const followersCount = followState ? followState.followers : Number(creatorData?.followers || 0);
 

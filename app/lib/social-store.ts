@@ -273,7 +273,7 @@ export async function addPostComment(post: SocialPost, content: string, profile:
   return { ok: true as const, ...res.data };
 }
 
-export function validatePostImage(file?: File | null, options?: { maxImageUploadMb?: number | null }) {
+export function validatePostImage(file?: File | null, options?: { maxImageUploadMb?: number }) {
   return validatePostImageFile(file, options);
 }
 
