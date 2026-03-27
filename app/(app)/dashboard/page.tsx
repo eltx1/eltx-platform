@@ -63,6 +63,8 @@ export default function DashboardPage() {
   const [wordLimit, setWordLimit] = useState(1000);
   const [activeFeedTab, setActiveFeedTab] = useState<FeedTab>('for-you');
   const [feedSettings, setFeedSettings] = useState<FeedAlgorithmSettings>(DEFAULT_FEED_ALGORITHM_SETTINGS);
+  const [forYouFeed, setForYouFeed] = useState<SocialPost[]>([]);
+  const [isForYouLoading, setIsForYouLoading] = useState(true);
 
   useEffect(() => {
     if (user === undefined) return;
@@ -104,10 +106,25 @@ export default function DashboardPage() {
     return quickPost.trim().split(/\s+/).length;
   }, [quickPost]);
 
-  const fullForYouFeed = useMemo(() => getForYouFeed(posts, { settings: feedSettings }), [posts, feedSettings]);
-  const forYouFeed = useMemo(() => fullForYouFeed.slice(0, feedSettings.dashboardForYouItems), [fullForYouFeed, feedSettings.dashboardForYouItems]);
   const followingFeed = useMemo(() => getFollowingFeed(posts), [posts]);
   const activeFeed = activeFeedTab === 'for-you' ? forYouFeed : followingFeed;
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsForYouLoading(true);
+    const timer = window.setTimeout(() => {
+      const fullForYouFeed = getForYouFeed(posts, { settings: feedSettings });
+      const nextFeed = fullForYouFeed.slice(0, feedSettings.dashboardForYouItems);
+      if (!cancelled) {
+        setForYouFeed(nextFeed);
+        setIsForYouLoading(false);
+      }
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [posts, feedSettings]);
 
   const scrollToShortcuts = () => {
     shortcutsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -232,6 +249,9 @@ export default function DashboardPage() {
               )}
             </div>
             <div className="space-y-2">
+              {activeFeedTab === 'for-you' && isForYouLoading && (
+                <div className="x-card p-3 text-xs text-white/60">{lang === 'ar' ? 'جاري تحميل فور يو…' : 'Loading For You feed…'}</div>
+              )}
               {activeFeed.map((post) => {
                 const summary = getPostInteractionSummary(post);
                 return (
