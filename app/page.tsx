@@ -1,4 +1,6 @@
 import Hero from '../components/home/Hero';
+import HomeForYouPreview from '../components/home/HomeForYouPreview';
+import HomeAuthRepeat from '../components/home/HomeAuthRepeat';
 import ScrollToTopOnLoad from '../components/ScrollToTopOnLoad';
 import type { Metadata } from 'next';
 
@@ -37,6 +39,8 @@ export default async function Page() {
     <main className="flex flex-col">
       <ScrollToTopOnLoad />
       <Hero />
+      <HomeForYouPreview />
+      <HomeAuthRepeat />
     </main>
   );
 }
