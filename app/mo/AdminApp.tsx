@@ -220,7 +220,10 @@ type PageAdsSettings = {
   p2p: string;
 };
 
-type PageAdsSettingsResponse = { settings: PageAdsSettings };
+type PageAdsSettingsResponse = {
+  settings: PageAdsSettings;
+  injectSettings?: PageAdsSettings;
+};
 
 type SeoSettings = {
   sitemapRefreshHours: number;
@@ -2001,12 +2004,32 @@ function PageAdsPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     market: '',
     p2p: '',
   });
+  const [injectForm, setInjectForm] = useState<PageAdsSettings>({
+    for_you: '',
+    ai: '',
+    dashboard: '',
+    wallet: '',
+    public_profile: '',
+    public_post: '',
+    market: '',
+    p2p: '',
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
     const res = await apiFetch<PageAdsSettingsResponse>('/api/admin/page-ads');
     if (res.ok && res.data?.settings) {
       setForm(res.data.settings);
+      setInjectForm(res.data.injectSettings || {
+        for_you: '',
+        ai: '',
+        dashboard: '',
+        wallet: '',
+        public_profile: '',
+        public_post: '',
+        market: '',
+        p2p: '',
+      });
     } else {
       onNotify(res.error || 'Failed to load page ads settings', 'error');
     }
@@ -2022,11 +2045,12 @@ function PageAdsPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     setSaving(true);
     const res = await apiFetch<PageAdsSettingsResponse>('/api/admin/page-ads', {
       method: 'PUT',
-      body: JSON.stringify({ settings: form }),
+      body: JSON.stringify({ settings: form, injectSettings: injectForm }),
     });
     setSaving(false);
     if (res.ok && res.data?.settings) {
       setForm(res.data.settings);
+      setInjectForm(res.data.injectSettings || injectForm);
       onNotify('Page ads settings updated', 'success');
     } else {
       onNotify(res.error || 'Failed to save page ads settings', 'error');
@@ -2037,26 +2061,41 @@ function PageAdsPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     <div className="space-y-4">
       <div>
         <h2 className="text-xl font-semibold">Page ads placements</h2>
-        <p className="text-sm text-white/70">Paste ad-network HTML snippets for each page. Keep empty to disable placement. Ads are isolated in sandboxed iframe for safety.</p>
+        <p className="text-sm text-white/70">Add per-page ad snippets in two modes: banner slot (sandboxed iframe) and direct body injection for popups/social bars. Keep empty to disable placement.</p>
       </div>
       {loading ? (
         <div className="x-card p-4 text-sm text-white/70">Loading page ads settings...</div>
       ) : (
         <form className="space-y-4" onSubmit={save}>
           {PAGE_AD_LABELS.map((item) => (
-            <label key={item.key} className="block text-sm text-white/70">
-              <div className="mb-1 flex items-center justify-between">
+            <div key={item.key} className="rounded-xl border border-white/10 bg-black/20 p-3">
+              <div className="mb-2 flex items-center justify-between text-sm text-white/70">
                 <span>{item.label}</span>
                 <span className="text-xs text-white/45">{item.hint}</span>
               </div>
-              <textarea
-                rows={5}
-                value={form[item.key]}
-                onChange={(event) => setForm((prev) => ({ ...prev, [item.key]: event.target.value }))}
-                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
-                placeholder="<div>Ad snippet here...</div>"
-              />
-            </label>
+              <div className="grid gap-3 lg:grid-cols-2">
+                <label className="block text-xs text-white/60">
+                  Banner slot (iframe)
+                  <textarea
+                    rows={5}
+                    value={form[item.key]}
+                    onChange={(event) => setForm((prev) => ({ ...prev, [item.key]: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                    placeholder="<div>Banner ad snippet...</div>"
+                  />
+                </label>
+                <label className="block text-xs text-white/60">
+                  Direct inject to body
+                  <textarea
+                    rows={5}
+                    value={injectForm[item.key]}
+                    onChange={(event) => setInjectForm((prev) => ({ ...prev, [item.key]: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                    placeholder="<script>/* popup/social bar */</script>"
+                  />
+                </label>
+              </div>
+            </div>
           ))}
           <div className="flex justify-end">
             <button

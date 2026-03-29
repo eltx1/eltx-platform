@@ -20,6 +20,7 @@ import {
 } from '../../../lib/social-store';
 import { useToast } from '../../../lib/toast';
 import PageAdSlot from '../../../../components/ads/PageAdSlot';
+import PageAdInject from '../../../../components/ads/PageAdInject';
 
 type CreatorProfilePageProps = {
   params: { handle: string };
@@ -117,6 +118,7 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
 
   return (
     <section className="space-y-4">
+      <PageAdInject placement="public_profile" />
       <div className="overflow-hidden rounded-3xl border border-[#2f3336] bg-black">
         <div className="h-36 bg-[radial-gradient(circle_at_top,_#334155,_#0a0a0a_65%)] p-4">
           <div className="flex items-center justify-between">

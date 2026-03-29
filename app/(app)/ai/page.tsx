@@ -9,6 +9,7 @@ import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { dict, useLang } from '../../lib/i18n';
 import PageAdSlot from '../../../components/ads/PageAdSlot';
+import PageAdInject from '../../../components/ads/PageAdInject';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 type AiUsage = {
@@ -169,6 +170,7 @@ function AIPageInner() {
 
   return (
     <div className="min-h-[calc(100vh-120px)] bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-white">
+      <PageAdInject placement="ai" />
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8">
         <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-2xl shadow-indigo-900/40 backdrop-blur">
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

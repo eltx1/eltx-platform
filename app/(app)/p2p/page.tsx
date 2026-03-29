@@ -10,6 +10,7 @@ import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { trackEvent } from '../../lib/analytics';
 import PageAdSlot from '../../../components/ads/PageAdSlot';
+import PageAdInject from '../../../components/ads/PageAdInject';
 
 type OfferPaymentMethod = { id: number; name: string };
 
@@ -200,6 +201,7 @@ export default function P2PPage() {
 
   return (
     <div className="space-y-4 p-4 pb-24">
+      <PageAdInject placement="p2p" />
       <PageAdSlot placement="p2p" />
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">

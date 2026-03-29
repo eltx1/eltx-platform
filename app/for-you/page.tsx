@@ -24,6 +24,7 @@ import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../
 import { trackPostView } from '../lib/monetization';
 import { useToast } from '../lib/toast';
 import PageAdSlot from '../../components/ads/PageAdSlot';
+import PageAdInject from '../../components/ads/PageAdInject';
 
 const FALLBACK_BATCH_SIZE = 50;
 
@@ -134,6 +135,7 @@ export default function ForYouPage() {
 
   return (
     <>
+      <PageAdInject placement="for_you" />
       <AppShell>
         <main className="mx-auto w-full max-w-3xl space-y-4 px-3 py-4 sm:px-4">
           <section className="x-card flex items-center justify-between p-3">
