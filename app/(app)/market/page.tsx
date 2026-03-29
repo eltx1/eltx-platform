@@ -3,6 +3,7 @@
 import DashboardMarketBoard from '../../../components/dashboard/DashboardMarketBoard';
 import { dict, useLang } from '../../lib/i18n';
 import PageAdSlot from '../../../components/ads/PageAdSlot';
+import PageAdInject from '../../../components/ads/PageAdInject';
 
 export default function MarketPage() {
   const { lang } = useLang();
@@ -10,6 +11,7 @@ export default function MarketPage() {
 
   return (
     <div className="space-y-4">
+      <PageAdInject placement="market" />
       <PageAdSlot placement="market" />
       <header className="x-card space-y-2 p-4">
         <p className="text-xs uppercase tracking-[0.26em] text-white/60">{t.dashboard.market.kicker}</p>

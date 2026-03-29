@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getDb } from '../../../lib/db.server';
-import { readPageAdSettings, writePageAdSettings } from '../../../lib/page-ads.server';
+import {
+  readPageAdInjectSettings,
+  readPageAdSettings,
+  writePageAdInjectSettings,
+  writePageAdSettings,
+} from '../../../lib/page-ads.server';
 
 const ADMIN_COOKIE_NAME = process.env.ADMIN_SESSION_COOKIE_NAME || 'asid';
 
@@ -41,7 +46,8 @@ export async function GET() {
   }
 
   const settings = await readPageAdSettings();
-  return NextResponse.json({ settings });
+  const injectSettings = await readPageAdInjectSettings();
+  return NextResponse.json({ settings, injectSettings });
 }
 
 export async function PUT(request: NextRequest) {
@@ -52,5 +58,8 @@ export async function PUT(request: NextRequest) {
 
   const body = await request.json().catch(() => ({}));
   const settings = await writePageAdSettings(body?.settings || body);
-  return NextResponse.json({ settings });
+  const injectSettings = body?.injectSettings
+    ? await writePageAdInjectSettings(body.injectSettings)
+    : await readPageAdInjectSettings();
+  return NextResponse.json({ settings, injectSettings });
 }

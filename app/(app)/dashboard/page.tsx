@@ -48,6 +48,7 @@ import { apiFetch } from '../../lib/api';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../../lib/feed-algorithm';
 import { trackPostView } from '../../lib/monetization';
 import PageAdSlot from '../../../components/ads/PageAdSlot';
+import PageAdInject from '../../../components/ads/PageAdInject';
 
 type FeedTab = 'for-you' | 'following';
 
@@ -133,6 +134,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-2">
+      <PageAdInject placement="dashboard" />
       <div className="grid gap-2 lg:grid-cols-[220px,minmax(0,1fr),290px] lg:items-start">
         <aside className="x-card space-y-2 p-2 lg:sticky lg:top-20">
           <div className="grid grid-cols-3 gap-1.5">

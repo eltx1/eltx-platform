@@ -20,6 +20,7 @@ import {
 } from '../../lib/social-store';
 import { trackPostView } from '../../lib/monetization';
 import PageAdSlot from '../../../components/ads/PageAdSlot';
+import PageAdInject from '../../../components/ads/PageAdInject';
 
 export default function PostDetailsClient({ postId }: { postId: string }) {
   const { user } = useAuth();
@@ -44,6 +45,7 @@ export default function PostDetailsClient({ postId }: { postId: string }) {
 
   return (
     <>
+      <PageAdInject placement="public_post" />
       <AppShell>
         <main className="mx-auto w-full max-w-3xl space-y-4 px-3 py-4 sm:px-4">
           <section className="x-card flex items-center justify-between p-3">
