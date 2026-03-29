@@ -66,6 +66,7 @@ type Section =
   | 'premium'
   | 'analytics'
   | 'ads'
+  | 'pageAds'
   | 'seo';
 
 interface SummaryResponse {
@@ -207,6 +208,19 @@ type AdsFilesSettings = {
 };
 
 type AdsFilesSettingsResponse = { settings: AdsFilesSettings };
+
+type PageAdsSettings = {
+  for_you: string;
+  ai: string;
+  dashboard: string;
+  wallet: string;
+  public_profile: string;
+  public_post: string;
+  market: string;
+  p2p: string;
+};
+
+type PageAdsSettingsResponse = { settings: PageAdsSettings };
 
 type SeoSettings = {
   sitemapRefreshHours: number;
@@ -425,6 +439,7 @@ const sections: Array<{ id: Section; label: string; icon: ComponentType<{ classN
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'analytics', label: 'Analytics', icon: LineChart },
   { id: 'ads', label: 'Ads Files', icon: FileText },
+  { id: 'pageAds', label: 'Page Ads', icon: FileText },
   { id: 'seo', label: 'SEO', icon: LineChart },
   { id: 'support', label: 'Support', icon: LifeBuoy },
   { id: 'faq', label: 'FAQ', icon: HelpCircle },
@@ -1954,6 +1969,103 @@ function AdsFilesPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               Save ads files
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+const PAGE_AD_LABELS: Array<{ key: keyof PageAdsSettings; label: string; hint: string }> = [
+  { key: 'for_you', label: 'For You page', hint: '/for-you' },
+  { key: 'ai', label: 'AI page', hint: '/ai' },
+  { key: 'dashboard', label: 'Dashboard page', hint: '/dashboard' },
+  { key: 'wallet', label: 'Wallet page', hint: '/wallet' },
+  { key: 'public_profile', label: 'Public profile page', hint: '/creators/[handle]' },
+  { key: 'public_post', label: 'Public post page', hint: '/posts/[postId]' },
+  { key: 'market', label: 'Market page', hint: '/market' },
+  { key: 'p2p', label: 'P2P page', hint: '/p2p' },
+];
+
+function PageAdsPanel({ onNotify }: { onNotify: (message: string, variant?: 'success' | 'error') => void }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState<PageAdsSettings>({
+    for_you: '',
+    ai: '',
+    dashboard: '',
+    wallet: '',
+    public_profile: '',
+    public_post: '',
+    market: '',
+    p2p: '',
+  });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await apiFetch<PageAdsSettingsResponse>('/api/admin/page-ads');
+    if (res.ok && res.data?.settings) {
+      setForm(res.data.settings);
+    } else {
+      onNotify(res.error || 'Failed to load page ads settings', 'error');
+    }
+    setLoading(false);
+  }, [onNotify]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const save = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    const res = await apiFetch<PageAdsSettingsResponse>('/api/admin/page-ads', {
+      method: 'PUT',
+      body: JSON.stringify({ settings: form }),
+    });
+    setSaving(false);
+    if (res.ok && res.data?.settings) {
+      setForm(res.data.settings);
+      onNotify('Page ads settings updated', 'success');
+    } else {
+      onNotify(res.error || 'Failed to save page ads settings', 'error');
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Page ads placements</h2>
+        <p className="text-sm text-white/70">Paste ad-network HTML snippets for each page. Keep empty to disable placement. Ads are isolated in sandboxed iframe for safety.</p>
+      </div>
+      {loading ? (
+        <div className="x-card p-4 text-sm text-white/70">Loading page ads settings...</div>
+      ) : (
+        <form className="space-y-4" onSubmit={save}>
+          {PAGE_AD_LABELS.map((item) => (
+            <label key={item.key} className="block text-sm text-white/70">
+              <div className="mb-1 flex items-center justify-between">
+                <span>{item.label}</span>
+                <span className="text-xs text-white/45">{item.hint}</span>
+              </div>
+              <textarea
+                rows={5}
+                value={form[item.key]}
+                onChange={(event) => setForm((prev) => ({ ...prev, [item.key]: event.target.value }))}
+                className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 font-mono text-xs focus:border-blue-500 focus:outline-none"
+                placeholder="<div>Ad snippet here...</div>"
+              />
+            </label>
+          ))}
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center gap-2 rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-60"
+            >
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save page ads
             </button>
           </div>
         </form>
@@ -5528,6 +5640,7 @@ export default function AdminApp() {
           {active === 'notifications' && <NotificationsPanel onNotify={notify} />}
           {active === 'analytics' && <AnalyticsPanel onNotify={notify} />}
           {active === 'ads' && <AdsFilesPanel onNotify={notify} />}
+          {active === 'pageAds' && <PageAdsPanel onNotify={notify} />}
           {active === 'seo' && <SeoPanel onNotify={notify} />}
           {active === 'support' && <SupportPanel onNotify={notify} />}
           {active === 'faq' && <FaqPanel onNotify={notify} />}

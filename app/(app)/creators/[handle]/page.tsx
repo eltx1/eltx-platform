@@ -19,6 +19,7 @@ import {
   type SocialProfile,
 } from '../../../lib/social-store';
 import { useToast } from '../../../lib/toast';
+import PageAdSlot from '../../../../components/ads/PageAdSlot';
 
 type CreatorProfilePageProps = {
   params: { handle: string };
@@ -205,6 +206,8 @@ export default function CreatorProfilePage({ params }: CreatorProfilePageProps) 
           </div>
         </div>
       </div>
+
+      <PageAdSlot placement="public_profile" />
 
       <div className="space-y-3">
         {shownPosts.length === 0 ? (

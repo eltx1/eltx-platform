@@ -47,6 +47,7 @@ import {
 import { apiFetch } from '../../lib/api';
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../../lib/feed-algorithm';
 import { trackPostView } from '../../lib/monetization';
+import PageAdSlot from '../../../components/ads/PageAdSlot';
 
 type FeedTab = 'for-you' | 'following';
 
@@ -164,6 +165,7 @@ export default function DashboardPage() {
         </aside>
 
         <main className="space-y-2">
+          <PageAdSlot placement="dashboard" />
           <section className="x-card space-y-1.5 p-2">
             <h2 className="text-xs font-semibold sm:text-sm">{t.dashboard.social.askAiTitle}</h2>
             <div className="flex flex-col gap-2">

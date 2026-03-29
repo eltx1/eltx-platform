@@ -23,6 +23,7 @@ import {
 import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../lib/feed-algorithm';
 import { trackPostView } from '../lib/monetization';
 import { useToast } from '../lib/toast';
+import PageAdSlot from '../../components/ads/PageAdSlot';
 
 const FALLBACK_BATCH_SIZE = 50;
 
@@ -147,6 +148,7 @@ export default function ForYouPage() {
           </section>
 
           <section className="space-y-3">
+            <PageAdSlot placement="for_you" />
             {visible.map((post) => {
               const summary = getPostInteractionSummary(post);
               return (

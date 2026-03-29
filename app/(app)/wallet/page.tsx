@@ -9,6 +9,7 @@ import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { useAuth } from '../../lib/auth';
 import { formatWei } from '../../lib/format';
+import PageAdSlot from '../../../components/ads/PageAdSlot';
 
 type Transaction = {
   tx_hash: string | null;
@@ -221,6 +222,7 @@ export default function WalletPage() {
   return (
     <div className="p-4 space-y-6 overflow-x-hidden">
       <h1 className="text-xl font-semibold">{t.wallet.title}</h1>
+      <PageAdSlot placement="wallet" />
       {hasEltxBalance && (
         <div className="p-4 rounded-2xl bg-white/5">
           <div className="text-sm opacity-80">{t.dashboard.balanceCard.title}</div>

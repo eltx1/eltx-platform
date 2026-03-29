@@ -9,6 +9,7 @@ import { apiFetch } from '../../lib/api';
 import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import { trackEvent } from '../../lib/analytics';
+import PageAdSlot from '../../../components/ads/PageAdSlot';
 
 type OfferPaymentMethod = { id: number; name: string };
 
@@ -199,6 +200,7 @@ export default function P2PPage() {
 
   return (
     <div className="space-y-4 p-4 pb-24">
+      <PageAdSlot placement="p2p" />
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 text-sm font-semibold">
