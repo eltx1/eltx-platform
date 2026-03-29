@@ -8,6 +8,7 @@ import { Bot, Loader2, Send, ShieldCheck, Sparkles, UserRound, Wallet } from 'lu
 import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { dict, useLang } from '../../lib/i18n';
+import PageAdSlot from '../../../components/ads/PageAdSlot';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 type AiUsage = {
@@ -195,6 +196,7 @@ function AIPageInner() {
             <StatPill label={t.stats.balance} value={status ? `${status.balance.usdt_balance} USDT` : '...'} icon={Wallet} />
           </div>
         </div>
+        <PageAdSlot placement="ai" />
 
         {error && (
           <div className="rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-100">

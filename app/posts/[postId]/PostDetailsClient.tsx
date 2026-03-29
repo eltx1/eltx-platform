@@ -19,6 +19,7 @@ import {
   type SocialPost,
 } from '../../lib/social-store';
 import { trackPostView } from '../../lib/monetization';
+import PageAdSlot from '../../../components/ads/PageAdSlot';
 
 export default function PostDetailsClient({ postId }: { postId: string }) {
   const { user } = useAuth();
@@ -59,6 +60,7 @@ export default function PostDetailsClient({ postId }: { postId: string }) {
               </Link>
             )}
           </section>
+          <PageAdSlot placement="public_post" />
 
           {!post && <section className="x-card p-4 text-sm text-white/75">{lang === 'ar' ? 'المنشور غير موجود.' : 'Post not found.'}</section>}
 
