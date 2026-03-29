@@ -76,9 +76,19 @@ export default function NavBar() {
     ? [
       { href: '/', label: t.nav.home },
       { href: '/dashboard', label: t.nav.dashboard },
+      { href: '/for-you', label: lang === 'ar' ? 'فور يو' : 'Feed' },
+      { href: '/privacy', label: t.footer.privacy },
+      { href: '/terms', label: lang === 'ar' ? 'شروط الاستخدام' : 'Terms of Use' },
+      { href: '/child-safety', label: t.footer.childSafety },
+      { href: '/contact', label: t.footer.contact },
     ]
     : [
       { href: '/', label: t.nav.home },
+      { href: '/for-you', label: lang === 'ar' ? 'فور يو' : 'Feed' },
+      { href: '/privacy', label: t.footer.privacy },
+      { href: '/terms', label: lang === 'ar' ? 'شروط الاستخدام' : 'Terms of Use' },
+      { href: '/child-safety', label: t.footer.childSafety },
+      { href: '/contact', label: t.footer.contact },
     ];
 
   const isActive = (href: string) => (pathname === href ? 'text-white font-semibold' : 'text-white/70');

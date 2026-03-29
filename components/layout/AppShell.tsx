@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Search, Bell, Mail, UserRound, Sparkles, Wallet, ShieldCheck, CircleDollarSign } from 'lucide-react';
+import { Home, Search, Bell, Mail, UserRound, Sparkles, Wallet, ShieldCheck, CircleDollarSign, FileText, ShieldAlert, Phone } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
 import { useMessageUnread } from '../../app/lib/useMessageUnread';
 
 const items = [
   { href: '/dashboard', key: 'home', icon: Home },
+  { href: '/for-you', key: 'feed', icon: Search },
   { href: '/trade/spot', key: 'explore', icon: Search },
   { href: '/transactions', key: 'alerts', icon: Bell },
   { href: '/messages', key: 'messages', icon: Mail },
@@ -17,6 +18,10 @@ const items = [
   { href: '/premium', key: 'premium', icon: ShieldCheck },
   { href: '/monetize', key: 'monetize', icon: CircleDollarSign },
   { href: '/profile', key: 'profile', icon: UserRound },
+  { href: '/privacy', key: 'privacy', icon: ShieldCheck },
+  { href: '/terms', key: 'terms', icon: FileText },
+  { href: '/child-safety', key: 'childSafety', icon: ShieldAlert },
+  { href: '/contact', key: 'contact', icon: Phone },
 ] as const;
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -27,6 +32,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const labels: Record<(typeof items)[number]['key'], string> = {
     home: t.appNav.home,
+    feed: lang === 'ar' ? 'فور يو' : 'Feed',
     explore: lang === 'ar' ? 'استكشاف' : 'Explore',
     alerts: lang === 'ar' ? 'التحديثات' : 'Updates',
     messages: t.appNav.messages,
@@ -36,6 +42,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     premium: lang === 'ar' ? 'بريميم' : 'Premium',
     profile: lang === 'ar' ? 'الملف الشخصي' : 'Profile',
     monetize: lang === 'ar' ? 'تحقيق الربح' : 'Monetize',
+    privacy: t.footer.privacy,
+    terms: lang === 'ar' ? 'شروط الاستخدام' : 'Terms of Use',
+    childSafety: t.footer.childSafety,
+    contact: t.footer.contact,
   };
 
   return (
