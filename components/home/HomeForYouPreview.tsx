@@ -4,22 +4,15 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { Heart, MessageCircle, Repeat2, ExternalLink } from 'lucide-react';
 import { dict, useLang } from '../../app/lib/i18n';
-
-type PreviewPost = {
-  id: string;
-  authorName: string;
-  handle: string;
-  content: string;
-  createdAt: string;
-  likes: number;
-  comments: number;
-  reposts: number;
-};
+import { apiFetch } from '../../app/lib/api';
+import { fetchAllPosts, getForYouFeedPage, getPostInteractionSummary, type SocialPost } from '../../app/lib/social-store';
+import { DEFAULT_FEED_ALGORITHM_SETTINGS, type FeedAlgorithmSettings } from '../../app/lib/feed-algorithm';
 
 export default function HomeForYouPreview() {
   const { lang } = useLang();
   const t = dict[lang].home.feedPreview;
-  const [posts, setPosts] = useState<PreviewPost[]>([]);
+  const [posts, setPosts] = useState<SocialPost[]>([]);
+  const [feedSettings, setFeedSettings] = useState<FeedAlgorithmSettings>(DEFAULT_FEED_ALGORITHM_SETTINGS);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,23 +20,8 @@ export default function HomeForYouPreview() {
 
     const load = async () => {
       try {
-        const response = await fetch('/api/social/posts', { cache: 'no-store' });
-        const payload = await response.json();
-
-        if (!cancelled && Array.isArray(payload?.posts)) {
-          setPosts(
-            payload.posts.slice(0, 3).map((post: any) => ({
-              id: String(post.id),
-              authorName: String(post.authorName || ''),
-              handle: String(post.handle || ''),
-              content: String(post.content || ''),
-              createdAt: String(post.createdAt || ''),
-              likes: Number(post.likes || 0),
-              comments: Number(post.comments || 0),
-              reposts: Number(post.reposts || 0),
-            })),
-          );
-        }
+        const loadedPosts = await fetchAllPosts(undefined);
+        if (!cancelled) setPosts(loadedPosts);
       } catch {
         if (!cancelled) setPosts([]);
       } finally {
@@ -58,7 +36,29 @@ export default function HomeForYouPreview() {
     };
   }, []);
 
-  const postList = useMemo(() => posts, [posts]);
+  useEffect(() => {
+    let cancelled = false;
+    const loadSettings = async () => {
+      const res = await apiFetch<{ settings: FeedAlgorithmSettings }>('/api/admin/feed-algorithm');
+      if (!cancelled && res.ok && res.data?.settings) {
+        setFeedSettings(res.data.settings);
+      }
+    };
+    loadSettings();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const postList = useMemo(
+    () =>
+      getForYouFeedPage(posts, {
+        settings: feedSettings,
+        offset: 0,
+        limit: 3,
+      }).items,
+    [feedSettings, posts],
+  );
 
   return (
     <section className="border-b border-[#2f3336] py-10 text-white md:py-14">
@@ -77,8 +77,10 @@ export default function HomeForYouPreview() {
         {!loading && postList.length === 0 && <div className="x-card p-4 text-sm text-white/70">{t.empty}</div>}
 
         {!loading &&
-          postList.map((post) => (
-            <article key={post.id} className="x-card space-y-3 p-4 md:p-5">
+          postList.map((post) => {
+            const summary = getPostInteractionSummary(post);
+            return (
+              <article key={post.id} className="x-card space-y-3 p-4 md:p-5">
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-semibold">{post.authorName}</p>
@@ -98,19 +100,20 @@ export default function HomeForYouPreview() {
               <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
                 <Link href="/login" className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3 py-1 hover:border-[#c9a75c]/60 hover:text-[#f4deae]">
                   <Heart className="h-3.5 w-3.5" />
-                  {t.like} · {post.likes}
+                  {t.like} · {summary.likes}
                 </Link>
                 <Link href="/login" className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3 py-1 hover:border-[#c9a75c]/60 hover:text-[#f4deae]">
                   <MessageCircle className="h-3.5 w-3.5" />
-                  {t.comment} · {post.comments}
+                  {t.comment} · {summary.comments}
                 </Link>
                 <Link href="/login" className="inline-flex items-center gap-1 rounded-full border border-white/10 px-3 py-1 hover:border-[#c9a75c]/60 hover:text-[#f4deae]">
                   <Repeat2 className="h-3.5 w-3.5" />
-                  {t.repost} · {post.reposts}
+                  {t.repost} · {summary.reposts}
                 </Link>
               </div>
             </article>
-          ))}
+            );
+          })}
 
         <div className="flex justify-center">
           <Link
