@@ -115,7 +115,7 @@ type SpotStreamMessage =
   | { type: 'ping'; payload?: { ts?: number } }
   | { type: 'error'; payload?: { message?: string } };
 
-const MARKET_PRIORITY = ['ELTX/USDT', 'WBTC/USDT', 'BNB/USDT', 'ETH/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB'];
+const MARKET_PRIORITY = ['BTC/USDT', 'ETH/USDT', 'WBTC/USDT', 'BNB/USDT', 'SOL/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB', 'ELTX/USDT'];
 const STREAM_TRADE_LIMIT = 50;
 
 function normalizeStreamTrades(trades: OrderbookResponse['trades']): OrderbookResponse['trades'] {
