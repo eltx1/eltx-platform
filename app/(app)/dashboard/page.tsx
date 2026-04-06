@@ -139,16 +139,6 @@ export default function DashboardPage() {
         <aside className="x-card space-y-2 p-2 lg:sticky lg:top-20">
           <div className="grid grid-cols-3 gap-1.5">
             <SectionCard title={lang === 'ar' ? 'اكسبلور' : 'Explore'} href="/for-you" icon={Compass} compact />
-            <button
-              type="button"
-              onClick={scrollToShortcuts}
-              className="group relative flex items-center gap-1.5 rounded-xl border border-[#2f3336] bg-black px-1.5 py-1.5 text-left shadow-sm transition hover:border-[#c9a75c]/60 hover:bg-[#16181c]"
-            >
-              <div className="flex h-6 w-6 items-center justify-center rounded-full border border-[#2f3336] bg-[#16181c] text-white transition group-hover:border-[#c9a75c]/70">
-                <ChevronDown className="h-3 w-3" />
-              </div>
-              <span className="truncate text-[0.72rem] font-semibold leading-tight text-white">{lang === 'ar' ? 'المزيد..' : 'More..'}</span>
-            </button>
             <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} compact />
             <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} compact />
             <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} compact />
@@ -330,6 +320,16 @@ export default function DashboardPage() {
               <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} compact />
               <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} compact />
               <SectionCard title={t.dashboard.cards.kyc.title} href="/kyc" icon={ShieldCheck} compact />
+              <button
+                type="button"
+                onClick={scrollToShortcuts}
+                className="group relative flex items-center gap-1.5 rounded-xl border border-[#2f3336] bg-black px-1.5 py-1.5 text-left shadow-sm transition hover:border-[#c9a75c]/60 hover:bg-[#16181c]"
+              >
+                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-[#2f3336] bg-[#16181c] text-white transition group-hover:border-[#c9a75c]/70">
+                  <ChevronDown className="h-3 w-3" />
+                </div>
+                <span className="truncate text-[0.72rem] font-semibold leading-tight text-white">{lang === 'ar' ? 'المزيد..' : 'More..'}</span>
+              </button>
             </div>
           </section>
         </aside>
