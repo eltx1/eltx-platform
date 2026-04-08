@@ -374,6 +374,21 @@ export async function fetchAllPosts(userId?: UserScopeId): Promise<SocialPost[]>
   });
 }
 
+export async function fetchPostById(postId: string, userId?: UserScopeId): Promise<SocialPost | null> {
+  const normalizedPostId = String(postId || '').trim();
+  if (!normalizedPostId) return null;
+  const params = new URLSearchParams();
+  if (userId != null) params.set('viewerId', String(userId));
+  const res = await apiFetch<{ post: SocialPost }>(`/api/social/posts/${encodeURIComponent(normalizedPostId)}?${params.toString()}`);
+  if (!res.ok || !res.data?.post) return null;
+  const followingMap = getFollowingMap(userId);
+  const viewBucket = getViewBucket();
+  const post = res.data.post;
+  const normalizedHandle = normalizeHandle(post.handle);
+  const isFollowed = typeof followingMap[normalizedHandle] === 'boolean' ? followingMap[normalizedHandle] : Boolean(post.isFollowed);
+  return { ...post, isFollowed, views: Number(post.views || 0) + Number(viewBucket[post.id] || 0) };
+}
+
 export function getAllPosts() {
   return [] as SocialPost[];
 }

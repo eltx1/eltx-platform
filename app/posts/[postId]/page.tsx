@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import PostDetailsClient from './PostDetailsClient';
 import { getPublicSocialPostById } from '../../lib/social-posts.server';
 import { buildPostJsonLd, buildPostMetadata } from '../../lib/post-seo';
@@ -23,17 +24,33 @@ export async function generateMetadata({ params }: { params: { postId: string } 
 export default async function PostDetailsPage({ params }: { params: { postId: string } }) {
   const decodedPostId = decodeURIComponent(params.postId || '');
   const post = await getPublicSocialPostById(decodedPostId);
-  const jsonLd = post ? buildPostJsonLd(post, getBaseUrl()) : null;
+  if (!post) {
+    notFound();
+  }
+
+  const jsonLd = buildPostJsonLd(post, getBaseUrl());
+  const initialPost = {
+    ...post,
+    likes: 0,
+    comments: 0,
+    reposts: 0,
+    views: 0,
+    authorFollowers: 0,
+    authorPremiumFollowers: 0,
+    isFollowed: false,
+    isPremium: false,
+    viewerLiked: false,
+    viewerReposted: false,
+    commentsList: [],
+  };
 
   return (
     <>
-      {jsonLd && (
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
-      )}
-      <PostDetailsClient postId={decodedPostId} />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <PostDetailsClient postId={decodedPostId} initialPost={initialPost} />
     </>
   );
 }

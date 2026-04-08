@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import AppBottomNav from '../../../components/layout/AppBottomNav';
@@ -11,7 +11,7 @@ import { dict, useLang } from '../../lib/i18n';
 import { useToast } from '../../lib/toast';
 import {
   addPostComment,
-  fetchAllPosts,
+  fetchPostById,
   getPostInteractionSummary,
   getProfile,
   togglePostLike,
@@ -22,26 +22,34 @@ import { trackPostView } from '../../lib/monetization';
 import PageAdSlot from '../../../components/ads/PageAdSlot';
 import PageAdInject from '../../../components/ads/PageAdInject';
 
-export default function PostDetailsClient({ postId }: { postId: string }) {
+type PostDetailsClientProps = {
+  postId: string;
+  initialPost: SocialPost;
+};
+
+export default function PostDetailsClient({ postId, initialPost }: PostDetailsClientProps) {
   const { user } = useAuth();
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
-  const [posts, setPosts] = useState<SocialPost[]>([]);
+  const [post, setPost] = useState<SocialPost | null>(initialPost);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const loaded = await fetchAllPosts(user?.id);
-      if (!cancelled) setPosts(loaded);
+      setLoading(true);
+      const loaded = await fetchPostById(postId, user?.id);
+      if (!cancelled) {
+        setPost(loaded || null);
+        setLoading(false);
+      }
     };
     load();
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
-
-  const post = useMemo(() => posts.find((item) => item.id === postId), [postId, posts]);
+  }, [postId, user?.id]);
 
   return (
     <>
@@ -64,7 +72,7 @@ export default function PostDetailsClient({ postId }: { postId: string }) {
           </section>
           <PageAdSlot placement="public_post" />
 
-          {!post && <section className="x-card p-4 text-sm text-white/75">{lang === 'ar' ? 'المنشور غير موجود.' : 'Post not found.'}</section>}
+          {!post && !loading && <section className="x-card p-4 text-sm text-white/75">{lang === 'ar' ? 'المنشور غير موجود.' : 'Post not found.'}</section>}
 
           {post && (
             <section className="space-y-3">
@@ -81,22 +89,22 @@ export default function PostDetailsClient({ postId }: { postId: string }) {
                   if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                   const result = await togglePostLike(targetPost, user.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  const loaded = await fetchAllPosts(user.id);
-                  setPosts(loaded);
+                  const loaded = await fetchPostById(postId, user.id);
+                  setPost(loaded || targetPost);
                 }}
                 onRepost={async (targetPost) => {
                   if (!user?.id) return toast(t.dashboard.social.sessionMissing);
                   const result = await togglePostRepost(targetPost, user.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  const loaded = await fetchAllPosts(user.id);
-                  setPosts(loaded);
+                  const loaded = await fetchPostById(postId, user.id);
+                  setPost(loaded || targetPost);
                   toast(result.reposted ? t.dashboard.social.repostSuccess : t.dashboard.social.repostRemoved);
                 }}
                 onViewed={async (targetPost) => {
                   const counted = trackPostView(targetPost.id, user?.id);
                   if (counted) {
-                    const loaded = await fetchAllPosts(user?.id);
-                    setPosts(loaded);
+                    const loaded = await fetchPostById(postId, user?.id);
+                    setPost(loaded || targetPost);
                   }
                 }}
                 onComment={async (targetPost, content) => {
@@ -105,11 +113,19 @@ export default function PostDetailsClient({ postId }: { postId: string }) {
                   const profile = getProfile(user.id, user);
                   const result = await addPostComment(targetPost, content, profile, user.id);
                   if (!result.ok) return toast(t.dashboard.social.quickPostStorageError);
-                  const loaded = await fetchAllPosts(user.id);
-                  setPosts(loaded);
+                  const loaded = await fetchPostById(postId, user.id);
+                  setPost(loaded || targetPost);
                   toast(t.dashboard.social.commentSuccess);
                 }}
               />
+              <div className="x-card p-4 text-center">
+                <Link
+                  href="/for-you"
+                  className="inline-flex items-center justify-center rounded-full border border-[#c9a75c]/70 px-5 py-2 text-sm font-semibold text-[#f4deae] transition hover:border-[#c9a75c] hover:bg-[#c9a75c]/10"
+                >
+                  {lang === 'ar' ? 'شوف منشورات أكتر' : 'See More Posts'}
+                </Link>
+              </div>
             </section>
           )}
         </main>
