@@ -820,6 +820,7 @@ export const dict = {
       logout: 'Logout',
       language: 'Language',
       balance: 'Balance',
+      explore: 'Explore',
     },
     appNav: {
       home: 'Home',
@@ -1983,6 +1984,7 @@ export const dict = {
       logout: 'تسجيل الخروج',
       language: 'اللغة',
       balance: 'الرصيد',
+      explore: 'استكشاف',
     },
     appNav: {
       home: 'الرئيسية',

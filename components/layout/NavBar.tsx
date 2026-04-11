@@ -12,6 +12,7 @@ import { apiFetch } from '../../app/lib/api';
 import { formatWei } from '../../app/lib/format';
 
 interface NavLink { href: string; label: string; }
+interface PublicLink { href: string; label: string; }
 
 export default function NavBar() {
   const { user, logout } = useAuth();
@@ -90,6 +91,12 @@ export default function NavBar() {
       { href: '/child-safety', label: t.footer.childSafety },
       { href: '/contact', label: t.footer.contact },
     ];
+  const publicLinks: PublicLink[] = [
+    { href: '/privacy', label: t.footer.privacy },
+    { href: '/terms', label: t.footer.terms },
+    { href: '/child-safety', label: t.footer.childSafety },
+    { href: '/contact', label: t.footer.contact },
+  ];
 
   const isActive = (href: string) => (pathname === href ? 'text-white font-semibold' : 'text-white/70');
 
@@ -125,6 +132,15 @@ export default function NavBar() {
               {l.label}
             </Link>
           ))}
+          <div className="mx-1 h-6 w-px bg-[#2f3336]" aria-hidden="true" />
+          <div className="flex items-center gap-1 rounded-full border border-[#2f3336] bg-[#111216]/80 px-2 py-1">
+            <span className="px-2 text-[10px] uppercase tracking-[0.2em] text-white/50">{t.nav.explore}</span>
+            {publicLinks.map((l) => (
+              <Link key={l.href} href={l.href} className="rounded-full px-2.5 py-1.5 text-xs text-white/70 transition-colors hover:bg-white/10 hover:text-white">
+                {l.label}
+              </Link>
+            ))}
+          </div>
           {!user && (
             <>
               <Link href="/login" className="rounded-full px-3 py-2 hover:bg-white/10">{t.nav.login}</Link>
@@ -164,7 +180,7 @@ export default function NavBar() {
           <Menu />
         </button>
       </div>
-      <MobileMenu open={open} setOpen={setOpen} links={links} user={user} logout={logout} />
+      <MobileMenu open={open} setOpen={setOpen} links={links} publicLinks={publicLinks} user={user} logout={logout} />
     </header>
   );
 }
