@@ -46,7 +46,7 @@ const DEFAULT_MARKET_MAKER_SPREAD_BPS = 200;
 const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
 const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
 const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
-const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 15;
+const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 0;
 const BINANCE_RECV_WINDOW_MS = 5_000;
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
@@ -2673,7 +2673,7 @@ async function getSpotTopOfBook(conn, marketId, { forUpdate = false } = {}) {
   const [[ask]] = await conn.query(
     `SELECT price_wei
        FROM spot_orders
-      WHERE market_id=? AND side='sell' AND status='open'
+      WHERE market_id=? AND side='sell' AND status='open' AND COALESCE(external_bound, 0)=0
       ORDER BY price_wei ASC, id ASC
       LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     [marketId]
@@ -2681,7 +2681,7 @@ async function getSpotTopOfBook(conn, marketId, { forUpdate = false } = {}) {
   const [[bid]] = await conn.query(
     `SELECT price_wei
        FROM spot_orders
-      WHERE market_id=? AND side='buy' AND status='open'
+      WHERE market_id=? AND side='buy' AND status='open' AND COALESCE(external_bound, 0)=0
       ORDER BY price_wei DESC, id ASC
       LIMIT 1${forUpdate ? ' FOR UPDATE' : ''}`,
     [marketId]
@@ -2709,7 +2709,7 @@ async function estimateSpotMarketFill(conn, market, { side, baseAmountWei }) {
   const [rows] = await conn.query(
     `SELECT price_wei, remaining_base_wei
        FROM spot_orders
-      WHERE market_id=? AND side=? AND status='open'
+      WHERE market_id=? AND side=? AND status='open' AND COALESCE(external_bound, 0)=0
       ORDER BY ${side === 'buy' ? 'price_wei ASC, id ASC' : 'price_wei DESC, id ASC'}
       LIMIT 200`,
     [market.id, side === 'buy' ? 'sell' : 'buy']
@@ -2909,6 +2909,12 @@ function toBinanceSymbol(symbol) {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+function normalizeBinanceOrderId(value) {
+  if (value === undefined || value === null) return null;
+  const str = String(value).trim();
+  return str.length ? str : null;
+}
+
 function getSyntheticReferencePriceWei(marketRow) {
   const key = String(marketRow?.base_asset || '').toUpperCase();
   const fallbackByAsset = {
@@ -3083,11 +3089,91 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
   };
 }
 
+async function executeBinanceLimitOrder(marketRow, side, { quantityWei, priceWei, timeInForce = 'GTC' }) {
+  const cfg = getBinanceConfig();
+  if (cfg.mockMode) {
+    return {
+      externalOrderId: `mock-limit-${Date.now()}`,
+      status: 'NEW',
+      executedBaseWei: 0n,
+      quoteWithoutFeeWei: 0n,
+      averagePriceWei: 0n,
+      raw: { mock: true, side, timeInForce },
+    };
+  }
+  if (!cfg.configured) throw new Error('Binance API credentials are not configured');
+  if (!quantityWei || quantityWei <= 0n) throw new Error('Missing limit quantity');
+  if (!priceWei || priceWei <= 0n) throw new Error('Missing limit price');
+
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const params = new URLSearchParams();
+  params.set('symbol', symbol);
+  params.set('side', side.toUpperCase());
+  params.set('type', 'LIMIT');
+  params.set('timeInForce', String(timeInForce || 'GTC').toUpperCase());
+  params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
+  params.set('price', trimDecimal(formatUnitsStr(priceWei.toString(), 18)));
+  params.set('newOrderRespType', 'FULL');
+  params.set('recvWindow', String(BINANCE_RECV_WINDOW_MS));
+  params.set('timestamp', String(Date.now()));
+  const signature = crypto.createHmac('sha256', cfg.apiSecret).update(params.toString()).digest('hex');
+  params.set('signature', signature);
+
+  const response = await fetch(`${cfg.baseUrl}/api/v3/order`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-MBX-APIKEY': cfg.apiKey,
+    },
+    body: params.toString(),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.msg || `Binance limit order failed (${response.status})`);
+
+  const executedQty = ethers.parseUnits(String(payload.executedQty || '0'), marketRow.base_decimals);
+  const cummulativeQuoteQty = ethers.parseUnits(String(payload.cummulativeQuoteQty || '0'), marketRow.quote_decimals);
+  const averagePriceWei =
+    executedQty > 0n && cummulativeQuoteQty > 0n ? mulDiv(cummulativeQuoteQty, PRICE_SCALE, executedQty) : 0n;
+  const externalOrderId = normalizeBinanceOrderId(payload.orderId ?? payload.clientOrderId);
+  if (!externalOrderId) throw new Error('Binance limit response missing order id');
+  return {
+    externalOrderId,
+    status: String(payload.status || 'NEW').toUpperCase(),
+    executedBaseWei: executedQty,
+    quoteWithoutFeeWei: cummulativeQuoteQty,
+    averagePriceWei,
+    raw: payload,
+  };
+}
+
+async function cancelBinanceOrder(marketRow, externalOrderId) {
+  const cfg = getBinanceConfig();
+  if (cfg.mockMode) return { ok: true, raw: { mock: true, orderId: externalOrderId } };
+  if (!cfg.configured) throw new Error('Binance API credentials are not configured');
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const params = new URLSearchParams();
+  params.set('symbol', symbol);
+  params.set('orderId', String(externalOrderId));
+  params.set('recvWindow', String(BINANCE_RECV_WINDOW_MS));
+  params.set('timestamp', String(Date.now()));
+  const signature = crypto.createHmac('sha256', cfg.apiSecret).update(params.toString()).digest('hex');
+  params.set('signature', signature);
+  const response = await fetch(`${cfg.baseUrl}/api/v3/order?${params.toString()}`, {
+    method: 'DELETE',
+    headers: {
+      'X-MBX-APIKEY': cfg.apiKey,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.msg || `Binance cancel failed (${response.status})`);
+  return { ok: true, raw: payload };
+}
+
 async function readSpotOrderbookVersion(conn, marketRow) {
   const [rows] = await conn.query(
     `SELECT UNIX_TIMESTAMP(updated_at) * 1000 AS updated_ms, id
        FROM spot_orders
-       WHERE market_id = ?
+       WHERE market_id = ? AND COALESCE(external_bound, 0)=0
        ORDER BY updated_at DESC, id DESC
        LIMIT 1`,
     [marketRow.id]
@@ -3138,7 +3224,7 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
   const [bidRows] = await conn.query(
     `SELECT price_wei, SUM(remaining_base_wei) AS base_total
        FROM spot_orders
-       WHERE market_id=? AND status='open' AND side='buy'
+       WHERE market_id=? AND status='open' AND side='buy' AND COALESCE(external_bound, 0)=0
        GROUP BY price_wei
        ORDER BY price_wei DESC
        LIMIT 50`,
@@ -3147,7 +3233,7 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
   const [askRows] = await conn.query(
     `SELECT price_wei, SUM(remaining_base_wei) AS base_total
        FROM spot_orders
-       WHERE market_id=? AND status='open' AND side='sell'
+       WHERE market_id=? AND status='open' AND side='sell' AND COALESCE(external_bound, 0)=0
        GROUP BY price_wei
        ORDER BY price_wei ASC
        LIMIT 50`,
@@ -3214,6 +3300,7 @@ async function readSpotOrderbookDeltas(conn, marketRow, sinceVersion) {
     `SELECT id, side, price_wei, remaining_base_wei, remaining_quote_wei, status, created_at, updated_at
        FROM spot_orders
        WHERE market_id=?
+         AND COALESCE(external_bound, 0)=0
          AND (
            updated_at > FROM_UNIXTIME(? / 1000)
            OR (updated_at = FROM_UNIXTIME(? / 1000) AND id > ?)
@@ -3282,6 +3369,9 @@ async function readSpotOrdersForUser(conn, userId, marketRow) {
       remaining_quote_amount: trimDecimal(formatUnitsStr(remainingQuoteWei.toString(), quoteDecimals)),
       remaining_quote_wei: remainingQuoteWei.toString(),
       fee_bps: row.fee_bps,
+      external_bound: Number(row.external_bound || 0) === 1,
+      external_order_id: row.external_order_id || null,
+      external_status: row.external_status || null,
       created_at: row.created_at,
       updated_at: row.updated_at,
     };
@@ -3317,7 +3407,7 @@ async function simulateSpotMarketBuy(conn, market, quoteAmountWei, takerFeeBps) 
   const [asks] = await conn.query(
     `SELECT price_wei, remaining_base_wei, fee_bps
        FROM spot_orders
-      WHERE market_id=? AND side='sell' AND status='open'
+      WHERE market_id=? AND side='sell' AND status='open' AND COALESCE(external_bound, 0)=0
       ORDER BY price_wei ASC, id ASC
       LIMIT 200`,
     [market.id]
@@ -3418,7 +3508,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
     const [matchRows] = await conn.query(
       `SELECT id, user_id, price_wei, remaining_base_wei, remaining_quote_wei, fee_bps
        FROM spot_orders
-       WHERE market_id=? AND side=? AND status='open' ${priceClause}
+       WHERE market_id=? AND side=? AND status='open' AND COALESCE(external_bound, 0)=0 ${priceClause}
        ORDER BY ${orderBy}
        LIMIT 1 FOR UPDATE`,
       params
@@ -10884,7 +10974,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     }
 
     const [insert] = await conn.query(
-      'INSERT INTO spot_orders (market_id, user_id, side, type, price_wei, base_amount_wei, quote_amount_wei, remaining_base_wei, remaining_quote_wei, fee_bps, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO spot_orders (market_id, user_id, side, type, price_wei, base_amount_wei, quote_amount_wei, remaining_base_wei, remaining_quote_wei, fee_bps, status, external_bound, external_order_id, external_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [
         market.id,
         userId,
@@ -10897,6 +10987,9 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         side === 'buy' && type === 'limit' ? reservedQuote.toString() : '0',
         Number(type === 'limit' ? makerFeeBps : takerFeeBps),
         'open',
+        0,
+        null,
+        null,
       ]
     );
     const orderId = insert.insertId;
@@ -10925,9 +11018,14 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
-    if (shouldExternalFallback && isImmediateOrCancel && taker.remainingBase > 0n) {
+    let externalRestingOrderId = null;
+    let externalRestingStatus = null;
+    if (shouldExternalFallback && taker.remainingBase > 0n) {
       try {
         externalFallbackAttempted = true;
+        console.info(
+          `[spot] external fallback start: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} remainingBaseWei=${taker.remainingBase.toString()} spreadBps=${liquidityState.spreadBps} mode=${liquidityState.mockMode ? 'mock' : 'live'}`
+        );
         const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
         const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
         const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
@@ -11000,10 +11098,58 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
             maker_fee_wei: 0n,
             external_liquidity: true,
           });
+          console.info(
+            `[spot] external fallback filled: orderId=${orderId} tradeId=${tradeId} executedBaseWei=${externalBase.toString()} executedQuoteWei=${externalQuote.toString()} avgPriceWei=${externalAveragePriceWei.toString()}`
+          );
+        } else {
+          console.info(
+            `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
+          );
         }
       } catch (err) {
         externalFallbackError = err;
-        console.warn('[spot] Binance execution fallback failed:', err.message || err);
+        console.warn(
+          `[spot] Binance execution fallback failed: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} error=${
+            err.message || err
+          }`
+        );
+      }
+    } else if (taker.remainingBase > 0n) {
+      const reason = !liquidityState.enabled
+        ? 'binance_liquidity_disabled'
+        : !liquidityState.configured && !liquidityState.mockMode
+          ? 'binance_credentials_missing'
+          : 'no_remaining_quantity';
+      console.info(
+        `[spot] external fallback skipped: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=${reason}`
+      );
+    }
+
+    const shouldPlaceRestingExternalLimit =
+      shouldExternalFallback &&
+      !isImmediateOrCancel &&
+      type === 'limit' &&
+      taker.remainingBase > 0n &&
+      !externalRestingOrderId;
+    if (shouldPlaceRestingExternalLimit) {
+      try {
+        const limitOrder = await executeBinanceLimitOrder(market, side, {
+          quantityWei: taker.remainingBase,
+          priceWei,
+          timeInForce: 'GTC',
+        });
+        externalRestingOrderId = limitOrder.externalOrderId;
+        externalRestingStatus = limitOrder.status || 'NEW';
+        console.info(
+          `[spot] external resting limit placed: orderId=${orderId} market=${market.symbol} side=${side} externalOrderId=${externalRestingOrderId} qtyWei=${taker.remainingBase.toString()} priceWei=${priceWei.toString()} status=${externalRestingStatus}`
+        );
+      } catch (err) {
+        await conn.rollback();
+        return next({
+          status: 502,
+          code: 'BINANCE_LIMIT_PLACE_FAILED',
+          message: `External resting limit placement failed: ${err.message || 'unknown error'}`,
+        });
       }
     }
 
@@ -11104,13 +11250,19 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       remainingQuote = 0n;
     }
 
-    await conn.query('UPDATE spot_orders SET remaining_base_wei=?, remaining_quote_wei=?, status=?, quote_amount_wei=? WHERE id=?', [
-      taker.remainingBase.toString(),
-      remainingQuote.toString(),
-      orderStatus,
-      quoteAmountRecord.toString(),
-      orderId,
-    ]);
+    await conn.query(
+      'UPDATE spot_orders SET remaining_base_wei=?, remaining_quote_wei=?, status=?, quote_amount_wei=?, external_bound=?, external_order_id=?, external_status=? WHERE id=?',
+      [
+        taker.remainingBase.toString(),
+        remainingQuote.toString(),
+        orderStatus,
+        quoteAmountRecord.toString(),
+        externalRestingOrderId ? 1 : 0,
+        externalRestingOrderId,
+        externalRestingStatus,
+        orderId,
+      ]
+    );
 
     await conn.commit();
 
@@ -11149,6 +11301,9 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       order: {
         id: orderId,
         status: orderStatus,
+        external_bound: !!externalRestingOrderId,
+        external_order_id: externalRestingOrderId,
+        external_status: externalRestingStatus,
         remaining_base_wei: taker.remainingBase.toString(),
         remaining_quote_wei: remainingQuote.toString(),
         filled_base_wei: matchResult.filledBase.toString(),
@@ -11174,7 +11329,7 @@ app.post('/spot/orders/:id/cancel', walletLimiter, async (req, res, next) => {
     conn = await pool.getConnection();
     await conn.beginTransaction();
     const [rows] = await conn.query(
-      `SELECT so.*, sm.base_asset, sm.quote_asset, sm.base_decimals, sm.quote_decimals
+      `SELECT so.*, sm.symbol, sm.base_asset, sm.quote_asset, sm.base_decimals, sm.quote_decimals
        FROM spot_orders so
        JOIN spot_markets sm ON sm.id = so.market_id
        WHERE so.id=? AND so.user_id=? FOR UPDATE`,
@@ -11208,7 +11363,26 @@ app.post('/spot/orders/:id/cancel', walletLimiter, async (req, res, next) => {
       );
     }
 
-    await conn.query('UPDATE spot_orders SET status="cancelled", remaining_base_wei=0, remaining_quote_wei=0 WHERE id=?', [orderId]);
+    if (Number(order.external_bound || 0) === 1 && order.external_order_id) {
+      try {
+        await cancelBinanceOrder(order, order.external_order_id);
+        console.info(
+          `[spot] external resting limit cancelled: orderId=${orderId} market=${order.symbol || `${baseAsset}/${quoteAsset}`} externalOrderId=${order.external_order_id}`
+        );
+      } catch (err) {
+        await conn.rollback();
+        return next({
+          status: 502,
+          code: 'BINANCE_CANCEL_FAILED',
+          message: `External order cancel failed: ${err.message || 'unknown error'}`,
+        });
+      }
+    }
+
+    await conn.query(
+      'UPDATE spot_orders SET status="cancelled", remaining_base_wei=0, remaining_quote_wei=0, external_status="CANCELLED" WHERE id=?',
+      [orderId]
+    );
     await conn.commit();
     res.json({ ok: true });
   } catch (err) {
