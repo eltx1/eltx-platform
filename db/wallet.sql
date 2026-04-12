@@ -556,6 +556,9 @@ CREATE TABLE IF NOT EXISTS spot_orders (
   remaining_quote_wei DECIMAL(65,0) NOT NULL DEFAULT 0,
   fee_bps INT UNSIGNED NOT NULL DEFAULT 0,
   status ENUM('open','filled','cancelled') NOT NULL DEFAULT 'open',
+  external_bound TINYINT(1) NOT NULL DEFAULT 0,
+  external_order_id VARCHAR(128) NULL,
+  external_status VARCHAR(32) NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_spot_orders_market (market_id),
@@ -577,8 +580,12 @@ ALTER TABLE spot_orders
   ADD COLUMN IF NOT EXISTS remaining_quote_wei DECIMAL(65,0) NOT NULL DEFAULT 0 AFTER remaining_base_wei,
   ADD COLUMN IF NOT EXISTS fee_bps INT UNSIGNED NOT NULL DEFAULT 0 AFTER remaining_quote_wei,
   ADD COLUMN IF NOT EXISTS status ENUM('open','filled','cancelled') NOT NULL DEFAULT 'open' AFTER fee_bps,
-  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER status,
+  ADD COLUMN IF NOT EXISTS external_bound TINYINT(1) NOT NULL DEFAULT 0 AFTER status,
+  ADD COLUMN IF NOT EXISTS external_order_id VARCHAR(128) NULL AFTER external_bound,
+  ADD COLUMN IF NOT EXISTS external_status VARCHAR(32) NULL AFTER external_order_id,
+  ADD COLUMN IF NOT EXISTS created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER external_status,
   ADD COLUMN IF NOT EXISTS updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at;
+CREATE INDEX idx_spot_orders_external_bound ON spot_orders (external_bound, status, market_id, side);
 
 CREATE TABLE IF NOT EXISTS spot_trades (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
