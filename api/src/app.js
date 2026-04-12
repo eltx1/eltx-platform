@@ -11018,8 +11018,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
-    let externalRestingOrderId = null;
-    let externalRestingStatus = null;
     if (shouldExternalFallback && taker.remainingBase > 0n) {
       try {
         externalFallbackAttempted = true;
@@ -11123,34 +11121,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       console.info(
         `[spot] external fallback skipped: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=${reason}`
       );
-    }
-
-    const shouldPlaceRestingExternalLimit =
-      shouldExternalFallback &&
-      !isImmediateOrCancel &&
-      type === 'limit' &&
-      taker.remainingBase > 0n &&
-      !externalRestingOrderId;
-    if (shouldPlaceRestingExternalLimit) {
-      try {
-        const limitOrder = await executeBinanceLimitOrder(market, side, {
-          quantityWei: taker.remainingBase,
-          priceWei,
-          timeInForce: 'GTC',
-        });
-        externalRestingOrderId = limitOrder.externalOrderId;
-        externalRestingStatus = limitOrder.status || 'NEW';
-        console.info(
-          `[spot] external resting limit placed: orderId=${orderId} market=${market.symbol} side=${side} externalOrderId=${externalRestingOrderId} qtyWei=${taker.remainingBase.toString()} priceWei=${priceWei.toString()} status=${externalRestingStatus}`
-        );
-      } catch (err) {
-        await conn.rollback();
-        return next({
-          status: 502,
-          code: 'BINANCE_LIMIT_PLACE_FAILED',
-          message: `External resting limit placement failed: ${err.message || 'unknown error'}`,
-        });
-      }
     }
 
     if (isImmediateOrCancel && matchResult.filledBase <= 0n && externalFallbackAttempted && externalFallbackError) {
