@@ -46,6 +46,7 @@ const DEFAULT_MARKET_MAKER_SPREAD_BPS = 200;
 const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
 const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
 const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
+const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 15;
 const BINANCE_RECV_WINDOW_MS = 5_000;
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
@@ -717,6 +718,7 @@ const MarketMakerSettingsSchema = z
     pairs: z.union([z.string(), z.array(z.string().min(3))]).optional(),
     target_base_pct: z.coerce.number().min(1).max(99).optional(),
     binance_liquidity_enabled: z.boolean().optional(),
+    binance_liquidity_spread_bps: z.coerce.number().int().min(0).max(5000).optional(),
   })
   .refine(
     (data) =>
@@ -726,7 +728,8 @@ const MarketMakerSettingsSchema = z
       data.user_email !== undefined ||
       data.pairs !== undefined ||
       data.target_base_pct !== undefined ||
-      data.binance_liquidity_enabled !== undefined,
+      data.binance_liquidity_enabled !== undefined ||
+      data.binance_liquidity_spread_bps !== undefined,
     { message: 'At least one market maker field must be provided' }
   );
 
@@ -2782,10 +2785,16 @@ async function readMarketMakerSettings(conn = pool) {
     DEFAULT_BINANCE_LIQUIDITY_ENABLED ? '1' : '0',
     conn
   );
+  const binanceSpreadRaw = await getPlatformSettingValue(
+    'binance_liquidity_spread_bps',
+    DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS.toString(),
+    conn
+  );
 
   const spread = Number.parseInt(spreadRaw, 10);
   const refreshMinutes = Number.parseInt(refreshRaw, 10);
   const targetPct = Number.parseInt(targetPctRaw, 10);
+  const binanceSpread = Number.parseInt(binanceSpreadRaw, 10);
   return {
     enabled: enabledRaw === '1' || enabledRaw?.toLowerCase?.() === 'true',
     spread_bps: Number.isFinite(spread) ? spread : DEFAULT_MARKET_MAKER_SPREAD_BPS,
@@ -2799,6 +2808,9 @@ async function readMarketMakerSettings(conn = pool) {
       : [],
     target_base_pct: Number.isFinite(targetPct) ? targetPct : DEFAULT_MARKET_MAKER_TARGET_BASE_PCT,
     binance_liquidity_enabled: binanceEnabledRaw === '1' || binanceEnabledRaw?.toLowerCase?.() === 'true',
+    binance_liquidity_spread_bps: Number.isFinite(binanceSpread)
+      ? Math.max(0, Math.min(5000, binanceSpread))
+      : DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS,
   };
 }
 
@@ -2815,8 +2827,66 @@ async function updateMarketMakerSettings(partial) {
     tasks.push(setPlatformSettingValue('market_maker_target_base_pct', partial.target_base_pct.toString()));
   if (partial.binance_liquidity_enabled !== undefined)
     tasks.push(setPlatformSettingValue('binance_liquidity_enabled', partial.binance_liquidity_enabled ? '1' : '0'));
+  if (partial.binance_liquidity_spread_bps !== undefined)
+    tasks.push(setPlatformSettingValue('binance_liquidity_spread_bps', partial.binance_liquidity_spread_bps.toString()));
   if (!tasks.length) return;
   await Promise.all(tasks);
+}
+
+function applyExternalSpreadToPriceWei(rawPriceWei, side, spreadBps = 0) {
+  const base = bigIntFromValue(rawPriceWei);
+  const spread = BigInt(Math.max(0, Number.parseInt(String(spreadBps || 0), 10) || 0));
+  if (base <= 0n || spread <= 0n) return base;
+  if (side === 'sell') return mulDiv(base, 10_000n + spread, 10_000n);
+  const minMultiplier = 10_000n - spread;
+  if (minMultiplier <= 0n) return 0n;
+  return mulDiv(base, minMultiplier, 10_000n);
+}
+
+function normalizeExternalDepthWithSpread(depth, spreadBps = 0) {
+  const normalize = (rows, side) =>
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => {
+        const priceWei = applyExternalSpreadToPriceWei(row.price_wei, side, spreadBps);
+        const baseWei = bigIntFromValue(row.base_amount_wei);
+        if (priceWei <= 0n || baseWei <= 0n) return null;
+        return {
+          side,
+          price_wei: priceWei,
+          base_amount_wei: baseWei,
+          quote_amount_wei: computeQuoteAmount(baseWei, priceWei),
+        };
+      })
+      .filter(Boolean);
+
+  return {
+    bids: normalize(depth?.bids, 'buy'),
+    asks: normalize(depth?.asks, 'sell'),
+  };
+}
+
+function mergeSpotDepthLevels(internalLevels, externalLevels, side, limit = 50) {
+  const map = new Map();
+  const mergeRows = (rows, source) => {
+    for (const row of rows || []) {
+      const priceWei = bigIntFromValue(row.price_wei);
+      const baseWei = bigIntFromValue(row.base_amount_wei);
+      if (priceWei <= 0n || baseWei <= 0n) continue;
+      const key = priceWei.toString();
+      const entry = map.get(key) || { price_wei: priceWei, base_amount_wei: 0n, internalFirst: false };
+      entry.base_amount_wei += baseWei;
+      if (source === 'internal') entry.internalFirst = true;
+      map.set(key, entry);
+    }
+  };
+  mergeRows(internalLevels, 'internal');
+  mergeRows(externalLevels, 'external');
+  const rows = Array.from(map.values());
+  rows.sort((a, b) => {
+    if (a.price_wei === b.price_wei) return a.internalFirst === b.internalFirst ? 0 : a.internalFirst ? -1 : 1;
+    return side === 'buy' ? (a.price_wei > b.price_wei ? -1 : 1) : a.price_wei < b.price_wei ? -1 : 1;
+  });
+  return rows.slice(0, Math.max(1, limit));
 }
 
 function getBinanceConfig() {
@@ -2889,6 +2959,7 @@ async function readBinanceLiquidityState(conn = pool) {
   const cfg = getBinanceConfig();
   return {
     enabled: !!settings.binance_liquidity_enabled,
+    spreadBps: Number(settings.binance_liquidity_spread_bps || 0),
     configured: cfg.configured,
     mockMode: cfg.mockMode,
     baseUrl: cfg.baseUrl,
@@ -3090,9 +3161,30 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
        LIMIT 50`,
     [marketRow.id]
   );
-  const formatLevel = (row) => {
-    const priceWei = BigInt(row.price_wei);
-    const baseWei = bigIntFromValue(row.base_total);
+  let externalDepth = { bids: [], asks: [] };
+  try {
+    const external = await readBinanceLiquidityState(conn);
+    if (external.enabled) {
+      const depth = await fetchBinanceDepthSnapshot(marketRow, 50);
+      externalDepth = normalizeExternalDepthWithSpread(depth, external.spreadBps);
+    }
+  } catch (err) {
+    console.warn('[spot] Binance orderbook merge failed:', err.message || err);
+  }
+  const bidInternal = bidRows.map((row) => ({
+    price_wei: BigInt(row.price_wei),
+    base_amount_wei: bigIntFromValue(row.base_total),
+  }));
+  const askInternal = askRows.map((row) => ({
+    price_wei: BigInt(row.price_wei),
+    base_amount_wei: bigIntFromValue(row.base_total),
+  }));
+  const mergedBids = mergeSpotDepthLevels(bidInternal, externalDepth.bids, 'buy', 50);
+  const mergedAsks = mergeSpotDepthLevels(askInternal, externalDepth.asks, 'sell', 50);
+
+  const mergedFormat = (row) => {
+    const priceWei = bigIntFromValue(row.price_wei);
+    const baseWei = bigIntFromValue(row.base_amount_wei);
     const quoteWei = computeQuoteAmount(baseWei, priceWei);
     return {
       price: trimDecimal(formatUnitsStr(priceWei.toString(), 18)),
@@ -3103,32 +3195,6 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
       quote_amount_wei: quoteWei.toString(),
     };
   };
-  if (!bidRows.length && !askRows.length) {
-    try {
-      const external = await readBinanceLiquidityState(conn);
-      if (external.enabled) {
-        const depth = await fetchBinanceDepthSnapshot(marketRow, 50);
-        if (depth.bids.length || depth.asks.length) {
-          const extFormat = (row) => ({
-            price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
-            price_wei: row.price_wei.toString(),
-            base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
-            base_amount_wei: row.base_amount_wei.toString(),
-            quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
-            quote_amount_wei: row.quote_amount_wei.toString(),
-          });
-          return {
-            orderbookVersion: await readSpotOrderbookVersion(conn, marketRow),
-            lastTradeId: tradeRows.length ? Number(tradeRows[0].id || 0) : 0,
-            orderbook: { bids: depth.bids.map(extFormat), asks: depth.asks.map(extFormat) },
-            trades: tradeRows.map((row) => formatSpotTrade(row, marketRow)),
-          };
-        }
-      }
-    } catch (err) {
-      console.warn('[spot] Binance orderbook fallback failed:', err.message || err);
-    }
-  }
   const trades = tradeRows.map((row) => formatSpotTrade(row, marketRow));
   const orderbookVersion = await readSpotOrderbookVersion(conn, marketRow);
   const lastTradeId = trades.length ? trades[0].id : 0;
@@ -3136,7 +3202,7 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
   return {
     orderbookVersion,
     lastTradeId,
-    orderbook: { bids: bidRows.map(formatLevel), asks: askRows.map(formatLevel) },
+    orderbook: { bids: mergedBids.map(mergedFormat), asks: mergedAsks.map(mergedFormat) },
     trades,
   };
 }
@@ -3288,6 +3354,41 @@ async function simulateSpotMarketBuy(conn, market, quoteAmountWei, takerFeeBps) 
     if (grossQuote > 0n) result.averagePriceWei = mulDiv(grossQuote, PRICE_SCALE, result.filledBase);
   }
 
+  return result;
+}
+
+function estimateExternalFillFromDepth(levels, { side, maxBaseWei, takerFeeBps, limitPriceWei = 0n }) {
+  const result = {
+    filledBaseWei: 0n,
+    quoteWithoutFeeWei: 0n,
+    totalWithFeeWei: 0n,
+    averagePriceWei: 0n,
+    limitMatched: false,
+  };
+  let remainingBaseWei = bigIntFromValue(maxBaseWei);
+  const feeBps = clampBps(bigIntFromValue(takerFeeBps || 0));
+  for (const level of levels || []) {
+    if (remainingBaseWei <= 0n) break;
+    const levelBaseWei = bigIntFromValue(level.base_amount_wei);
+    const levelPriceWei = bigIntFromValue(level.price_wei);
+    if (levelBaseWei <= 0n || levelPriceWei <= 0n) continue;
+    if (limitPriceWei > 0n) {
+      if (side === 'buy' && levelPriceWei > limitPriceWei) continue;
+      if (side === 'sell' && levelPriceWei < limitPriceWei) continue;
+    }
+    result.limitMatched = true;
+    const tradeBaseWei = remainingBaseWei < levelBaseWei ? remainingBaseWei : levelBaseWei;
+    const quoteWithoutFee = computeQuoteAmount(tradeBaseWei, levelPriceWei);
+    if (tradeBaseWei <= 0n || quoteWithoutFee <= 0n) continue;
+    const takerFee = (quoteWithoutFee * feeBps) / 10000n;
+    result.filledBaseWei += tradeBaseWei;
+    result.quoteWithoutFeeWei += quoteWithoutFee;
+    result.totalWithFeeWei += side === 'buy' ? quoteWithoutFee + takerFee : quoteWithoutFee - takerFee;
+    remainingBaseWei -= tradeBaseWei;
+  }
+  if (result.filledBaseWei > 0n && result.quoteWithoutFeeWei > 0n) {
+    result.averagePriceWei = mulDiv(result.quoteWithoutFeeWei, PRICE_SCALE, result.filledBaseWei);
+  }
   return result;
 }
 
@@ -10727,22 +10828,19 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       let estimate = await estimateSpotMarketFill(conn, market, { side, baseAmountWei: amountWei });
       if (estimate.filledBase <= 0n && liquidityState.enabled) {
         try {
-          const externalDepth = await fetchBinanceDepthSnapshot(market, 50);
+          const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
+          const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
           const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
-          let remainingBase = amountWei;
-          let totalQuote = 0n;
-          for (const level of levels) {
-            if (remainingBase <= 0n) break;
-            const tradeBase = remainingBase < level.base_amount_wei ? remainingBase : level.base_amount_wei;
-            if (tradeBase <= 0n) continue;
-            totalQuote += computeQuoteAmount(tradeBase, level.price_wei);
-            remainingBase -= tradeBase;
-          }
-          const filledBase = amountWei - remainingBase;
+          const extEstimate = estimateExternalFillFromDepth(levels, {
+            side,
+            maxBaseWei: amountWei,
+            takerFeeBps,
+          });
+          const filledBase = extEstimate.filledBaseWei;
           estimate = {
             filledBase,
-            totalQuote,
-            averagePriceWei: filledBase > 0n ? mulDiv(totalQuote, PRICE_SCALE, filledBase) : 0n,
+            totalQuote: extEstimate.quoteWithoutFeeWei,
+            averagePriceWei: extEstimate.averagePriceWei,
           };
           if (!bestReferenceForRisk || bestReferenceForRisk <= 0n) {
             bestReferenceForRisk = levels[0]?.price_wei || 0n;
@@ -10819,12 +10917,22 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     if (shouldExternalFallback && isImmediateOrCancel && taker.remainingBase > 0n) {
       try {
         externalFallbackAttempted = true;
-        const externalOrder = await executeBinanceMarketOrder(market, side, {
-          quantityWei: taker.remainingBase,
+        const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
+        const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
+        const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
+        const externalPlan = estimateExternalFillFromDepth(levels, {
+          side,
+          maxBaseWei: taker.remainingBase,
+          takerFeeBps,
+          limitPriceWei: type === 'limit' ? priceWei : 0n,
         });
-        if (externalOrder.executedBaseWei > 0n && externalOrder.quoteWithoutFeeWei > 0n) {
-          const externalBase = externalOrder.executedBaseWei > taker.remainingBase ? taker.remainingBase : externalOrder.executedBaseWei;
-          const externalQuote = computeQuoteAmount(externalBase, externalOrder.averagePriceWei);
+        if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
+          const externalOrder = await executeBinanceMarketOrder(market, side, {
+            quantityWei: externalPlan.filledBaseWei,
+          });
+          if (externalOrder.executedBaseWei <= 0n) throw new Error('External liquidity returned zero fill');
+          const externalBase = externalOrder.executedBaseWei > externalPlan.filledBaseWei ? externalPlan.filledBaseWei : externalOrder.executedBaseWei;
+          const externalQuote = computeQuoteAmount(externalBase, externalPlan.averagePriceWei);
           const externalFee = (externalQuote * takerFeeBps) / 10000n;
           const buyOrderId = side === 'buy' ? orderId : orderId;
           const sellOrderId = side === 'sell' ? orderId : orderId;
@@ -10834,7 +10942,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
               market.id,
               buyOrderId,
               sellOrderId,
-              externalOrder.averagePriceWei.toString(),
+              externalPlan.averagePriceWei.toString(),
               externalBase.toString(),
               externalQuote.toString(),
               side === 'buy' ? externalFee.toString() : '0',
@@ -10865,7 +10973,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
             trade_id: tradeId,
             maker_order_id: null,
             maker_user_id: null,
-            price_wei: externalOrder.averagePriceWei,
+            price_wei: externalPlan.averagePriceWei,
             base_amount_wei: externalBase,
             quote_amount_wei: externalQuote,
             taker_fee_wei: externalFee,
