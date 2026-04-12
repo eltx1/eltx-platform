@@ -796,5 +796,5 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_user_em
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_pairs', 'ETH/USDT,WBTC/USDT,BNB/USDT');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_target_base_pct', '50');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_enabled', '0');
-INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_spread_bps', '15');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_spread_bps', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('seo_settings_json', '{"sitemapRefreshHours":3,"indexNowEnabled":false,"indexNowKey":"","indexNowKeyLocation":"/indexnow-key.txt","includeRssInSitemap":true,"postPublishPingEnabled":false,"postPublishPingUrls":["https://rpc.pingomatic.com/"]}');

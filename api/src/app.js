@@ -46,7 +46,7 @@ const DEFAULT_MARKET_MAKER_SPREAD_BPS = 200;
 const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
 const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
 const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
-const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 15;
+const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 0;
 const BINANCE_RECV_WINDOW_MS = 5_000;
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
@@ -10925,9 +10925,12 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
-    if (shouldExternalFallback && isImmediateOrCancel && taker.remainingBase > 0n) {
+    if (shouldExternalFallback && taker.remainingBase > 0n) {
       try {
         externalFallbackAttempted = true;
+        console.info(
+          `[spot] external fallback start: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} remainingBaseWei=${taker.remainingBase.toString()} spreadBps=${liquidityState.spreadBps} mode=${liquidityState.mockMode ? 'mock' : 'live'}`
+        );
         const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
         const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
         const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
@@ -11000,11 +11003,31 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
             maker_fee_wei: 0n,
             external_liquidity: true,
           });
+          console.info(
+            `[spot] external fallback filled: orderId=${orderId} tradeId=${tradeId} executedBaseWei=${externalBase.toString()} executedQuoteWei=${externalQuote.toString()} avgPriceWei=${externalAveragePriceWei.toString()}`
+          );
+        } else {
+          console.info(
+            `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
+          );
         }
       } catch (err) {
         externalFallbackError = err;
-        console.warn('[spot] Binance execution fallback failed:', err.message || err);
+        console.warn(
+          `[spot] Binance execution fallback failed: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} error=${
+            err.message || err
+          }`
+        );
       }
+    } else if (taker.remainingBase > 0n) {
+      const reason = !liquidityState.enabled
+        ? 'binance_liquidity_disabled'
+        : !liquidityState.configured && !liquidityState.mockMode
+          ? 'binance_credentials_missing'
+          : 'no_remaining_quantity';
+      console.info(
+        `[spot] external fallback skipped: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=${reason}`
+      );
     }
 
     if (isImmediateOrCancel && matchResult.filledBase <= 0n && externalFallbackAttempted && externalFallbackError) {
