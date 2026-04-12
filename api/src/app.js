@@ -3043,10 +3043,10 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
   params.set('type', 'MARKET');
   params.set('newOrderRespType', 'FULL');
   if (side === 'buy') {
-    if (quantityWei && quantityWei > 0n) {
-      params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
-    } else if (quoteOrderQtyWei && quoteOrderQtyWei > 0n) {
+    if (quoteOrderQtyWei && quoteOrderQtyWei > 0n) {
       params.set('quoteOrderQty', trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals)));
+    } else if (quantityWei && quantityWei > 0n) {
+      params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
     } else {
       throw new Error('Missing buy quantity');
     }
@@ -3594,6 +3594,17 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
   }
 
   return result;
+}
+
+function recalculateMatchAveragePrice(matchResult, side) {
+  if (!matchResult || !side) return 0n;
+  if (matchResult.filledBase <= 0n) return 0n;
+  const grossQuote =
+    side === 'buy'
+      ? matchResult.spentQuote - matchResult.takerFee
+      : matchResult.receivedQuote + matchResult.takerFee;
+  if (grossQuote <= 0n) return 0n;
+  return mulDiv(grossQuote, PRICE_SCALE, matchResult.filledBase);
 }
 
 const TransferSchema = z.object({
@@ -10911,7 +10922,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const marketMakerUserId = marketMakerUserRow ? Number(marketMakerUserRow.id) : null;
 
     const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
-    const shouldExternalFallback = liquidityState.enabled && isDemoMode !== true;
+    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
     if (shouldExternalFallback && isImmediateOrCancel && taker.remainingBase > 0n) {
@@ -10929,10 +10940,18 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
           const externalOrder = await executeBinanceMarketOrder(market, side, {
             quantityWei: externalPlan.filledBaseWei,
+            quoteOrderQtyWei: side === 'buy' ? externalPlan.quoteWithoutFeeWei : 0n,
           });
           if (externalOrder.executedBaseWei <= 0n) throw new Error('External liquidity returned zero fill');
           const externalBase = externalOrder.executedBaseWei > externalPlan.filledBaseWei ? externalPlan.filledBaseWei : externalOrder.executedBaseWei;
-          const externalQuote = computeQuoteAmount(externalBase, externalPlan.averagePriceWei);
+          const externalQuoteRaw = bigIntFromValue(externalOrder.quoteWithoutFeeWei);
+          const externalQuote = externalQuoteRaw > 0n
+            ? externalQuoteRaw
+            : computeQuoteAmount(externalBase, externalPlan.averagePriceWei);
+          const externalAveragePriceWei =
+            externalOrder.averagePriceWei && externalOrder.averagePriceWei > 0n
+              ? externalOrder.averagePriceWei
+              : externalPlan.averagePriceWei;
           const externalFee = (externalQuote * takerFeeBps) / 10000n;
           const buyOrderId = side === 'buy' ? orderId : orderId;
           const sellOrderId = side === 'sell' ? orderId : orderId;
@@ -10942,7 +10961,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
               market.id,
               buyOrderId,
               sellOrderId,
-              externalPlan.averagePriceWei.toString(),
+              externalAveragePriceWei.toString(),
               externalBase.toString(),
               externalQuote.toString(),
               side === 'buy' ? externalFee.toString() : '0',
@@ -10969,11 +10988,12 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           matchResult.takerFee += externalFee;
           matchResult.filledBase += externalBase;
           taker.remainingBase -= externalBase;
+          matchResult.averagePriceWei = recalculateMatchAveragePrice(matchResult, side);
           matchResult.trades.push({
             trade_id: tradeId,
             maker_order_id: null,
             maker_user_id: null,
-            price_wei: externalPlan.averagePriceWei,
+            price_wei: externalAveragePriceWei,
             base_amount_wei: externalBase,
             quote_amount_wei: externalQuote,
             taker_fee_wei: externalFee,
@@ -10995,6 +11015,8 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         message: `External liquidity execution failed: ${externalFallbackError.message || 'unknown error'}`,
       });
     }
+
+    matchResult.averagePriceWei = recalculateMatchAveragePrice(matchResult, side);
 
     if (timeInForce === 'fok' && matchResult.filledBase < amountWei) {
       await conn.rollback();
