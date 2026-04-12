@@ -332,6 +332,8 @@ type MarketMakerSettings = {
   user_email: string;
   pairs: string[];
   target_base_pct: number;
+  binance_liquidity_enabled: boolean;
+  binance_api_configured?: boolean;
 };
 
 type P2PPaymentMethod = {
@@ -5139,6 +5141,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   const [makerSettings, setMakerSettings] = useState<MarketMakerSettings | null>(null);
   const [makerForm, setMakerForm] = useState({
     enabled: false,
+    binanceLiquidityEnabled: false,
     spreadPct: '2.00',
     refreshMinutes: '30',
     userEmail: 'info.eltx@gmail.com',
@@ -5163,6 +5166,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       setMakerSettings(makerRes.data.settings);
       setMakerForm({
         enabled: !!makerRes.data.settings.enabled,
+        binanceLiquidityEnabled: !!makerRes.data.settings.binance_liquidity_enabled,
         spreadPct: (makerRes.data.settings.spread_bps / 100).toFixed(2),
         refreshMinutes: makerRes.data.settings.refresh_minutes.toString(),
         userEmail: makerRes.data.settings.user_email,
@@ -5309,6 +5313,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
 
     const payload = {
       enabled: makerForm.enabled,
+      binance_liquidity_enabled: makerForm.binanceLiquidityEnabled,
       spread_bps: Math.round(spread * 100),
       refresh_minutes: Math.round(refresh),
       user_email: makerForm.userEmail.trim(),
@@ -5326,6 +5331,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       setMakerSettings(res.data.settings);
       setMakerForm({
         enabled: !!res.data.settings.enabled,
+        binanceLiquidityEnabled: !!res.data.settings.binance_liquidity_enabled,
         spreadPct: (res.data.settings.spread_bps / 100).toFixed(2),
         refreshMinutes: res.data.settings.refresh_minutes.toString(),
         userEmail: res.data.settings.user_email,
@@ -5474,13 +5480,22 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                 <p className="text-sm text-white/60">Configure the background bot that seeds limit liquidity.</p>
               </div>
               {makerSettings && (
-                <span
-                  className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
-                    makerSettings.enabled ? 'bg-emerald-500/10 text-emerald-200' : 'bg-white/10 text-white/70'
-                  }`}
-                >
-                  {makerSettings.enabled ? 'Enabled' : 'Disabled'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                      makerSettings.enabled ? 'bg-emerald-500/10 text-emerald-200' : 'bg-white/10 text-white/70'
+                    }`}
+                  >
+                    {makerSettings.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
+                  <span
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold ${
+                      makerSettings.binance_api_configured ? 'bg-blue-500/10 text-blue-200' : 'bg-amber-500/10 text-amber-100'
+                    }`}
+                  >
+                    Binance API: {makerSettings.binance_api_configured ? 'Configured' : 'Missing keys'}
+                  </span>
+                </div>
               )}
             </div>
 
@@ -5493,6 +5508,15 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                   className="h-4 w-4 rounded border-white/30 bg-black/40"
                 />
                 Enable bot
+              </label>
+              <label className="flex items-center gap-3 text-sm font-medium text-white/80">
+                <input
+                  type="checkbox"
+                  checked={makerForm.binanceLiquidityEnabled}
+                  onChange={(e) => setMakerForm((prev) => ({ ...prev, binanceLiquidityEnabled: e.target.checked }))}
+                  className="h-4 w-4 rounded border-white/30 bg-black/40"
+                />
+                Enable Binance liquidity bridge
               </label>
 
               <div>

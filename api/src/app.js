@@ -45,6 +45,9 @@ const WITHDRAWAL_CHAINS = ['Ethereum', 'BNB', 'Solana', 'Base'];
 const DEFAULT_MARKET_MAKER_SPREAD_BPS = 200;
 const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
 const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
+const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
+const BINANCE_RECV_WINDOW_MS = 5_000;
+const BINANCE_HTTP_TIMEOUT_MS = 7_000;
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
@@ -714,6 +717,7 @@ const MarketMakerSettingsSchema = z
     user_email: z.string().email().optional(),
     pairs: z.union([z.string(), z.array(z.string().min(3))]).optional(),
     target_base_pct: z.coerce.number().min(1).max(99).optional(),
+    binance_liquidity_enabled: z.boolean().optional(),
   })
   .refine(
     (data) =>
@@ -722,7 +726,8 @@ const MarketMakerSettingsSchema = z
       data.refresh_minutes !== undefined ||
       data.user_email !== undefined ||
       data.pairs !== undefined ||
-      data.target_base_pct !== undefined,
+      data.target_base_pct !== undefined ||
+      data.binance_liquidity_enabled !== undefined,
     { message: 'At least one market maker field must be provided' }
   );
 
@@ -2773,10 +2778,16 @@ async function readMarketMakerSettings(conn = pool) {
     DEFAULT_MARKET_MAKER_TARGET_BASE_PCT.toString(),
     conn
   );
+  const binanceEnabledRaw = await getPlatformSettingValue(
+    'binance_liquidity_enabled',
+    DEFAULT_BINANCE_LIQUIDITY_ENABLED ? '1' : '0',
+    conn
+  );
 
   const spread = Number.parseInt(spreadRaw, 10);
   const refreshMinutes = Number.parseInt(refreshRaw, 10);
   const targetPct = Number.parseInt(targetPctRaw, 10);
+  const binanceCfg = getBinanceConfig();
   return {
     enabled: enabledRaw === '1' || enabledRaw?.toLowerCase?.() === 'true',
     spread_bps: Number.isFinite(spread) ? spread : DEFAULT_MARKET_MAKER_SPREAD_BPS,
@@ -2789,6 +2800,8 @@ async function readMarketMakerSettings(conn = pool) {
           .filter(Boolean)
       : [],
     target_base_pct: Number.isFinite(targetPct) ? targetPct : DEFAULT_MARKET_MAKER_TARGET_BASE_PCT,
+    binance_liquidity_enabled: binanceEnabledRaw === '1' || binanceEnabledRaw?.toLowerCase?.() === 'true',
+    binance_api_configured: !!binanceCfg.configured,
   };
 }
 
@@ -2803,8 +2816,210 @@ async function updateMarketMakerSettings(partial) {
     tasks.push(setPlatformSettingValue('market_maker_pairs', partial.pairs.map((p) => p.trim().toUpperCase()).join(',')));
   if (partial.target_base_pct !== undefined)
     tasks.push(setPlatformSettingValue('market_maker_target_base_pct', partial.target_base_pct.toString()));
+  if (partial.binance_liquidity_enabled !== undefined)
+    tasks.push(setPlatformSettingValue('binance_liquidity_enabled', partial.binance_liquidity_enabled ? '1' : '0'));
   if (!tasks.length) return;
   await Promise.all(tasks);
+}
+
+function getBinanceConfig() {
+  const apiKey = process.env.BINANCE_API_KEY || '';
+  const apiSecret = process.env.BINANCE_API_SECRET || '';
+  const baseUrl = (process.env.BINANCE_BASE_URL || 'https://api.binance.com').replace(/\/+$/, '');
+  return {
+    apiKey,
+    apiSecret,
+    baseUrl,
+    configured: !!apiKey && !!apiSecret,
+  };
+}
+
+function toBinanceSymbol(symbol) {
+  return String(symbol || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+async function fetchJsonWithTimeout(url, options = {}, timeoutMs = BINANCE_HTTP_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.msg || payload?.message || `HTTP ${response.status}`;
+      throw new Error(message);
+    }
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const binanceExchangeInfoCache = new Map();
+
+function parseStepDecimals(stepRaw) {
+  const normalized = String(stepRaw || '1').trim();
+  const dotIndex = normalized.indexOf('.');
+  if (dotIndex < 0) return 0;
+  const frac = normalized.slice(dotIndex + 1).replace(/0+$/, '');
+  return frac.length;
+}
+
+function floorToStep(value, step) {
+  if (step <= 0n) return value;
+  return value - (value % step);
+}
+
+async function readBinanceSymbolRules(marketRow) {
+  const cfg = getBinanceConfig();
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  if (binanceExchangeInfoCache.has(symbol)) return binanceExchangeInfoCache.get(symbol);
+  const url = new URL('/api/v3/exchangeInfo', cfg.baseUrl);
+  url.searchParams.set('symbol', symbol);
+  const payload = await fetchJsonWithTimeout(url.toString(), { method: 'GET' });
+  const symbolRow = Array.isArray(payload?.symbols) ? payload.symbols[0] : null;
+  if (!symbolRow) throw new Error(`Binance exchange info missing for ${symbol}`);
+  const lot = Array.isArray(symbolRow.filters) ? symbolRow.filters.find((f) => f.filterType === 'LOT_SIZE') : null;
+  const minNotionalFilter = Array.isArray(symbolRow.filters)
+    ? symbolRow.filters.find((f) => f.filterType === 'NOTIONAL' || f.filterType === 'MIN_NOTIONAL')
+    : null;
+  const stepDecimals = parseStepDecimals(lot?.stepSize || '1');
+  const stepWei = ethers.parseUnits(lot?.stepSize || '1', marketRow.base_decimals);
+  const minQtyWei = ethers.parseUnits(lot?.minQty || '0', marketRow.base_decimals);
+  const minNotionalWei = ethers.parseUnits(String(minNotionalFilter?.minNotional || '0'), marketRow.quote_decimals);
+  const rules = {
+    baseAssetPrecision: Number(symbolRow.baseAssetPrecision ?? marketRow.base_decimals),
+    quoteAssetPrecision: Number(symbolRow.quoteAssetPrecision ?? marketRow.quote_decimals),
+    stepDecimals,
+    stepWei,
+    minQtyWei,
+    minNotionalWei,
+  };
+  binanceExchangeInfoCache.set(symbol, rules);
+  return rules;
+}
+
+async function readBinanceLiquidityState(conn = pool) {
+  const settings = await readMarketMakerSettings(conn);
+  const cfg = getBinanceConfig();
+  return {
+    enabled: !!settings.binance_liquidity_enabled,
+    configured: cfg.configured,
+    baseUrl: cfg.baseUrl,
+  };
+}
+
+async function fetchBinanceDepthSnapshot(marketRow, limit = 50) {
+  const cfg = getBinanceConfig();
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const url = new URL('/api/v3/depth', cfg.baseUrl);
+  url.searchParams.set('symbol', symbol);
+  url.searchParams.set('limit', String(Math.min(Math.max(limit, 5), 100)));
+  const payload = await fetchJsonWithTimeout(url.toString(), { method: 'GET' });
+  const formatLevels = (levels, side) =>
+    (Array.isArray(levels) ? levels : [])
+      .map((level) => {
+        if (!Array.isArray(level) || level.length < 2) return null;
+        const [priceRaw, qtyRaw] = level;
+        let priceWei;
+        let baseWei;
+        try {
+          priceWei = ethers.parseUnits(String(priceRaw), 18);
+          baseWei = ethers.parseUnits(String(qtyRaw), marketRow.base_decimals);
+        } catch {
+          return null;
+        }
+        if (priceWei <= 0n || baseWei <= 0n) return null;
+        const quoteWei = computeQuoteAmount(baseWei, priceWei);
+        return {
+          side,
+          price_wei: priceWei,
+          base_amount_wei: baseWei,
+          quote_amount_wei: quoteWei,
+        };
+      })
+      .filter(Boolean);
+
+  return {
+    bids: formatLevels(payload.bids, 'buy'),
+    asks: formatLevels(payload.asks, 'sell'),
+  };
+}
+
+async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOrderQtyWei }) {
+  const cfg = getBinanceConfig();
+  if (!cfg.configured) throw new Error('Binance API credentials are not configured');
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const rules = await readBinanceSymbolRules(marketRow);
+  const params = new URLSearchParams();
+  params.set('symbol', symbol);
+  params.set('side', side.toUpperCase());
+  params.set('type', 'MARKET');
+  params.set('newOrderRespType', 'FULL');
+  if (side === 'buy') {
+    if (quoteOrderQtyWei && quoteOrderQtyWei > 0n) {
+      const quoteQtyDecimal = trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals));
+      const quoteQtyFixed = Number.parseFloat(quoteQtyDecimal || '0').toFixed(Math.max(0, rules.quoteAssetPrecision));
+      params.set('quoteOrderQty', trimDecimal(quoteQtyFixed));
+    } else if (quantityWei && quantityWei > 0n) {
+      const normalizedQtyWei = floorToStep(quantityWei, rules.stepWei);
+      if (normalizedQtyWei < rules.minQtyWei) throw new Error('Quantity below Binance minimum');
+      params.set('quantity', trimDecimal(formatUnitsStr(normalizedQtyWei.toString(), marketRow.base_decimals)));
+    } else {
+      throw new Error('Missing buy quantity');
+    }
+  } else if (quantityWei && quantityWei > 0n) {
+    const normalizedQtyWei = floorToStep(quantityWei, rules.stepWei);
+    if (normalizedQtyWei < rules.minQtyWei) throw new Error('Quantity below Binance minimum');
+    params.set('quantity', trimDecimal(formatUnitsStr(normalizedQtyWei.toString(), marketRow.base_decimals)));
+  } else {
+    throw new Error('Missing sell quantity');
+  }
+  params.set('recvWindow', String(BINANCE_RECV_WINDOW_MS));
+  params.set('timestamp', String(Date.now()));
+  const signature = crypto.createHmac('sha256', cfg.apiSecret).update(params.toString()).digest('hex');
+  params.set('signature', signature);
+
+  const payload = await fetchJsonWithTimeout(
+    `${cfg.baseUrl}/api/v3/order`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-MBX-APIKEY': cfg.apiKey,
+      },
+      body: params.toString(),
+    },
+    BINANCE_HTTP_TIMEOUT_MS
+  );
+
+  const executedQty = ethers.parseUnits(String(payload.executedQty || '0'), marketRow.base_decimals);
+  const cummulativeQuoteQty = ethers.parseUnits(String(payload.cummulativeQuoteQty || '0'), marketRow.quote_decimals);
+  let averagePriceWei = executedQty > 0n && cummulativeQuoteQty > 0n ? mulDiv(cummulativeQuoteQty, PRICE_SCALE, executedQty) : 0n;
+  if (Array.isArray(payload?.fills) && payload.fills.length) {
+    let fillsBase = 0n;
+    let fillsQuote = 0n;
+    for (const fill of payload.fills) {
+      try {
+        const priceWei = ethers.parseUnits(String(fill.price || '0'), 18);
+        const qtyWei = ethers.parseUnits(String(fill.qty || '0'), marketRow.base_decimals);
+        if (priceWei > 0n && qtyWei > 0n) {
+          fillsBase += qtyWei;
+          fillsQuote += computeQuoteAmount(qtyWei, priceWei);
+        }
+      } catch {
+        // ignore malformed fill
+      }
+    }
+    if (fillsBase > 0n && fillsQuote > 0n) averagePriceWei = mulDiv(fillsQuote, PRICE_SCALE, fillsBase);
+  }
+  return {
+    executedBaseWei: executedQty,
+    quoteWithoutFeeWei: cummulativeQuoteQty,
+    averagePriceWei,
+    raw: payload,
+  };
 }
 
 async function readSpotOrderbookVersion(conn, marketRow) {
@@ -2898,6 +3113,32 @@ async function readSpotOrderbookSnapshot(conn, marketRow) {
       quote_amount_wei: quoteWei.toString(),
     };
   };
+  if (!bidRows.length && !askRows.length) {
+    try {
+      const external = await readBinanceLiquidityState(conn);
+      if (external.enabled) {
+        const depth = await fetchBinanceDepthSnapshot(marketRow, 50);
+        if (depth.bids.length || depth.asks.length) {
+          const extFormat = (row) => ({
+            price: trimDecimal(formatUnitsStr(row.price_wei.toString(), 18)),
+            price_wei: row.price_wei.toString(),
+            base_amount: trimDecimal(formatUnitsStr(row.base_amount_wei.toString(), marketRow.base_decimals)),
+            base_amount_wei: row.base_amount_wei.toString(),
+            quote_amount: trimDecimal(formatUnitsStr(row.quote_amount_wei.toString(), marketRow.quote_decimals)),
+            quote_amount_wei: row.quote_amount_wei.toString(),
+          });
+          return {
+            orderbookVersion: await readSpotOrderbookVersion(conn, marketRow),
+            lastTradeId: tradeRows.length ? Number(tradeRows[0].id || 0) : 0,
+            orderbook: { bids: depth.bids.map(extFormat), asks: depth.asks.map(extFormat) },
+            trades: tradeRows.map((row) => formatSpotTrade(row, marketRow)),
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('[spot] Binance orderbook fallback failed:', err.message || err);
+    }
+  }
   const trades = tradeRows.map((row) => formatSpotTrade(row, marketRow));
   const orderbookVersion = await readSpotOrderbookVersion(conn, marketRow);
   const lastTradeId = trades.length ? trades[0].id : 0;
@@ -3242,6 +3483,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
     result.trades.push({
       trade_id: tradeId,
       maker_order_id: maker.id,
+      maker_user_id: maker.user_id,
       price_wei: makerPriceWei,
       base_amount_wei: tradeBase,
       quote_amount_wei: quoteWithoutFee,
@@ -10429,6 +10671,8 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     const feeSettings = await readSpotFeeBps(conn);
     const riskSettings = await readSpotRiskSettings(conn);
+    const liquidityState = await readBinanceLiquidityState(conn);
+    const marketMakerSettings = await readMarketMakerSettings(conn);
     const makerFeeBps = clampBps(BigInt(feeSettings.maker || 0));
     const takerFeeBps = clampBps(BigInt(feeSettings.taker || 0));
     const topOfBook = await getSpotTopOfBook(conn, market.id, { forUpdate: true });
@@ -10488,15 +10732,36 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       ]);
     }
 
+    let bestReferenceForRisk = side === 'buy' ? topOfBook.ask : topOfBook.bid;
     if (type === 'market') {
-      const bestReference = side === 'buy' ? topOfBook.ask : topOfBook.bid;
-      if (!bestReference || bestReference <= 0n) {
-        await conn.rollback();
-        return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
+      let estimate = await estimateSpotMarketFill(conn, market, { side, baseAmountWei: amountWei });
+      if (estimate.filledBase <= 0n && liquidityState.enabled) {
+        try {
+          const externalDepth = await fetchBinanceDepthSnapshot(market, 50);
+          const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
+          let remainingBase = amountWei;
+          let totalQuote = 0n;
+          for (const level of levels) {
+            if (remainingBase <= 0n) break;
+            const tradeBase = remainingBase < level.base_amount_wei ? remainingBase : level.base_amount_wei;
+            if (tradeBase <= 0n) continue;
+            totalQuote += computeQuoteAmount(tradeBase, level.price_wei);
+            remainingBase -= tradeBase;
+          }
+          const filledBase = amountWei - remainingBase;
+          estimate = {
+            filledBase,
+            totalQuote,
+            averagePriceWei: filledBase > 0n ? mulDiv(totalQuote, PRICE_SCALE, filledBase) : 0n,
+          };
+          if (!bestReferenceForRisk || bestReferenceForRisk <= 0n) {
+            bestReferenceForRisk = levels[0]?.price_wei || 0n;
+          }
+        } catch (err) {
+          console.warn('[spot] Binance estimate fallback failed:', err.message || err);
+        }
       }
-
-      const estimate = await estimateSpotMarketFill(conn, market, { side, baseAmountWei: amountWei });
-      if (estimate.filledBase <= 0n) {
+      if (bestReferenceForRisk <= 0n || estimate.filledBase <= 0n) {
         await conn.rollback();
         return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
       }
@@ -10504,7 +10769,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         await conn.rollback();
         return next({ status: 400, code: 'FOK_INCOMPLETE', message: 'Order could not be fully filled immediately' });
       }
-      const expectedSlippageBps = computeRelativeBps(estimate.averagePriceWei, bestReference);
+      const expectedSlippageBps = computeRelativeBps(estimate.averagePriceWei, bestReferenceForRisk);
       if (expectedSlippageBps > riskSettings.maxSlippageBps) {
         await conn.rollback();
         return next({ status: 400, code: 'SLIPPAGE_EXCEEDED', message: 'Expected slippage exceeds max limit' });
@@ -10551,15 +10816,96 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     };
 
     const matchResult = await matchSpotOrder(conn, market, taker);
+    const marketMakerUserRow =
+      marketMakerSettings.user_email
+        ? (await conn.query('SELECT id FROM users WHERE email=? LIMIT 1', [marketMakerSettings.user_email]))[0]?.[0]
+        : null;
+    const marketMakerUserId = marketMakerUserRow ? Number(marketMakerUserRow.id) : null;
+
+    const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
+    const shouldExternalFallback = liquidityState.enabled && getBinanceConfig().configured;
+    if (shouldExternalFallback && isImmediateOrCancel && taker.remainingBase > 0n) {
+      try {
+        const spentBefore = matchResult.spentQuote;
+        const quoteBudgetWei = side === 'buy' ? (quoteBalance > spentBefore ? quoteBalance - spentBefore : 0n) : 0n;
+        const externalOrder = await executeBinanceMarketOrder(market, side, {
+          quantityWei: side === 'sell' ? taker.remainingBase : taker.remainingBase,
+          quoteOrderQtyWei: side === 'buy' ? quoteBudgetWei : 0n,
+        });
+        if (externalOrder.executedBaseWei > 0n && externalOrder.quoteWithoutFeeWei > 0n && externalOrder.averagePriceWei > 0n) {
+          const externalBase = externalOrder.executedBaseWei > taker.remainingBase ? taker.remainingBase : externalOrder.executedBaseWei;
+          const externalQuote = computeQuoteAmount(externalBase, externalOrder.averagePriceWei);
+          const externalFee = (externalQuote * takerFeeBps) / 10000n;
+          const buyOrderId = side === 'buy' ? orderId : orderId;
+          const sellOrderId = side === 'sell' ? orderId : orderId;
+          const [tradeInsert] = await conn.query(
+            'INSERT INTO spot_trades (market_id, buy_order_id, sell_order_id, price_wei, base_amount_wei, quote_amount_wei, buy_fee_wei, sell_fee_wei, fee_asset, taker_side) VALUES (?,?,?,?,?,?,?,?,?,?)',
+            [
+              market.id,
+              buyOrderId,
+              sellOrderId,
+              externalOrder.averagePriceWei.toString(),
+              externalBase.toString(),
+              externalQuote.toString(),
+              side === 'buy' ? externalFee.toString() : '0',
+              side === 'sell' ? externalFee.toString() : '0',
+              market.quote_asset,
+              side,
+            ]
+          );
+          const tradeId = tradeInsert.insertId;
+          if (externalFee > 0n) {
+            await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+              'spot',
+              `trade:${tradeId}:external:taker`,
+              market.quote_asset,
+              externalFee.toString(),
+            ]);
+          }
+          if (side === 'buy') {
+            matchResult.spentQuote += externalQuote + externalFee;
+            matchResult.receivedBase += externalBase;
+          } else {
+            matchResult.receivedQuote += externalQuote - externalFee;
+          }
+          matchResult.takerFee += externalFee;
+          matchResult.filledBase += externalBase;
+          taker.remainingBase -= externalBase;
+          const grossQuoteAfter =
+            side === 'buy' ? matchResult.spentQuote - matchResult.takerFee : matchResult.receivedQuote + matchResult.takerFee;
+          matchResult.averagePriceWei =
+            matchResult.filledBase > 0n && grossQuoteAfter > 0n
+              ? mulDiv(grossQuoteAfter, PRICE_SCALE, matchResult.filledBase)
+              : 0n;
+          matchResult.trades.push({
+            trade_id: tradeId,
+            maker_order_id: null,
+            maker_user_id: null,
+            price_wei: externalOrder.averagePriceWei,
+            base_amount_wei: externalBase,
+            quote_amount_wei: externalQuote,
+            taker_fee_wei: externalFee,
+            maker_fee_wei: 0n,
+            external_liquidity: true,
+          });
+        }
+      } catch (err) {
+        console.warn('[spot] Binance execution fallback failed:', err.message || err);
+      }
+    }
 
     if (timeInForce === 'fok' && matchResult.filledBase < amountWei) {
       await conn.rollback();
       return next({ status: 400, code: 'FOK_INCOMPLETE', message: 'Order could not be fully filled immediately' });
     }
+    if (type === 'market' && matchResult.filledBase <= 0n) {
+      await conn.rollback();
+      return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
+    }
 
     if (type === 'market' && matchResult.filledBase > 0n) {
       const averagePriceWei = matchResult.averagePriceWei;
-      const referencePrice = side === 'buy' ? topOfBook.ask : topOfBook.bid;
+      const referencePrice = bestReferenceForRisk;
       if (!referencePrice || referencePrice <= 0n) {
         await conn.rollback();
         return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Orderbook reference price missing' });
@@ -10579,7 +10925,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       }
     }
 
-    const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
     let orderStatus = 'open';
     if (isImmediateOrCancel) {
       orderStatus = matchResult.filledBase > 0n ? 'filled' : 'cancelled';
@@ -10648,6 +10993,23 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     ]);
 
     await conn.commit();
+
+    if (shouldExternalFallback && marketMakerUserId && matchResult.trades.length) {
+      const hedgeBaseWei = matchResult.trades
+        .filter((trade) => Number(trade.maker_user_id || 0) === marketMakerUserId)
+        .reduce((acc, trade) => acc + bigIntFromValue(trade.base_amount_wei), 0n);
+      if (hedgeBaseWei > 0n) {
+        executeBinanceMarketOrder(market, side === 'buy' ? 'sell' : 'buy', { quantityWei: hedgeBaseWei })
+          .then(() => {
+            console.log(
+              `[spot] hedged market-maker fill via Binance: market=${market.symbol} side=${side === 'buy' ? 'sell' : 'buy'} baseWei=${hedgeBaseWei.toString()}`
+            );
+          })
+          .catch((err) => {
+            console.warn('[spot] market-maker hedge failed:', err.message || err);
+          });
+      }
+    }
 
     const trades = matchResult.trades.map((trade) => ({
       trade_id: trade.trade_id,
