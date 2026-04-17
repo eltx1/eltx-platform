@@ -22,7 +22,7 @@ const {
   isSupportedSwapAsset,
 } = require('./services/pricing');
 const { createDatabasePool } = require('./config/database');
-const { openaiClient } = require('./config/openai');
+const { callLLM, getLlmProviderSettings } = require('./services/llm');
 const { getEmailEnvDefaults } = require('./config/email');
 const { createStripeState, STRIPE_BASE_FALLBACK } = require('./config/stripe');
 const { requestIdMiddleware } = require('./middleware/requestId');
@@ -1063,6 +1063,20 @@ const AI_PRICE_SETTING_LEGACY = 'ai_message_price_eltx';
 const AI_BILLING_SYMBOL = 'USDT';
 const DEFAULT_AI_DAILY_FREE = 10;
 const DEFAULT_AI_PRICE = '1';
+const DEFAULT_AI_TEMPERATURE = 0.3;
+const DEFAULT_AI_TOP_P = 0.9;
+
+function getAiRuntimeConfig() {
+  const llm = getLlmProviderSettings();
+  return {
+    provider: llm.provider,
+    use_ollama: llm.useOllama,
+    ollama_base_url: llm.ollamaBaseUrl,
+    ollama_model: llm.ollamaModel,
+    openai_configured: llm.openaiConfigured,
+  };
+}
+
 const REFERRAL_REWARD_SETTING = 'referral_reward_eltx';
 const REFERRAL_FEE_SHARE_SETTING = 'referral_fee_share_bps';
 const DEFAULT_REFERRAL_REWARD = '0';
@@ -7669,7 +7683,7 @@ app.get('/admin/ai/settings', async (req, res, next) => {
     await requireAdmin(req);
     const today = getTodayDateString();
     const [settings, stats] = await Promise.all([readAiSettings(), readAiUsageSummary(today)]);
-    res.json({ ok: true, settings, stats, today });
+    res.json({ ok: true, settings, stats, today, runtime: getAiRuntimeConfig() });
   } catch (err) {
     next(err);
   }
@@ -7690,7 +7704,7 @@ app.patch('/admin/ai/settings', async (req, res, next) => {
     ]);
     const today = getTodayDateString();
     const [settings, stats] = await Promise.all([readAiSettings(), readAiUsageSummary(today)]);
-    res.json({ ok: true, settings, stats, today });
+    res.json({ ok: true, settings, stats, today, runtime: getAiRuntimeConfig() });
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid AI settings', details: err.flatten() });
@@ -9227,8 +9241,6 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
   let conn;
   try {
     const userId = await requireUser(req);
-    if (!openaiClient)
-      return next({ status: 503, code: 'AI_DISABLED', message: 'AI service is not configured' });
     const payload = AiChatSchema.parse(req.body || {});
     conn = await pool.getConnection();
     await conn.beginTransaction();
@@ -9273,11 +9285,13 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
       chargeType = 'usdt';
     }
 
-    const completion = await openaiClient.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+    const llmResponse = await callLLM({
       messages: payload.messages,
+      temperature: DEFAULT_AI_TEMPERATURE,
+      top_p: DEFAULT_AI_TOP_P,
+      requestTag: `/ai/chat user=${userId}`,
     });
-    const message = completion.choices?.[0]?.message;
+    const message = llmResponse?.message;
     if (!message || !message.content) {
       await conn.rollback();
       return next({ status: 502, code: 'AI_EMPTY_RESPONSE', message: 'AI did not return a message' });
@@ -9327,6 +9341,8 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
     res.json({
       ok: true,
       message,
+      provider: llmResponse.provider,
+      model: llmResponse.model,
       usage,
       charge_type: chargeType,
       pricing: { message_price_usdt: settings.message_price_usdt, message_price_wei: priceWei.toString() },
@@ -9339,6 +9355,12 @@ app.post('/ai/chat', walletLimiter, async (req, res, next) => {
     if (conn) await conn.rollback().catch(() => {});
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid messages payload', details: err.flatten() });
+    if (err?.code === 'OPENAI_DISABLED' || err?.code === 'OLLAMA_UNREACHABLE') {
+      return next({ status: 503, code: err.code, message: err.message, details: err.details || null });
+    }
+    if (err?.code === 'OLLAMA_HTTP_ERROR' || err?.code === 'OLLAMA_BAD_RESPONSE') {
+      return next({ status: 502, code: err.code, message: err.message, details: err.details || null });
+    }
     next(err);
   } finally {
     if (conn) conn.release();

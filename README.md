@@ -37,6 +37,23 @@ mysql -u <user> -p <database> < docs/sql/manual_swap_seed.sql
 ### Social platform tables (LordAi.Net)
 - شغّل ترحيل `db/migrations/202504050900_social_core.sql` علشان يتضاف نظام البروفايلات والبوستات والتفاعل و الـ Follow.
 
+
+### AI provider switching (OpenAI ↔ Ollama)
+
+The AI layer can now run through either OpenAI or a local Ollama server.
+
+Add these variables in both `.env` and `api/.env`:
+
+```env
+USE_OLLAMA=true
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen3.5:2b
+```
+
+- `USE_OLLAMA=true` → routes AI calls to Ollama (`/api/chat`, `stream: false`).
+- `USE_OLLAMA=false` → falls back to OpenAI Chat Completions.
+- Admin panel (`/mo` → AI tab) shows the active provider/runtime model so you can verify the current mode quickly.
+
 ### ENV required (names only)
 ```
 CHAIN
