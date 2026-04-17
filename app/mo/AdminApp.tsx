@@ -140,6 +140,13 @@ type FeeSettings = {
 type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
 
 type AiSettings = { daily_free_messages: number; message_price_usdt: string };
+type AiRuntime = {
+  provider: 'ollama' | 'openai';
+  use_ollama: boolean;
+  ollama_base_url: string;
+  ollama_model: string;
+  openai_configured: boolean;
+};
 type FeedAlgorithmSettings = {
   followingRatio: number;
   forYouRatio: number;
@@ -158,7 +165,7 @@ type FeedAlgorithmSettings = {
   topMonthlyItems: number;
 };
 type AiStats = { messages_used: number; paid_messages: number; free_messages: number; usdt_spent: string; usdt_spent_wei: string };
-type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string };
+type AiSettingsResponse = { settings: AiSettings; stats: AiStats; today?: string; runtime?: AiRuntime };
 
 type ReferralSettings = { reward_eltx: string; fee_share_bps: string };
 type ReferralSettingsPayload = { reward_eltx: string; fee_share_bps: string | number };
@@ -507,6 +514,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
   const [stats, setStats] = useState<AiStats | null>(null);
   const [today, setToday] = useState<string>('');
   const [form, setForm] = useState<AiSettings>({ daily_free_messages: 10, message_price_usdt: '1' });
+  const [runtime, setRuntime] = useState<AiRuntime | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -516,6 +524,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
       setStats(res.data.stats);
       setForm(res.data.settings);
       setToday(res.data.today || '');
+      setRuntime(res.data.runtime || null);
     } else {
       onNotify(res.error || 'Failed to load AI settings', 'error');
     }
@@ -540,6 +549,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
       setStats(res.data.stats);
       setForm(res.data.settings);
       setToday(res.data.today || '');
+      setRuntime(res.data.runtime || null);
       onNotify('AI settings updated');
     } else {
       onNotify(res.error || 'Failed to update AI settings', 'error');
@@ -563,6 +573,21 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
           </button>
           {today && <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/60">{today}</span>}
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/75">
+        <p className="text-xs uppercase tracking-wide text-white/60">LLM runtime</p>
+        {runtime ? (
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <p>Provider: <span className="font-semibold text-white">{runtime.provider}</span></p>
+            <p>Ollama mode: <span className="font-semibold text-white">{runtime.use_ollama ? 'enabled' : 'disabled'}</span></p>
+            <p>Ollama URL: <span className="font-semibold text-white">{runtime.ollama_base_url}</span></p>
+            <p>Model: <span className="font-semibold text-white">{runtime.ollama_model}</span></p>
+            <p>OpenAI key: <span className="font-semibold text-white">{runtime.openai_configured ? 'configured' : 'missing'}</span></p>
+          </div>
+        ) : (
+          <p className="mt-2 text-white/60">Runtime details are not available yet.</p>
+        )}
       </div>
 
       <form
@@ -703,7 +728,6 @@ function ReferralPanel({ onNotify }: { onNotify: (message: string, variant?: 'su
           Sync
         </button>
       </div>
-
       <form
         onSubmit={handleSubmit}
         className="space-y-4 rounded-2xl border border-white/10 bg-white/5 p-5 shadow-inner shadow-black/30"
