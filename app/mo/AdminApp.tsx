@@ -491,6 +491,7 @@ function SectionTabs({ active, onSelect }: { active: Section; onSelect: (section
         return (
           <button
             key={id}
+            type="button"
             onClick={() => onSelect(id)}
             className={`flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition ${
               isActive
@@ -565,6 +566,7 @@ function AiPanel({ onNotify }: { onNotify: (message: string, variant?: 'success'
         </div>
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={load}
             className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
           >
@@ -4905,6 +4907,7 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
           <p className="text-sm text-white/60">Control swap and spot maker/taker fees and audit collected balances.</p>
         </div>
         <button
+          type="button"
           onClick={load}
           className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
         >
@@ -5372,6 +5375,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold">Swap & spot pricing</h3>
         <button
+          type="button"
           onClick={load}
           className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
         >
@@ -5419,12 +5423,14 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                         <td className="px-3 py-2 text-right">
                           <div className="flex justify-end gap-2">
                             <button
+                              type="button"
                               onClick={() => editSwap(row)}
                               className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
                             >
                               Edit pricing
                             </button>
                             <button
+                              type="button"
                               onClick={() => editSwapPool(row)}
                               className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
                             >
@@ -5482,6 +5488,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                         </td>
                         <td className="px-3 py-2 text-right">
                           <button
+                            type="button"
                             onClick={() => editSpot(row)}
                             className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
                           >
@@ -5595,6 +5602,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
 
             <div className="mt-4 flex flex-wrap gap-3">
               <button
+                type="button"
                 onClick={saveMakerSettings}
                 disabled={savingMaker}
                 className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium transition hover:bg-blue-500 disabled:opacity-60"
@@ -5602,6 +5610,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                 <ShieldCheck className="h-4 w-4" /> {savingMaker ? 'Saving…' : 'Save bot settings'}
               </button>
               <button
+                type="button"
                 onClick={load}
                 className="flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/30 hover:text-white"
               >
@@ -5684,12 +5693,14 @@ export default function AdminApp() {
           </div>
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={loadMe}
               className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
             >
               <RefreshCw className="h-3 w-3" /> Sync session
             </button>
             <button
+              type="button"
               onClick={handleLogout}
               className="flex items-center gap-2 rounded-full border border-red-500/40 px-3 py-1 text-xs text-red-200 transition hover:border-red-400"
             >
