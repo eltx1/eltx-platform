@@ -50,6 +50,7 @@ const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 0;
 const DEFAULT_SPOT_EXTERNAL_EXECUTION_ENABLED = DEFAULT_BINANCE_LIQUIDITY_ENABLED;
 const DEFAULT_SPOT_LIQUIDITY_PROVIDER = 'binance';
 const BINANCE_RECV_WINDOW_MS = 5_000;
+const BINANCE_EXCHANGE_INFO_TTL_MS = 60_000;
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
@@ -2948,6 +2949,54 @@ function getBinanceConfig() {
   };
 }
 
+const binanceExchangeInfoCache = new Map();
+
+function normalizeBinanceTimeInForce(value, fallback = 'GTC') {
+  const tif = String(value || fallback).toUpperCase();
+  return ['GTC', 'IOC', 'FOK'].includes(tif) ? tif : String(fallback || 'GTC').toUpperCase();
+}
+
+function floorToStepDecimal(valueRaw, stepRaw) {
+  try {
+    const value = new Decimal(String(valueRaw || '0'));
+    const step = new Decimal(String(stepRaw || '0'));
+    if (!value.isFinite() || value.lte(0)) return '0';
+    if (!step.isFinite() || step.lte(0)) return trimDecimal(value.toFixed(18, Decimal.ROUND_DOWN));
+    const floored = value.div(step).floor().mul(step);
+    return trimDecimal(floored.toFixed(18, Decimal.ROUND_DOWN));
+  } catch {
+    return '0';
+  }
+}
+
+async function fetchBinanceSymbolFilters(marketRow) {
+  const cfg = getBinanceConfig();
+  if (cfg.mockMode) return null;
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const cacheKey = `${cfg.baseUrl}:${symbol}`;
+  const cached = binanceExchangeInfoCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const url = new URL('/api/v3/exchangeInfo', cfg.baseUrl);
+  url.searchParams.set('symbol', symbol);
+  const response = await fetch(url.toString(), { method: 'GET' });
+  if (!response.ok) throw new Error(`Binance exchangeInfo failed (${response.status})`);
+  const payload = await response.json().catch(() => ({}));
+  const row = Array.isArray(payload?.symbols) ? payload.symbols[0] : null;
+  if (!row) throw new Error('Binance exchangeInfo missing symbol');
+  const filters = Array.isArray(row.filters) ? row.filters : [];
+  const byType = Object.fromEntries(filters.map((f) => [String(f.filterType || '').toUpperCase(), f]));
+  const value = {
+    symbol,
+    lotSizeStep: byType.LOT_SIZE?.stepSize || null,
+    marketLotSizeStep: byType.MARKET_LOT_SIZE?.stepSize || null,
+    tickSize: byType.PRICE_FILTER?.tickSize || null,
+    minNotional: byType.NOTIONAL?.minNotional || byType.MIN_NOTIONAL?.minNotional || null,
+  };
+  binanceExchangeInfoCache.set(cacheKey, { value, expiresAt: Date.now() + BINANCE_EXCHANGE_INFO_TTL_MS });
+  return value;
+}
+
 function toBinanceSymbol(symbol) {
   return String(symbol || '')
     .toUpperCase()
@@ -3092,6 +3141,7 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
     };
   }
   if (!cfg.configured) throw new Error('Binance API credentials are not configured');
+  const filters = await fetchBinanceSymbolFilters(marketRow);
   const symbol = toBinanceSymbol(marketRow.symbol);
   const params = new URLSearchParams();
   params.set('symbol', symbol);
@@ -3100,14 +3150,27 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
   params.set('newOrderRespType', 'FULL');
   if (side === 'buy') {
     if (quoteOrderQtyWei && quoteOrderQtyWei > 0n) {
-      params.set('quoteOrderQty', trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals)));
+      const quoteRaw = trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals));
+      let quoteOrderQty = quoteRaw;
+      if (filters?.minNotional) {
+        const minNotional = new Decimal(String(filters.minNotional));
+        const quoteValue = new Decimal(quoteRaw || '0');
+        if (quoteValue.gt(0) && quoteValue.lt(minNotional)) quoteOrderQty = trimDecimal(minNotional.toFixed(18));
+      }
+      params.set('quoteOrderQty', quoteOrderQty);
     } else if (quantityWei && quantityWei > 0n) {
-      params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
+      const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
+      const quantity = floorToStepDecimal(quantityRaw, filters?.marketLotSizeStep || filters?.lotSizeStep || '0');
+      if (!quantity || quantity === '0') throw new Error('Binance quantity below LOT_SIZE step');
+      params.set('quantity', quantity);
     } else {
       throw new Error('Missing buy quantity');
     }
   } else if (quantityWei && quantityWei > 0n) {
-    params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
+    const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
+    const quantity = floorToStepDecimal(quantityRaw, filters?.marketLotSizeStep || filters?.lotSizeStep || '0');
+    if (!quantity || quantity === '0') throw new Error('Binance quantity below LOT_SIZE step');
+    params.set('quantity', quantity);
   } else {
     throw new Error('Missing sell quantity');
   }
@@ -3154,15 +3217,22 @@ async function executeBinanceLimitOrder(marketRow, side, { quantityWei, priceWei
   if (!cfg.configured) throw new Error('Binance API credentials are not configured');
   if (!quantityWei || quantityWei <= 0n) throw new Error('Missing limit quantity');
   if (!priceWei || priceWei <= 0n) throw new Error('Missing limit price');
+  const filters = await fetchBinanceSymbolFilters(marketRow);
 
   const symbol = toBinanceSymbol(marketRow.symbol);
   const params = new URLSearchParams();
   params.set('symbol', symbol);
   params.set('side', side.toUpperCase());
   params.set('type', 'LIMIT');
-  params.set('timeInForce', String(timeInForce || 'GTC').toUpperCase());
-  params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
-  params.set('price', trimDecimal(formatUnitsStr(priceWei.toString(), 18)));
+  params.set('timeInForce', normalizeBinanceTimeInForce(timeInForce, 'GTC'));
+  const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
+  const quantity = floorToStepDecimal(quantityRaw, filters?.lotSizeStep || '0');
+  if (!quantity || quantity === '0') throw new Error('Binance quantity below LOT_SIZE step');
+  const priceRaw = trimDecimal(formatUnitsStr(priceWei.toString(), 18));
+  const normalizedPrice = floorToStepDecimal(priceRaw, filters?.tickSize || '0');
+  if (!normalizedPrice || normalizedPrice === '0') throw new Error('Binance price below PRICE_FILTER tick');
+  params.set('quantity', quantity);
+  params.set('price', normalizedPrice);
   params.set('newOrderRespType', 'FULL');
   params.set('recvWindow', String(BINANCE_RECV_WINDOW_MS));
   params.set('timestamp', String(Date.now()));
@@ -10874,7 +10944,9 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       await conn.rollback();
       return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not available' });
     }
-    if (type === 'market' && market.allow_market_orders === 0) {
+    const liquidityState = await readBinanceLiquidityState(conn);
+    const canRouteMarketExternally = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
+    if (type === 'market' && market.allow_market_orders === 0 && !canRouteMarketExternally) {
       await conn.rollback();
       return next({ status: 400, code: 'MARKET_ORDER_DISABLED', message: 'Market orders disabled for this market' });
     }
@@ -10921,7 +10993,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     const feeSettings = await readSpotFeeBps(conn);
     const riskSettings = await readSpotRiskSettings(conn);
-    const liquidityState = await readBinanceLiquidityState(conn);
     const marketMakerSettings = await readMarketMakerSettings(conn);
     const makerFeeBps = clampBps(BigInt(feeSettings.maker || 0));
     const takerFeeBps = clampBps(BigInt(feeSettings.taker || 0));
