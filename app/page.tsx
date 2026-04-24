@@ -1,4 +1,5 @@
 import Hero from '../components/home/Hero';
+import TradingInvestmentShowcase from '../components/home/TradingInvestmentShowcase';
 import HomeForYouPreview from '../components/home/HomeForYouPreview';
 import HomeAuthRepeat from '../components/home/HomeAuthRepeat';
 import ScrollToTopOnLoad from '../components/ScrollToTopOnLoad';
@@ -39,6 +40,7 @@ export default async function Page() {
     <main className="flex flex-col">
       <ScrollToTopOnLoad />
       <Hero />
+      <TradingInvestmentShowcase />
       <HomeForYouPreview />
       <HomeAuthRepeat />
     </main>

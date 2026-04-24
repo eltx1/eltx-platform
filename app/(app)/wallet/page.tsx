@@ -227,7 +227,7 @@ export default function WalletPage() {
       <PageAdSlot placement="wallet" />
       {hasEltxBalance && (
         <div className="p-4 rounded-2xl bg-white/5">
-          <div className="text-sm opacity-80">{t.dashboard.balanceCard.title}</div>
+          <div className="text-sm opacity-80">{lang === 'ar' ? 'رصيد USDT' : 'USDT Balance'}</div>
           <div className="text-2xl font-bold">{eltxBalanceFormatted}</div>
         </div>
       )}

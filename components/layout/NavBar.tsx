@@ -180,7 +180,7 @@ export default function NavBar() {
           <Menu />
         </button>
       </div>
-      <MobileMenu open={open} setOpen={setOpen} links={links} publicLinks={publicLinks} user={user} logout={logout} />
+      <MobileMenu open={open} setOpen={setOpen} links={links} user={user} logout={logout} />
     </header>
   );
 }
