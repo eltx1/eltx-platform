@@ -195,7 +195,7 @@ function SpotTradePageContent() {
   const [loadingBook, setLoadingBook] = useState(false);
   const [placing, setPlacing] = useState(false);
   const [formSide, setFormSide] = useState<'buy' | 'sell'>('buy');
-  const [formType, setFormType] = useState<'limit' | 'market'>('limit');
+  const [formType, setFormType] = useState<'limit' | 'market'>('market');
   const [amount, setAmount] = useState('');
   const [sliderValue, setSliderValue] = useState(0);
   const [price, setPrice] = useState('');

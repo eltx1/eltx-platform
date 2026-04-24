@@ -3289,6 +3289,207 @@ async function cancelBinanceOrder(marketRow, externalOrderId) {
   return { ok: true, raw: payload };
 }
 
+async function fetchBinanceOrderStatus(marketRow, externalOrderId) {
+  const cfg = getBinanceConfig();
+  if (cfg.mockMode) {
+    return {
+      status: 'NEW',
+      executedBaseWei: 0n,
+      quoteWithoutFeeWei: 0n,
+      averagePriceWei: 0n,
+      raw: { mock: true, orderId: externalOrderId },
+    };
+  }
+  if (!cfg.configured) throw new Error('Binance API credentials are not configured');
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const params = new URLSearchParams();
+  params.set('symbol', symbol);
+  params.set('orderId', String(externalOrderId));
+  params.set('recvWindow', String(BINANCE_RECV_WINDOW_MS));
+  params.set('timestamp', String(Date.now()));
+  const signature = crypto.createHmac('sha256', cfg.apiSecret).update(params.toString()).digest('hex');
+  params.set('signature', signature);
+  const response = await fetch(`${cfg.baseUrl}/api/v3/order?${params.toString()}`, {
+    method: 'GET',
+    headers: {
+      'X-MBX-APIKEY': cfg.apiKey,
+    },
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload?.msg || `Binance order query failed (${response.status})`);
+  const executedQty = ethers.parseUnits(String(payload.executedQty || '0'), marketRow.base_decimals);
+  const cummulativeQuoteQty = ethers.parseUnits(String(payload.cummulativeQuoteQty || '0'), marketRow.quote_decimals);
+  const averagePriceWei =
+    executedQty > 0n && cummulativeQuoteQty > 0n ? mulDiv(cummulativeQuoteQty, PRICE_SCALE, executedQty) : 0n;
+  return {
+    status: String(payload.status || 'NEW').toUpperCase(),
+    executedBaseWei: executedQty,
+    quoteWithoutFeeWei: cummulativeQuoteQty,
+    averagePriceWei,
+    raw: payload,
+  };
+}
+
+function computeTerminalExternalOrderStatus(binanceStatus, remainingBaseWei) {
+  const normalized = String(binanceStatus || '').toUpperCase();
+  const done = ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED'];
+  if (!done.includes(normalized)) return 'open';
+  if (remainingBaseWei <= 0n || normalized === 'FILLED') return 'filled';
+  return 'cancelled';
+}
+
+async function syncExternalBoundOrderById(conn, orderId) {
+  const [rows] = await conn.query(
+    `SELECT so.*, sm.symbol, sm.base_asset, sm.base_decimals, sm.quote_asset, sm.quote_decimals
+       FROM spot_orders so
+       JOIN spot_markets sm ON sm.id = so.market_id
+      WHERE so.id=? AND so.status='open' AND COALESCE(so.external_bound, 0)=1 AND so.external_order_id IS NOT NULL
+      LIMIT 1
+      FOR UPDATE`,
+    [orderId]
+  );
+  if (!rows.length) return false;
+  const order = rows[0];
+  const external = await fetchBinanceOrderStatus(order, order.external_order_id);
+  const baseAmountWei = bigIntFromValue(order.base_amount_wei);
+  const quoteAmountWei = bigIntFromValue(order.quote_amount_wei);
+  const prevRemainingBaseWei = bigIntFromValue(order.remaining_base_wei);
+  const prevRemainingQuoteWei = bigIntFromValue(order.remaining_quote_wei);
+  const alreadyFilledBaseWei = baseAmountWei > prevRemainingBaseWei ? baseAmountWei - prevRemainingBaseWei : 0n;
+  const executedBaseTotalWei = external.executedBaseWei > baseAmountWei ? baseAmountWei : external.executedBaseWei;
+  const executedQuoteTotalWei = external.quoteWithoutFeeWei > 0n ? external.quoteWithoutFeeWei : 0n;
+  const deltaBaseWei = executedBaseTotalWei > alreadyFilledBaseWei ? executedBaseTotalWei - alreadyFilledBaseWei : 0n;
+  const avgPriceWei = external.averagePriceWei > 0n ? external.averagePriceWei : bigIntFromValue(order.price_wei);
+  const deltaQuoteWei = deltaBaseWei > 0n && avgPriceWei > 0n ? computeQuoteAmount(deltaBaseWei, avgPriceWei) : 0n;
+  const feeBps = clampBps(BigInt(Number.parseInt(String(order.fee_bps || 0), 10) || 0));
+  const deltaFeeWei = deltaQuoteWei > 0n ? (deltaQuoteWei * feeBps) / 10000n : 0n;
+
+  let nextRemainingBaseWei = prevRemainingBaseWei;
+  let nextRemainingQuoteWei = prevRemainingQuoteWei;
+  if (deltaBaseWei > 0n) {
+    nextRemainingBaseWei = prevRemainingBaseWei > deltaBaseWei ? prevRemainingBaseWei - deltaBaseWei : 0n;
+    if (order.side === 'buy') {
+      const consumeWei = deltaQuoteWei + deltaFeeWei;
+      nextRemainingQuoteWei = prevRemainingQuoteWei > consumeWei ? prevRemainingQuoteWei - consumeWei : 0n;
+      if (deltaBaseWei > 0n) {
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [order.user_id, order.base_asset, deltaBaseWei.toString()]
+        );
+      }
+    } else if (deltaQuoteWei > 0n) {
+      const netQuoteWei = deltaQuoteWei > deltaFeeWei ? deltaQuoteWei - deltaFeeWei : 0n;
+      if (netQuoteWei > 0n) {
+        await conn.query(
+          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+          [order.user_id, order.quote_asset, netQuoteWei.toString()]
+        );
+      }
+    }
+    if (deltaQuoteWei > 0n && avgPriceWei > 0n) {
+      const [tradeInsert] = await conn.query(
+        'INSERT INTO spot_trades (market_id, buy_order_id, sell_order_id, price_wei, base_amount_wei, quote_amount_wei, buy_fee_wei, sell_fee_wei, fee_asset, taker_side) VALUES (?,?,?,?,?,?,?,?,?,?)',
+        [
+          order.market_id,
+          order.id,
+          order.id,
+          avgPriceWei.toString(),
+          deltaBaseWei.toString(),
+          deltaQuoteWei.toString(),
+          order.side === 'buy' ? deltaFeeWei.toString() : '0',
+          order.side === 'sell' ? deltaFeeWei.toString() : '0',
+          order.quote_asset,
+          order.side,
+        ]
+      );
+      if (deltaFeeWei > 0n) {
+        await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+          'spot',
+          `trade:${tradeInsert.insertId}:external:sync`,
+          order.quote_asset,
+          deltaFeeWei.toString(),
+        ]);
+      }
+    }
+  }
+
+  const nextOrderStatus = computeTerminalExternalOrderStatus(external.status, nextRemainingBaseWei);
+  const isTerminal = nextOrderStatus !== 'open';
+  if (isTerminal) {
+    if (order.side === 'buy' && nextRemainingQuoteWei > 0n) {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [order.user_id, order.quote_asset, nextRemainingQuoteWei.toString()]
+      );
+      nextRemainingQuoteWei = 0n;
+    }
+    if (order.side === 'sell' && nextRemainingBaseWei > 0n) {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [order.user_id, order.base_asset, nextRemainingBaseWei.toString()]
+      );
+      nextRemainingBaseWei = 0n;
+    }
+  }
+
+  const executedFeeTotalWei = (executedQuoteTotalWei * feeBps) / 10000n;
+  const executedQuoteWithFeeWei = executedQuoteTotalWei + executedFeeTotalWei;
+  const quoteAmountForRecordWei = order.side === 'buy' ? executedQuoteWithFeeWei : executedQuoteWithFeeWei;
+  await conn.query(
+    'UPDATE spot_orders SET remaining_base_wei=?, remaining_quote_wei=?, status=?, quote_amount_wei=?, external_status=?, external_bound=? WHERE id=?',
+    [
+      nextRemainingBaseWei.toString(),
+      nextRemainingQuoteWei.toString(),
+      nextOrderStatus,
+      quoteAmountForRecordWei.toString(),
+      external.status,
+      isTerminal ? 0 : 1,
+      order.id,
+    ]
+  );
+  return true;
+}
+
+async function syncExternalSpotOrders({ userId = null, marketId = null, limit = 20 } = {}) {
+  const cfg = getBinanceConfig();
+  if (!cfg.mockMode && !cfg.configured) return 0;
+  let where = `so.status='open' AND COALESCE(so.external_bound, 0)=1 AND so.external_order_id IS NOT NULL`;
+  const params = [];
+  if (Number.isFinite(Number(userId)) && Number(userId) > 0) {
+    where += ' AND so.user_id=?';
+    params.push(Number(userId));
+  }
+  if (Number.isFinite(Number(marketId)) && Number(marketId) > 0) {
+    where += ' AND so.market_id=?';
+    params.push(Number(marketId));
+  }
+  const cappedLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const [rows] = await pool.query(
+    `SELECT so.id
+       FROM spot_orders so
+      WHERE ${where}
+      ORDER BY so.updated_at ASC, so.id ASC
+      LIMIT ${cappedLimit}`,
+    params
+  );
+  let updated = 0;
+  for (const row of rows) {
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const changed = await syncExternalBoundOrderById(conn, row.id);
+      await conn.commit();
+      if (changed) updated += 1;
+    } catch (err) {
+      await conn.rollback();
+      console.warn(`[spot] external order sync failed: orderId=${row.id} error=${err.message || err}`);
+    } finally {
+      conn.release();
+    }
+  }
+  return updated;
+}
+
 async function readSpotOrderbookVersion(conn, marketRow) {
   const [rows] = await conn.query(
     `SELECT UNIX_TIMESTAMP(updated_at) * 1000 AS updated_ms, id
@@ -10364,6 +10565,8 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
 app.get('/spot/markets', spotLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
+    const liquidityState = await readBinanceLiquidityState();
+    const externalMarketAvailable = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     const [rows] = await pool.query(
       `SELECT sm.id, sm.symbol, sm.base_asset, sm.base_decimals, sm.quote_asset, sm.quote_decimals, sm.min_base_amount, sm.min_quote_amount,
               sm.price_precision, sm.amount_precision, sm.active, sm.allow_market_orders,
@@ -10386,7 +10589,9 @@ app.get('/spot/markets', spotLimiter, async (req, res, next) => {
         min_quote_amount: trimDecimal(row.min_quote_amount),
         price_precision: row.price_precision,
         amount_precision: row.amount_precision,
-        allow_market_orders: row.allow_market_orders === undefined || row.allow_market_orders === null ? true : !!row.allow_market_orders,
+        allow_market_orders:
+          (row.allow_market_orders === undefined || row.allow_market_orders === null ? true : !!row.allow_market_orders) ||
+          externalMarketAvailable,
         last_price: lastPriceWei > 0n ? trimDecimal(formatUnitsStr(lastPriceWei.toString(), 18)) : null,
       };
     });
@@ -10505,6 +10710,7 @@ async function handleSpotWebsocketConnection(socket, req) {
     }
 
     const pushSnapshot = async () => {
+      await syncExternalSpotOrders({ userId, marketId: marketRow.id, limit: 10 });
       const [snapshot, orders, balances, fees] = await Promise.all([
         readSpotOrderbookSnapshot(pool, marketRow),
         readSpotOrdersForUser(pool, userId, marketRow),
@@ -10533,6 +10739,7 @@ async function handleSpotWebsocketConnection(socket, req) {
       if (closed || updating) return;
       updating = true;
       try {
+        await syncExternalSpotOrders({ userId, marketId: marketRow.id, limit: 10 });
         const [orderbookDelta, tradeDelta] = await Promise.all([
           readSpotOrderbookDeltas(pool, marketRow, lastOrderbookVersion),
           readSpotTradeDeltas(pool, marketRow, lastTradeId),
@@ -10623,6 +10830,7 @@ app.get('/spot/stream', spotLimiter, async (req, res, next) => {
 
     const pushSnapshot = async () => {
       try {
+        await syncExternalSpotOrders({ userId, marketId: marketRow.id, limit: 10 });
         const [snapshot, orders, balances, fees] = await Promise.all([
           readSpotOrderbookSnapshot(pool, marketRow),
           readSpotOrdersForUser(pool, userId, marketRow),
@@ -10652,6 +10860,7 @@ app.get('/spot/stream', spotLimiter, async (req, res, next) => {
 
     const pushDeltas = async () => {
       try {
+        await syncExternalSpotOrders({ userId, marketId: marketRow.id, limit: 10 });
         const [orderbookDelta, tradeDelta] = await Promise.all([
           readSpotOrderbookDeltas(pool, marketRow, lastOrderbookVersion),
           readSpotTradeDeltas(pool, marketRow, lastTradeId),
@@ -10821,6 +11030,7 @@ app.get('/spot/orders', spotLimiter, async (req, res, next) => {
       marketFilter = 'AND so.market_id = ?';
       orderParams.push(marketRow.id);
     }
+    await syncExternalSpotOrders({ userId, marketId: marketRow?.id || null, limit: 25 });
 
     const [orderRows] = await pool.query(
       `SELECT so.*, sm.symbol, sm.base_asset, sm.quote_asset, sm.base_decimals, sm.quote_decimals
@@ -12352,6 +12562,13 @@ async function runStakingSweep() {
 
 setTimeout(runStakingSweep, 5_000);
 setInterval(runStakingSweep, STAKING_SWEEP_INTERVAL_MS);
+
+const SPOT_EXTERNAL_SYNC_INTERVAL_MS = Math.max(3000, Number(process.env.SPOT_EXTERNAL_SYNC_INTERVAL_MS || 8000) || 8000);
+setInterval(() => {
+  syncExternalSpotOrders({ limit: 30 }).catch((err) => {
+    console.warn('[spot] background external sync failed:', err?.message || err);
+  });
+}, SPOT_EXTERNAL_SYNC_INTERVAL_MS);
 
 app.use(errorHandler);
 
