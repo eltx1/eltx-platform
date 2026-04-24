@@ -47,7 +47,11 @@ const DEFAULT_MARKET_MAKER_REFRESH_MINUTES = 30;
 const DEFAULT_MARKET_MAKER_TARGET_BASE_PCT = 50;
 const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
 const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 0;
+const DEFAULT_SPOT_EXTERNAL_EXECUTION_ENABLED = DEFAULT_BINANCE_LIQUIDITY_ENABLED;
+const DEFAULT_SPOT_LIQUIDITY_PROVIDER = 'binance';
+const DEFAULT_SPOT_EXTERNAL_EXECUTION_MODE = 'primary';
 const BINANCE_RECV_WINDOW_MS = 5_000;
+const BINANCE_EXCHANGE_INFO_TTL_MS = 60_000;
 const ELTX_SYMBOL = 'ELTX';
 const STRIPE_SUPPORTED_ASSETS = [ELTX_SYMBOL, 'USDT'];
 const WITHDRAWAL_ASSETS = [ELTX_SYMBOL, 'USDT'];
@@ -719,6 +723,9 @@ const MarketMakerSettingsSchema = z
     target_base_pct: z.coerce.number().min(1).max(99).optional(),
     binance_liquidity_enabled: z.boolean().optional(),
     binance_liquidity_spread_bps: z.coerce.number().int().min(0).max(5000).optional(),
+    spot_external_execution_enabled: z.boolean().optional(),
+    spot_liquidity_provider: z.enum(['binance', 'internal']).optional(),
+    spot_external_execution_mode: z.enum(['primary', 'fallback']).optional(),
   })
   .refine(
     (data) =>
@@ -729,7 +736,10 @@ const MarketMakerSettingsSchema = z
       data.pairs !== undefined ||
       data.target_base_pct !== undefined ||
       data.binance_liquidity_enabled !== undefined ||
-      data.binance_liquidity_spread_bps !== undefined,
+      data.binance_liquidity_spread_bps !== undefined ||
+      data.spot_external_execution_enabled !== undefined ||
+      data.spot_liquidity_provider !== undefined ||
+      data.spot_external_execution_mode !== undefined,
     { message: 'At least one market maker field must be provided' }
   );
 
@@ -2799,6 +2809,21 @@ async function readMarketMakerSettings(conn = pool) {
     DEFAULT_BINANCE_LIQUIDITY_ENABLED ? '1' : '0',
     conn
   );
+  const externalExecutionEnabledRaw = await getPlatformSettingValue(
+    'spot_external_execution_enabled',
+    binanceEnabledRaw || (DEFAULT_SPOT_EXTERNAL_EXECUTION_ENABLED ? '1' : '0'),
+    conn
+  );
+  const liquidityProviderRaw = await getPlatformSettingValue(
+    'spot_liquidity_provider',
+    DEFAULT_SPOT_LIQUIDITY_PROVIDER,
+    conn
+  );
+  const executionModeRaw = await getPlatformSettingValue(
+    'spot_external_execution_mode',
+    DEFAULT_SPOT_EXTERNAL_EXECUTION_MODE,
+    conn
+  );
   const binanceSpreadRaw = await getPlatformSettingValue(
     'binance_liquidity_spread_bps',
     DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS.toString(),
@@ -2809,6 +2834,10 @@ async function readMarketMakerSettings(conn = pool) {
   const refreshMinutes = Number.parseInt(refreshRaw, 10);
   const targetPct = Number.parseInt(targetPctRaw, 10);
   const binanceSpread = Number.parseInt(binanceSpreadRaw, 10);
+  const spotLiquidityProvider = String(liquidityProviderRaw || DEFAULT_SPOT_LIQUIDITY_PROVIDER).toLowerCase();
+  const spotExternalExecutionMode = String(executionModeRaw || DEFAULT_SPOT_EXTERNAL_EXECUTION_MODE).toLowerCase();
+  const spotExternalExecutionEnabled =
+    externalExecutionEnabledRaw === '1' || externalExecutionEnabledRaw?.toLowerCase?.() === 'true';
   return {
     enabled: enabledRaw === '1' || enabledRaw?.toLowerCase?.() === 'true',
     spread_bps: Number.isFinite(spread) ? spread : DEFAULT_MARKET_MAKER_SPREAD_BPS,
@@ -2821,10 +2850,13 @@ async function readMarketMakerSettings(conn = pool) {
           .filter(Boolean)
       : [],
     target_base_pct: Number.isFinite(targetPct) ? targetPct : DEFAULT_MARKET_MAKER_TARGET_BASE_PCT,
-    binance_liquidity_enabled: binanceEnabledRaw === '1' || binanceEnabledRaw?.toLowerCase?.() === 'true',
+    binance_liquidity_enabled: spotExternalExecutionEnabled && spotLiquidityProvider === 'binance',
     binance_liquidity_spread_bps: Number.isFinite(binanceSpread)
       ? Math.max(0, Math.min(5000, binanceSpread))
       : DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS,
+    spot_external_execution_enabled: spotExternalExecutionEnabled,
+    spot_liquidity_provider: spotLiquidityProvider === 'internal' ? 'internal' : 'binance',
+    spot_external_execution_mode: spotExternalExecutionMode === 'fallback' ? 'fallback' : 'primary',
   };
 }
 
@@ -2839,10 +2871,27 @@ async function updateMarketMakerSettings(partial) {
     tasks.push(setPlatformSettingValue('market_maker_pairs', partial.pairs.map((p) => p.trim().toUpperCase()).join(',')));
   if (partial.target_base_pct !== undefined)
     tasks.push(setPlatformSettingValue('market_maker_target_base_pct', partial.target_base_pct.toString()));
-  if (partial.binance_liquidity_enabled !== undefined)
+  if (partial.binance_liquidity_enabled !== undefined) {
     tasks.push(setPlatformSettingValue('binance_liquidity_enabled', partial.binance_liquidity_enabled ? '1' : '0'));
+    tasks.push(setPlatformSettingValue('spot_external_execution_enabled', partial.binance_liquidity_enabled ? '1' : '0'));
+  }
   if (partial.binance_liquidity_spread_bps !== undefined)
     tasks.push(setPlatformSettingValue('binance_liquidity_spread_bps', partial.binance_liquidity_spread_bps.toString()));
+  if (partial.spot_external_execution_enabled !== undefined)
+    tasks.push(
+      setPlatformSettingValue('spot_external_execution_enabled', partial.spot_external_execution_enabled ? '1' : '0')
+    );
+  if (partial.spot_liquidity_provider !== undefined)
+    tasks.push(
+      setPlatformSettingValue('spot_liquidity_provider', partial.spot_liquidity_provider === 'internal' ? 'internal' : 'binance')
+    );
+  if (partial.spot_external_execution_mode !== undefined)
+    tasks.push(
+      setPlatformSettingValue(
+        'spot_external_execution_mode',
+        partial.spot_external_execution_mode === 'fallback' ? 'fallback' : 'primary'
+      )
+    );
   if (!tasks.length) return;
   await Promise.all(tasks);
 }
@@ -2917,6 +2966,54 @@ function getBinanceConfig() {
   };
 }
 
+const binanceExchangeInfoCache = new Map();
+
+function normalizeBinanceTimeInForce(value, fallback = 'GTC') {
+  const tif = String(value || fallback).toUpperCase();
+  return ['GTC', 'IOC', 'FOK'].includes(tif) ? tif : String(fallback || 'GTC').toUpperCase();
+}
+
+function floorToStepDecimal(valueRaw, stepRaw) {
+  try {
+    const value = new Decimal(String(valueRaw || '0'));
+    const step = new Decimal(String(stepRaw || '0'));
+    if (!value.isFinite() || value.lte(0)) return '0';
+    if (!step.isFinite() || step.lte(0)) return trimDecimal(value.toFixed(18, Decimal.ROUND_DOWN));
+    const floored = value.div(step).floor().mul(step);
+    return trimDecimal(floored.toFixed(18, Decimal.ROUND_DOWN));
+  } catch {
+    return '0';
+  }
+}
+
+async function fetchBinanceSymbolFilters(marketRow) {
+  const cfg = getBinanceConfig();
+  if (cfg.mockMode) return null;
+  const symbol = toBinanceSymbol(marketRow.symbol);
+  const cacheKey = `${cfg.baseUrl}:${symbol}`;
+  const cached = binanceExchangeInfoCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const url = new URL('/api/v3/exchangeInfo', cfg.baseUrl);
+  url.searchParams.set('symbol', symbol);
+  const response = await fetch(url.toString(), { method: 'GET' });
+  if (!response.ok) throw new Error(`Binance exchangeInfo failed (${response.status})`);
+  const payload = await response.json().catch(() => ({}));
+  const row = Array.isArray(payload?.symbols) ? payload.symbols[0] : null;
+  if (!row) throw new Error('Binance exchangeInfo missing symbol');
+  const filters = Array.isArray(row.filters) ? row.filters : [];
+  const byType = Object.fromEntries(filters.map((f) => [String(f.filterType || '').toUpperCase(), f]));
+  const value = {
+    symbol,
+    lotSizeStep: byType.LOT_SIZE?.stepSize || null,
+    marketLotSizeStep: byType.MARKET_LOT_SIZE?.stepSize || null,
+    tickSize: byType.PRICE_FILTER?.tickSize || null,
+    minNotional: byType.NOTIONAL?.minNotional || byType.MIN_NOTIONAL?.minNotional || null,
+  };
+  binanceExchangeInfoCache.set(cacheKey, { value, expiresAt: Date.now() + BINANCE_EXCHANGE_INFO_TTL_MS });
+  return value;
+}
+
 function toBinanceSymbol(symbol) {
   return String(symbol || '')
     .toUpperCase()
@@ -2977,8 +3074,15 @@ function buildSyntheticDepthSnapshot(marketRow, limit = 50) {
 async function readBinanceLiquidityState(conn = pool) {
   const settings = await readMarketMakerSettings(conn);
   const cfg = getBinanceConfig();
+  const provider = settings.spot_liquidity_provider === 'internal' ? 'internal' : 'binance';
+  const mode = settings.spot_external_execution_mode === 'fallback' ? 'fallback' : 'primary';
+  const externalExecutionEnabled = !!settings.spot_external_execution_enabled;
+  const enabled = externalExecutionEnabled && provider === 'binance';
   return {
-    enabled: !!settings.binance_liquidity_enabled,
+    enabled,
+    provider,
+    mode,
+    externalExecutionEnabled,
     spreadBps: Number(settings.binance_liquidity_spread_bps || 0),
     configured: cfg.configured,
     mockMode: cfg.mockMode,
@@ -3056,6 +3160,7 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
     };
   }
   if (!cfg.configured) throw new Error('Binance API credentials are not configured');
+  const filters = await fetchBinanceSymbolFilters(marketRow);
   const symbol = toBinanceSymbol(marketRow.symbol);
   const params = new URLSearchParams();
   params.set('symbol', symbol);
@@ -3064,14 +3169,27 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
   params.set('newOrderRespType', 'FULL');
   if (side === 'buy') {
     if (quoteOrderQtyWei && quoteOrderQtyWei > 0n) {
-      params.set('quoteOrderQty', trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals)));
+      const quoteRaw = trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals));
+      let quoteOrderQty = quoteRaw;
+      if (filters?.minNotional) {
+        const minNotional = new Decimal(String(filters.minNotional));
+        const quoteValue = new Decimal(quoteRaw || '0');
+        if (quoteValue.gt(0) && quoteValue.lt(minNotional)) quoteOrderQty = trimDecimal(minNotional.toFixed(18));
+      }
+      params.set('quoteOrderQty', quoteOrderQty);
     } else if (quantityWei && quantityWei > 0n) {
-      params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
+      const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
+      const quantity = floorToStepDecimal(quantityRaw, filters?.marketLotSizeStep || filters?.lotSizeStep || '0');
+      if (!quantity || quantity === '0') throw new Error('Binance quantity below LOT_SIZE step');
+      params.set('quantity', quantity);
     } else {
       throw new Error('Missing buy quantity');
     }
   } else if (quantityWei && quantityWei > 0n) {
-    params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
+    const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
+    const quantity = floorToStepDecimal(quantityRaw, filters?.marketLotSizeStep || filters?.lotSizeStep || '0');
+    if (!quantity || quantity === '0') throw new Error('Binance quantity below LOT_SIZE step');
+    params.set('quantity', quantity);
   } else {
     throw new Error('Missing sell quantity');
   }
@@ -3118,15 +3236,22 @@ async function executeBinanceLimitOrder(marketRow, side, { quantityWei, priceWei
   if (!cfg.configured) throw new Error('Binance API credentials are not configured');
   if (!quantityWei || quantityWei <= 0n) throw new Error('Missing limit quantity');
   if (!priceWei || priceWei <= 0n) throw new Error('Missing limit price');
+  const filters = await fetchBinanceSymbolFilters(marketRow);
 
   const symbol = toBinanceSymbol(marketRow.symbol);
   const params = new URLSearchParams();
   params.set('symbol', symbol);
   params.set('side', side.toUpperCase());
   params.set('type', 'LIMIT');
-  params.set('timeInForce', String(timeInForce || 'GTC').toUpperCase());
-  params.set('quantity', trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals)));
-  params.set('price', trimDecimal(formatUnitsStr(priceWei.toString(), 18)));
+  params.set('timeInForce', normalizeBinanceTimeInForce(timeInForce, 'GTC'));
+  const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
+  const quantity = floorToStepDecimal(quantityRaw, filters?.lotSizeStep || '0');
+  if (!quantity || quantity === '0') throw new Error('Binance quantity below LOT_SIZE step');
+  const priceRaw = trimDecimal(formatUnitsStr(priceWei.toString(), 18));
+  const normalizedPrice = floorToStepDecimal(priceRaw, filters?.tickSize || '0');
+  if (!normalizedPrice || normalizedPrice === '0') throw new Error('Binance price below PRICE_FILTER tick');
+  params.set('quantity', quantity);
+  params.set('price', normalizedPrice);
   params.set('newOrderRespType', 'FULL');
   params.set('recvWindow', String(BINANCE_RECV_WINDOW_MS));
   params.set('timestamp', String(Date.now()));
@@ -10838,7 +10963,17 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       await conn.rollback();
       return next({ status: 404, code: 'MARKET_NOT_FOUND', message: 'Market not available' });
     }
-    if (type === 'market' && market.allow_market_orders === 0) {
+    const liquidityState = await readBinanceLiquidityState(conn);
+    const canRouteMarketExternally = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
+    if (liquidityState.enabled && liquidityState.mode === 'primary' && !canRouteMarketExternally) {
+      await conn.rollback();
+      return next({
+        status: 503,
+        code: 'EXTERNAL_LIQUIDITY_UNAVAILABLE',
+        message: 'External liquidity is enabled but Binance is not configured',
+      });
+    }
+    if (type === 'market' && market.allow_market_orders === 0 && !canRouteMarketExternally) {
       await conn.rollback();
       return next({ status: 400, code: 'MARKET_ORDER_DISABLED', message: 'Market orders disabled for this market' });
     }
@@ -10885,7 +11020,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     const feeSettings = await readSpotFeeBps(conn);
     const riskSettings = await readSpotRiskSettings(conn);
-    const liquidityState = await readBinanceLiquidityState(conn);
     const marketMakerSettings = await readMarketMakerSettings(conn);
     const makerFeeBps = clampBps(BigInt(feeSettings.maker || 0));
     const takerFeeBps = clampBps(BigInt(feeSettings.taker || 0));
@@ -11029,7 +11163,22 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       timeInForce,
     };
 
-    const matchResult = await matchSpotOrder(conn, market, taker);
+    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
+    const shouldPreferExternal = shouldExternalFallback && liquidityState.mode === 'primary';
+    const matchResult = shouldPreferExternal
+      ? {
+          filledBase: 0n,
+          spentQuote: 0n,
+          receivedQuote: 0n,
+          receivedBase: 0n,
+          takerFee: 0n,
+          trades: [],
+          averagePriceWei: 0n,
+        }
+      : await matchSpotOrder(conn, market, taker);
+    console.info(
+      `[spot] execution plan: market=${market.symbol} orderType=${type} tif=${timeInForce} provider=${liquidityState.provider} externalEnabled=${liquidityState.enabled} mode=${liquidityState.mode} preferExternal=${shouldPreferExternal}`
+    );
     const marketMakerUserRow =
       marketMakerSettings.user_email
         ? (await conn.query('SELECT id FROM users WHERE email=? LIMIT 1', [marketMakerSettings.user_email]))[0]?.[0]
@@ -11037,9 +11186,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const marketMakerUserId = marketMakerUserRow ? Number(marketMakerUserRow.id) : null;
 
     const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
-    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
+    let externalRestingOrderId = null;
+    let externalRestingStatus = null;
     if (shouldExternalFallback && taker.remainingBase > 0n) {
       try {
         externalFallbackAttempted = true;
@@ -11055,7 +11205,84 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           takerFeeBps,
           limitPriceWei: type === 'limit' ? priceWei : 0n,
         });
-        if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
+        if (type === 'limit') {
+          let executedBase = 0n;
+          const externalLimitOrder = await executeBinanceLimitOrder(market, side, {
+            quantityWei: taker.remainingBase,
+            priceWei,
+            timeInForce: String(timeInForce || 'gtc').toUpperCase(),
+          });
+          executedBase = bigIntFromValue(externalLimitOrder.executedBaseWei);
+          if (executedBase > 0n) {
+            const externalQuoteRaw = bigIntFromValue(externalLimitOrder.quoteWithoutFeeWei);
+            const externalQuote =
+              externalQuoteRaw > 0n ? externalQuoteRaw : computeQuoteAmount(executedBase, externalLimitOrder.averagePriceWei || priceWei);
+            const externalAveragePriceWei =
+              externalLimitOrder.averagePriceWei && externalLimitOrder.averagePriceWei > 0n
+                ? externalLimitOrder.averagePriceWei
+                : priceWei;
+            const externalFee = (externalQuote * takerFeeBps) / 10000n;
+            const [tradeInsert] = await conn.query(
+              'INSERT INTO spot_trades (market_id, buy_order_id, sell_order_id, price_wei, base_amount_wei, quote_amount_wei, buy_fee_wei, sell_fee_wei, fee_asset, taker_side) VALUES (?,?,?,?,?,?,?,?,?,?)',
+              [
+                market.id,
+                orderId,
+                orderId,
+                externalAveragePriceWei.toString(),
+                executedBase.toString(),
+                externalQuote.toString(),
+                side === 'buy' ? externalFee.toString() : '0',
+                side === 'sell' ? externalFee.toString() : '0',
+                market.quote_asset,
+                side,
+              ]
+            );
+            const tradeId = tradeInsert.insertId;
+            if (externalFee > 0n) {
+              await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+                'spot',
+                `trade:${tradeId}:external:taker`,
+                market.quote_asset,
+                externalFee.toString(),
+              ]);
+            }
+            if (side === 'buy') {
+              matchResult.spentQuote += externalQuote + externalFee;
+              matchResult.receivedBase += executedBase;
+            } else {
+              matchResult.receivedQuote += externalQuote - externalFee;
+            }
+            matchResult.takerFee += externalFee;
+            matchResult.filledBase += executedBase;
+            taker.remainingBase -= executedBase;
+            matchResult.averagePriceWei = recalculateMatchAveragePrice(matchResult, side);
+            matchResult.trades.push({
+              trade_id: tradeId,
+              maker_order_id: null,
+              maker_user_id: null,
+              price_wei: externalAveragePriceWei,
+              base_amount_wei: executedBase,
+              quote_amount_wei: externalQuote,
+              taker_fee_wei: externalFee,
+              maker_fee_wei: 0n,
+              external_liquidity: true,
+            });
+          }
+          const isGtc = timeInForce === 'gtc';
+          if (isGtc && taker.remainingBase > 0n && externalLimitOrder.externalOrderId) {
+            externalRestingOrderId = externalLimitOrder.externalOrderId;
+            externalRestingStatus = externalLimitOrder.status || 'NEW';
+          }
+          if (executedBase <= 0n && !externalRestingOrderId) {
+            console.info(
+              `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
+            );
+          } else {
+            console.info(
+              `[spot] external fallback filled: orderId=${orderId} executedBaseWei=${executedBase.toString()} externalOrderId=${externalLimitOrder.externalOrderId || 'n/a'} status=${externalLimitOrder.status || 'UNKNOWN'}`
+            );
+          }
+        } else if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
           const externalOrder = await executeBinanceMarketOrder(market, side, {
             quantityWei: externalPlan.filledBaseWei,
             quoteOrderQtyWei: side === 'buy' ? externalPlan.quoteWithoutFeeWei : 0n,
@@ -11121,7 +11348,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           console.info(
             `[spot] external fallback filled: orderId=${orderId} tradeId=${tradeId} executedBaseWei=${externalBase.toString()} executedQuoteWei=${externalQuote.toString()} avgPriceWei=${externalAveragePriceWei.toString()}`
           );
-        } else {
+        } else if (type !== 'limit') {
           console.info(
             `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
           );
@@ -11151,6 +11378,21 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         status: 502,
         code: 'BINANCE_EXECUTION_FAILED',
         message: `External liquidity execution failed: ${externalFallbackError.message || 'unknown error'}`,
+      });
+    }
+    if (
+      liquidityState.mode === 'primary' &&
+      type === 'limit' &&
+      matchResult.filledBase <= 0n &&
+      !externalRestingOrderId &&
+      externalFallbackAttempted &&
+      externalFallbackError
+    ) {
+      await conn.rollback();
+      return next({
+        status: 502,
+        code: 'BINANCE_LIMIT_ROUTE_FAILED',
+        message: `Primary external routing failed: ${externalFallbackError.message || 'unknown error'}`,
       });
     }
 

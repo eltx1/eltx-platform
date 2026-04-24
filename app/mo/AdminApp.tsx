@@ -340,6 +340,9 @@ type MarketMakerSettings = {
   pairs: string[];
   target_base_pct: number;
   binance_liquidity_enabled: boolean;
+  spot_external_execution_enabled?: boolean;
+  spot_liquidity_provider?: 'binance' | 'internal';
+  spot_external_execution_mode?: 'primary' | 'fallback';
 };
 
 type P2PPaymentMethod = {
@@ -5165,6 +5168,8 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
   const [makerForm, setMakerForm] = useState({
     enabled: false,
     binanceLiquidityEnabled: false,
+    spotLiquidityProvider: 'binance' as 'binance' | 'internal',
+    spotExecutionMode: 'primary' as 'primary' | 'fallback',
     spreadPct: '2.00',
     refreshMinutes: '30',
     userEmail: 'info.eltx@gmail.com',
@@ -5190,6 +5195,8 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       setMakerForm({
         enabled: !!makerRes.data.settings.enabled,
         binanceLiquidityEnabled: !!makerRes.data.settings.binance_liquidity_enabled,
+        spotLiquidityProvider: makerRes.data.settings.spot_liquidity_provider === 'internal' ? 'internal' : 'binance',
+        spotExecutionMode: makerRes.data.settings.spot_external_execution_mode === 'fallback' ? 'fallback' : 'primary',
         spreadPct: (makerRes.data.settings.spread_bps / 100).toFixed(2),
         refreshMinutes: makerRes.data.settings.refresh_minutes.toString(),
         userEmail: makerRes.data.settings.user_email,
@@ -5337,6 +5344,9 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     const payload = {
       enabled: makerForm.enabled,
       binance_liquidity_enabled: makerForm.binanceLiquidityEnabled,
+      spot_external_execution_enabled: makerForm.binanceLiquidityEnabled,
+      spot_liquidity_provider: makerForm.spotLiquidityProvider,
+      spot_external_execution_mode: makerForm.spotExecutionMode,
       spread_bps: Math.round(spread * 100),
       refresh_minutes: Math.round(refresh),
       user_email: makerForm.userEmail.trim(),
@@ -5355,6 +5365,8 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       setMakerForm({
         enabled: !!res.data.settings.enabled,
         binanceLiquidityEnabled: !!res.data.settings.binance_liquidity_enabled,
+        spotLiquidityProvider: res.data.settings.spot_liquidity_provider === 'internal' ? 'internal' : 'binance',
+        spotExecutionMode: res.data.settings.spot_external_execution_mode === 'fallback' ? 'fallback' : 'primary',
         spreadPct: (res.data.settings.spread_bps / 100).toFixed(2),
         refreshMinutes: res.data.settings.refresh_minutes.toString(),
         userEmail: res.data.settings.user_email,
@@ -5532,6 +5544,38 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                 />
                 Enable Binance liquidity bridge
               </label>
+              <div>
+                <label className="text-xs uppercase text-white/60">Spot liquidity provider</label>
+                <select
+                  value={makerForm.spotLiquidityProvider}
+                  onChange={(e) =>
+                    setMakerForm((prev) => ({
+                      ...prev,
+                      spotLiquidityProvider: e.target.value === 'internal' ? 'internal' : 'binance',
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="binance">Binance</option>
+                  <option value="internal">Internal Orderbook Only</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">External execution mode</label>
+                <select
+                  value={makerForm.spotExecutionMode}
+                  onChange={(e) =>
+                    setMakerForm((prev) => ({
+                      ...prev,
+                      spotExecutionMode: e.target.value === 'fallback' ? 'fallback' : 'primary',
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="primary">Primary (always route to Binance)</option>
+                  <option value="fallback">Fallback (internal first, Binance second)</option>
+                </select>
+              </div>
 
               <div>
                 <label className="text-xs uppercase text-white/60">Spread (%)</label>
