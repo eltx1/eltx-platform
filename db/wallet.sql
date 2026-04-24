@@ -804,4 +804,13 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_pairs',
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('market_maker_target_base_pct', '50');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_enabled', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_spread_bps', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_external_execution_enabled', '0');
+INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_liquidity_provider', 'binance');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('seo_settings_json', '{"sitemapRefreshHours":3,"indexNowEnabled":false,"indexNowKey":"","indexNowKeyLocation":"/indexnow-key.txt","includeRssInSitemap":true,"postPublishPingEnabled":false,"postPublishPingUrls":["https://rpc.pingomatic.com/"]}');
+
+-- Re-enable market orders by default (can still be disabled per market from admin)
+UPDATE spot_markets
+   SET allow_market_orders = 1,
+       updated_at = NOW()
+ WHERE active = 1
+   AND COALESCE(allow_market_orders, 0) = 0;
