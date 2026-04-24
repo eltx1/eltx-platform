@@ -11136,7 +11136,22 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       timeInForce,
     };
 
-    const matchResult = await matchSpotOrder(conn, market, taker);
+    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
+    const shouldPreferExternal = shouldExternalFallback && liquidityState.mode === 'primary';
+    const matchResult = shouldPreferExternal
+      ? {
+          filledBase: 0n,
+          spentQuote: 0n,
+          receivedQuote: 0n,
+          receivedBase: 0n,
+          takerFee: 0n,
+          trades: [],
+          averagePriceWei: 0n,
+        }
+      : await matchSpotOrder(conn, market, taker);
+    console.info(
+      `[spot] execution plan: market=${market.symbol} orderType=${type} tif=${timeInForce} provider=${liquidityState.provider} externalEnabled=${liquidityState.enabled} mode=${liquidityState.mode} preferExternal=${shouldPreferExternal}`
+    );
     const marketMakerUserRow =
       marketMakerSettings.user_email
         ? (await conn.query('SELECT id FROM users WHERE email=? LIMIT 1', [marketMakerSettings.user_email]))[0]?.[0]
@@ -11144,7 +11159,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const marketMakerUserId = marketMakerUserRow ? Number(marketMakerUserRow.id) : null;
 
     const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
-    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
     let externalRestingOrderId = null;
@@ -11337,6 +11351,21 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         status: 502,
         code: 'BINANCE_EXECUTION_FAILED',
         message: `External liquidity execution failed: ${externalFallbackError.message || 'unknown error'}`,
+      });
+    }
+    if (
+      liquidityState.mode === 'primary' &&
+      type === 'limit' &&
+      matchResult.filledBase <= 0n &&
+      !externalRestingOrderId &&
+      externalFallbackAttempted &&
+      externalFallbackError
+    ) {
+      await conn.rollback();
+      return next({
+        status: 502,
+        code: 'BINANCE_LIMIT_ROUTE_FAILED',
+        message: `Primary external routing failed: ${externalFallbackError.message || 'unknown error'}`,
       });
     }
 
