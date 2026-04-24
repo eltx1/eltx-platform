@@ -3151,14 +3151,13 @@ async function executeBinanceMarketOrder(marketRow, side, { quantityWei, quoteOr
   if (side === 'buy') {
     if (quoteOrderQtyWei && quoteOrderQtyWei > 0n) {
       const quoteRaw = trimDecimal(formatUnitsStr(quoteOrderQtyWei.toString(), marketRow.quote_decimals));
+      let quoteOrderQty = quoteRaw;
       if (filters?.minNotional) {
         const minNotional = new Decimal(String(filters.minNotional));
         const quoteValue = new Decimal(quoteRaw || '0');
-        if (quoteValue.gt(0) && quoteValue.lt(minNotional)) {
-          throw new Error(`Binance quoteOrderQty below MIN_NOTIONAL (${minNotional.toString()})`);
-        }
+        if (quoteValue.gt(0) && quoteValue.lt(minNotional)) quoteOrderQty = trimDecimal(minNotional.toFixed(18));
       }
-      params.set('quoteOrderQty', quoteRaw);
+      params.set('quoteOrderQty', quoteOrderQty);
     } else if (quantityWei && quantityWei > 0n) {
       const quantityRaw = trimDecimal(formatUnitsStr(quantityWei.toString(), marketRow.base_decimals));
       const quantity = floorToStepDecimal(quantityRaw, filters?.marketLotSizeStep || filters?.lotSizeStep || '0');
@@ -11137,7 +11136,22 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       timeInForce,
     };
 
-    const matchResult = await matchSpotOrder(conn, market, taker);
+    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
+    const shouldPreferExternal = shouldExternalFallback && liquidityState.mode === 'primary';
+    const matchResult = shouldPreferExternal
+      ? {
+          filledBase: 0n,
+          spentQuote: 0n,
+          receivedQuote: 0n,
+          receivedBase: 0n,
+          takerFee: 0n,
+          trades: [],
+          averagePriceWei: 0n,
+        }
+      : await matchSpotOrder(conn, market, taker);
+    console.info(
+      `[spot] execution plan: market=${market.symbol} orderType=${type} tif=${timeInForce} provider=${liquidityState.provider} externalEnabled=${liquidityState.enabled} mode=${liquidityState.mode} preferExternal=${shouldPreferExternal}`
+    );
     const marketMakerUserRow =
       marketMakerSettings.user_email
         ? (await conn.query('SELECT id FROM users WHERE email=? LIMIT 1', [marketMakerSettings.user_email]))[0]?.[0]
@@ -11145,7 +11159,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const marketMakerUserId = marketMakerUserRow ? Number(marketMakerUserRow.id) : null;
 
     const isImmediateOrCancel = type === 'market' || timeInForce !== 'gtc';
-    const shouldExternalFallback = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
     let externalFallbackAttempted = false;
     let externalFallbackError = null;
     let externalRestingOrderId = null;
@@ -11156,6 +11169,15 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         console.info(
           `[spot] external fallback start: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} remainingBaseWei=${taker.remainingBase.toString()} spreadBps=${liquidityState.spreadBps} mode=${liquidityState.mockMode ? 'mock' : 'live'}`
         );
+        const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
+        const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
+        const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
+        const externalPlan = estimateExternalFillFromDepth(levels, {
+          side,
+          maxBaseWei: taker.remainingBase,
+          takerFeeBps,
+          limitPriceWei: type === 'limit' ? priceWei : 0n,
+        });
         if (type === 'limit') {
           let executedBase = 0n;
           const externalLimitOrder = await executeBinanceLimitOrder(market, side, {
@@ -11233,17 +11255,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
               `[spot] external fallback filled: orderId=${orderId} executedBaseWei=${executedBase.toString()} externalOrderId=${externalLimitOrder.externalOrderId || 'n/a'} status=${externalLimitOrder.status || 'UNKNOWN'}`
             );
           }
-        } else {
-          const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
-          const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
-          const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
-          const externalPlan = estimateExternalFillFromDepth(levels, {
-            side,
-            maxBaseWei: taker.remainingBase,
-            takerFeeBps,
-            limitPriceWei: 0n,
-          });
-          if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
+        } else if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
           const externalOrder = await executeBinanceMarketOrder(market, side, {
             quantityWei: externalPlan.filledBaseWei,
             quoteOrderQtyWei: side === 'buy' ? externalPlan.quoteWithoutFeeWei : 0n,
@@ -11309,11 +11321,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           console.info(
             `[spot] external fallback filled: orderId=${orderId} tradeId=${tradeId} executedBaseWei=${externalBase.toString()} executedQuoteWei=${externalQuote.toString()} avgPriceWei=${externalAveragePriceWei.toString()}`
           );
-          } else {
-            console.info(
-              `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
-            );
-          }
+        } else if (type !== 'limit') {
+          console.info(
+            `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
+          );
         }
       } catch (err) {
         externalFallbackError = err;
@@ -11340,6 +11351,21 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         status: 502,
         code: 'BINANCE_EXECUTION_FAILED',
         message: `External liquidity execution failed: ${externalFallbackError.message || 'unknown error'}`,
+      });
+    }
+    if (
+      liquidityState.mode === 'primary' &&
+      type === 'limit' &&
+      matchResult.filledBase <= 0n &&
+      !externalRestingOrderId &&
+      externalFallbackAttempted &&
+      externalFallbackError
+    ) {
+      await conn.rollback();
+      return next({
+        status: 502,
+        code: 'BINANCE_LIMIT_ROUTE_FAILED',
+        message: `Primary external routing failed: ${externalFallbackError.message || 'unknown error'}`,
       });
     }
 
