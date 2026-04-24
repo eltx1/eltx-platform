@@ -49,7 +49,6 @@ const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
 const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 0;
 const DEFAULT_SPOT_EXTERNAL_EXECUTION_ENABLED = DEFAULT_BINANCE_LIQUIDITY_ENABLED;
 const DEFAULT_SPOT_LIQUIDITY_PROVIDER = 'binance';
-const DEFAULT_SPOT_EXTERNAL_EXECUTION_MODE = 'primary';
 const BINANCE_RECV_WINDOW_MS = 5_000;
 const BINANCE_EXCHANGE_INFO_TTL_MS = 60_000;
 const ELTX_SYMBOL = 'ELTX';
@@ -725,7 +724,6 @@ const MarketMakerSettingsSchema = z
     binance_liquidity_spread_bps: z.coerce.number().int().min(0).max(5000).optional(),
     spot_external_execution_enabled: z.boolean().optional(),
     spot_liquidity_provider: z.enum(['binance', 'internal']).optional(),
-    spot_external_execution_mode: z.enum(['primary', 'fallback']).optional(),
   })
   .refine(
     (data) =>
@@ -738,8 +736,7 @@ const MarketMakerSettingsSchema = z
       data.binance_liquidity_enabled !== undefined ||
       data.binance_liquidity_spread_bps !== undefined ||
       data.spot_external_execution_enabled !== undefined ||
-      data.spot_liquidity_provider !== undefined ||
-      data.spot_external_execution_mode !== undefined,
+      data.spot_liquidity_provider !== undefined,
     { message: 'At least one market maker field must be provided' }
   );
 
@@ -2819,11 +2816,6 @@ async function readMarketMakerSettings(conn = pool) {
     DEFAULT_SPOT_LIQUIDITY_PROVIDER,
     conn
   );
-  const executionModeRaw = await getPlatformSettingValue(
-    'spot_external_execution_mode',
-    DEFAULT_SPOT_EXTERNAL_EXECUTION_MODE,
-    conn
-  );
   const binanceSpreadRaw = await getPlatformSettingValue(
     'binance_liquidity_spread_bps',
     DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS.toString(),
@@ -2835,7 +2827,6 @@ async function readMarketMakerSettings(conn = pool) {
   const targetPct = Number.parseInt(targetPctRaw, 10);
   const binanceSpread = Number.parseInt(binanceSpreadRaw, 10);
   const spotLiquidityProvider = String(liquidityProviderRaw || DEFAULT_SPOT_LIQUIDITY_PROVIDER).toLowerCase();
-  const spotExternalExecutionMode = String(executionModeRaw || DEFAULT_SPOT_EXTERNAL_EXECUTION_MODE).toLowerCase();
   const spotExternalExecutionEnabled =
     externalExecutionEnabledRaw === '1' || externalExecutionEnabledRaw?.toLowerCase?.() === 'true';
   return {
@@ -2856,7 +2847,6 @@ async function readMarketMakerSettings(conn = pool) {
       : DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS,
     spot_external_execution_enabled: spotExternalExecutionEnabled,
     spot_liquidity_provider: spotLiquidityProvider === 'internal' ? 'internal' : 'binance',
-    spot_external_execution_mode: spotExternalExecutionMode === 'fallback' ? 'fallback' : 'primary',
   };
 }
 
@@ -2884,13 +2874,6 @@ async function updateMarketMakerSettings(partial) {
   if (partial.spot_liquidity_provider !== undefined)
     tasks.push(
       setPlatformSettingValue('spot_liquidity_provider', partial.spot_liquidity_provider === 'internal' ? 'internal' : 'binance')
-    );
-  if (partial.spot_external_execution_mode !== undefined)
-    tasks.push(
-      setPlatformSettingValue(
-        'spot_external_execution_mode',
-        partial.spot_external_execution_mode === 'fallback' ? 'fallback' : 'primary'
-      )
     );
   if (!tasks.length) return;
   await Promise.all(tasks);
@@ -3075,13 +3058,11 @@ async function readBinanceLiquidityState(conn = pool) {
   const settings = await readMarketMakerSettings(conn);
   const cfg = getBinanceConfig();
   const provider = settings.spot_liquidity_provider === 'internal' ? 'internal' : 'binance';
-  const mode = settings.spot_external_execution_mode === 'fallback' ? 'fallback' : 'primary';
   const externalExecutionEnabled = !!settings.spot_external_execution_enabled;
   const enabled = externalExecutionEnabled && provider === 'binance';
   return {
     enabled,
     provider,
-    mode,
     externalExecutionEnabled,
     spreadBps: Number(settings.binance_liquidity_spread_bps || 0),
     configured: cfg.configured,
@@ -10965,14 +10946,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     }
     const liquidityState = await readBinanceLiquidityState(conn);
     const canRouteMarketExternally = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
-    if (liquidityState.enabled && liquidityState.mode === 'primary' && !canRouteMarketExternally) {
-      await conn.rollback();
-      return next({
-        status: 503,
-        code: 'EXTERNAL_LIQUIDITY_UNAVAILABLE',
-        message: 'External liquidity is enabled but Binance is not configured',
-      });
-    }
     if (type === 'market' && market.allow_market_orders === 0 && !canRouteMarketExternally) {
       await conn.rollback();
       return next({ status: 400, code: 'MARKET_ORDER_DISABLED', message: 'Market orders disabled for this market' });

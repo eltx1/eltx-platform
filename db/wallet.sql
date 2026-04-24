@@ -806,7 +806,6 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_en
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('binance_liquidity_spread_bps', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_external_execution_enabled', '0');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_liquidity_provider', 'binance');
-INSERT IGNORE INTO platform_settings (name, value) VALUES ('spot_external_execution_mode', 'primary');
 INSERT IGNORE INTO platform_settings (name, value) VALUES ('seo_settings_json', '{"sitemapRefreshHours":3,"indexNowEnabled":false,"indexNowKey":"","indexNowKeyLocation":"/indexnow-key.txt","includeRssInSitemap":true,"postPublishPingEnabled":false,"postPublishPingUrls":["https://rpc.pingomatic.com/"]}');
 
 -- Re-enable market orders by default (can still be disabled per market from admin)
