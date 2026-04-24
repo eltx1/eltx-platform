@@ -11,14 +11,12 @@ export default function MobileMenu({
   open,
   setOpen,
   links,
-  publicLinks,
   user,
   logout,
 }: {
   open: boolean;
   setOpen: Dispatch<SetStateAction<boolean>>;
   links: NavLink[];
-  publicLinks: NavLink[];
   user: any;
   logout: () => Promise<void>;
 }) {
@@ -60,16 +58,6 @@ export default function MobileMenu({
             {l.label}
           </Link>
         ))}
-        <div className="mt-2 rounded-2xl border border-[#2f3336] bg-[#111216]/80 p-3">
-          <p className="px-2 pb-2 text-[10px] uppercase tracking-[0.2em] text-white/50">{t.nav.explore}</p>
-          <div className="flex flex-col gap-1">
-            {publicLinks.map((l) => (
-              <Link key={l.href} href={l.href} onClick={() => setOpen(false)} className="rounded-full px-3 py-2 text-sm text-white/80 hover:bg-white/10 hover:text-white">
-                {l.label}
-              </Link>
-            ))}
-          </div>
-        </div>
         {!user && (
           <>
             <Link href="/login" onClick={() => setOpen(false)} className="rounded-full px-3 py-2 hover:bg-white/10">

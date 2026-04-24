@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../lib/auth';
@@ -24,7 +24,6 @@ import {
   Bot,
   CircleDollarSign,
   Compass,
-  ChevronDown,
 } from 'lucide-react';
 import SectionCard from '../../../components/dashboard/SectionCard';
 import { dict, useLang } from '../../lib/i18n';
@@ -58,7 +57,6 @@ export default function DashboardPage() {
   const { lang } = useLang();
   const t = dict[lang];
   const toast = useToast();
-  const shortcutsRef = useRef<HTMLElement | null>(null);
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [quickPost, setQuickPost] = useState('');
   const [aiQuestion, setAiQuestion] = useState('');
@@ -128,14 +126,10 @@ export default function DashboardPage() {
     };
   }, [posts, feedSettings]);
 
-  const scrollToShortcuts = () => {
-    shortcutsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
-
   return (
     <div className="space-y-2">
       <PageAdInject placement="dashboard" />
-      <div className="grid gap-2 lg:grid-cols-[220px,minmax(0,1fr),290px] lg:items-start">
+      <div className="grid gap-2 lg:grid-cols-[260px,minmax(0,1fr)] lg:items-start">
         <aside className="x-card space-y-2 p-2 lg:sticky lg:top-20">
           <div className="grid grid-cols-3 gap-1.5">
             <SectionCard title={lang === 'ar' ? 'اكسبلور' : 'Explore'} href="/for-you" icon={Compass} compact />
@@ -154,6 +148,24 @@ export default function DashboardPage() {
             <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[#f4deae]"><Bot className="h-3 w-3" /> {lang === 'ar' ? 'اسأل LordAI 🤖' : 'Ask LordAI 🤖'}</p>
             <p className="mt-1 text-[10px] leading-4 text-white/70">{lang === 'ar' ? 'مساعد سريع للأفكار، الإجابات، وتحسين المحتوى.' : 'Fast help for ideas, answers, and content polish.'}</p>
           </button>
+          <section id="dashboard-shortcuts" className="x-card space-y-2 p-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
+            <div className="grid grid-cols-3 gap-1.5">
+              <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} compact />
+              <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} compact />
+              <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} compact />
+              <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} compact />
+              <SectionCard title="Staking" href="/staking" icon={Coins} compact />
+              <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} compact />
+              <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} compact />
+              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
+              <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
+              <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} compact />
+              <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} compact />
+              <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} compact />
+              <SectionCard title={t.dashboard.cards.kyc.title} href="/kyc" icon={ShieldCheck} compact />
+            </div>
+          </section>
         </aside>
 
         <main className="space-y-2">
@@ -303,36 +315,6 @@ export default function DashboardPage() {
           </section>
         </main>
 
-        <aside ref={shortcutsRef} className="space-y-2 lg:sticky lg:top-20">
-          <section id="dashboard-shortcuts" className="x-card space-y-2 p-2">
-            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
-            <div className="grid grid-cols-3 gap-1.5">
-              <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} compact />
-              <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} compact />
-              <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} compact />
-              <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} compact />
-              <SectionCard title="Staking" href="/staking" icon={Coins} compact />
-              <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} compact />
-              <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} compact />
-              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
-              <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
-              <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} compact />
-              <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} compact />
-              <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} compact />
-              <SectionCard title={t.dashboard.cards.kyc.title} href="/kyc" icon={ShieldCheck} compact />
-              <button
-                type="button"
-                onClick={scrollToShortcuts}
-                className="group relative flex items-center gap-1.5 rounded-xl border border-[#2f3336] bg-black px-1.5 py-1.5 text-left shadow-sm transition hover:border-[#c9a75c]/60 hover:bg-[#16181c]"
-              >
-                <div className="flex h-6 w-6 items-center justify-center rounded-full border border-[#2f3336] bg-[#16181c] text-white transition group-hover:border-[#c9a75c]/70">
-                  <ChevronDown className="h-3 w-3" />
-                </div>
-                <span className="truncate text-[0.72rem] font-semibold leading-tight text-white">{lang === 'ar' ? 'المزيد..' : 'More..'}</span>
-              </button>
-            </div>
-          </section>
-        </aside>
       </div>
 
       <button

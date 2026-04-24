@@ -894,7 +894,6 @@ function SpotTradePageContent() {
 
       <div className="space-y-1.5">
         <h1 className="text-lg font-semibold">{t.spotTrade.title}</h1>
-        <p className="text-xs text-white/70">{t.spotTrade.subtitle}</p>
       </div>
 
       {errorBanner && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/40 rounded p-2.5">{errorBanner}</div>}
@@ -935,14 +934,12 @@ function SpotTradePageContent() {
                     {changePercentLabel}%
                   </span>
                 )}
-                <span
-                  className={`flex items-center gap-1 rounded-full px-2 py-1 border ${
-                    streamConnected ? 'border-[#0ecb81]/40 bg-[#0ecb81]/10 text-[#0ecb81]' : 'border-amber-400/40 bg-amber-500/10 text-amber-100'
-                  }`}
-                >
-                  <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
-                  {streamConnected ? t.trade.liveRate : t.trade.loading}
-                </span>
+                {streamConnected && (
+                  <span className="flex items-center gap-1 rounded-full px-2 py-1 border border-[#0ecb81]/40 bg-[#0ecb81]/10 text-[#0ecb81]">
+                    <span className="h-2 w-2 rounded-full bg-current animate-pulse" />
+                    {t.trade.liveRate}
+                  </span>
+                )}
               </div>
             </div>
 
