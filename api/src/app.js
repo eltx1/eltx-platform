@@ -1156,6 +1156,23 @@ function bigIntFromValue(val) {
   }
 }
 
+function convertDecimals(amountWei, fromDecimals, toDecimals, rounding = 'floor') {
+  const amount = bigIntFromValue(amountWei);
+  const from = Number(fromDecimals || 0);
+  const to = Number(toDecimals || 0);
+  if (amount <= 0n) return 0n;
+  if (from === to) return amount;
+  if (from < to) {
+    const factor = 10n ** BigInt(to - from);
+    return amount * factor;
+  }
+  const factor = 10n ** BigInt(from - to);
+  if (rounding === 'ceil') {
+    return (amount + factor - 1n) / factor;
+  }
+  return amount / factor;
+}
+
 function decimalToWeiString(amount, decimals) {
   try {
     const decimalValue = new Decimal(amount);
@@ -11252,13 +11269,17 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const topOfBook = await getSpotTopOfBook(conn, market.id, { forUpdate: true });
 
     let quoteBalance = 0n;
+    let quoteBalanceLedger = 0n;
+    let quoteLedgerDecimals = quoteDecimals;
     let baseBalance = 0n;
     if (side === 'buy') {
       const [rows] = await conn.query(
         'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
         [userId, quoteAsset]
       );
-      quoteBalance = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+      quoteBalanceLedger = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+      quoteLedgerDecimals = resolveStablecoinLedgerDecimals(quoteAsset, quoteBalanceLedger);
+      quoteBalance = convertDecimals(quoteBalanceLedger, quoteLedgerDecimals, quoteDecimals);
     } else {
       const [rows] = await conn.query(
         'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
@@ -11279,8 +11300,9 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           await conn.rollback();
           return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
         }
+        const reservedQuoteLedger = convertDecimals(reservedQuote, quoteDecimals, quoteLedgerDecimals, 'ceil');
         await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-          reservedQuote.toString(),
+          reservedQuoteLedger.toString(),
           userId,
           quoteAsset,
         ]);
