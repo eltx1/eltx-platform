@@ -158,8 +158,6 @@ export default function DashboardPage() {
               <SectionCard title="Staking" href="/staking" icon={Coins} compact />
               <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} compact />
               <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} compact />
-              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
-              <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
               <SectionCard title={t.dashboard.cards.settings.title} href="/settings" icon={Settings} compact />
               <SectionCard title={t.dashboard.cards.faq.title} href="/faq" icon={HelpCircle} compact />
               <SectionCard title={t.dashboard.cards.support.title} href="/support" icon={LifeBuoy} compact />

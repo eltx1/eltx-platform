@@ -205,11 +205,11 @@ export default function WalletPage() {
   if (error) return <div className="p-4">{error}</div>;
   if (wallets.length === 0) return <div className="p-4">Loading...</div>;
 
-  const eltxAsset = assets.find((a) => (a.symbol || '').toUpperCase() === 'ELTX');
-  const eltxBalanceFormatted = eltxAsset
-    ? eltxAsset.balance || formatWei(eltxAsset.balance_wei, eltxAsset.decimals)
+  const usdtAsset = assets.find((a) => (a.symbol || '').toUpperCase() === 'USDT');
+  const usdtBalanceFormatted = usdtAsset
+    ? usdtAsset.balance || formatWei(usdtAsset.balance_wei, usdtAsset.decimals)
     : '0';
-  const hasEltxBalance = eltxAsset ? Number(eltxBalanceFormatted) > 0 : false;
+  const hasUsdtBalance = usdtAsset ? Number(usdtBalanceFormatted) > 0 : false;
 
   const statusLabel = (s: string) => {
     if (s === 'seen') return t.wallet.table.status.pending;
@@ -225,10 +225,10 @@ export default function WalletPage() {
       <PageAdInject placement="wallet" />
       <h1 className="text-xl font-semibold">{t.wallet.title}</h1>
       <PageAdSlot placement="wallet" />
-      {hasEltxBalance && (
+      {hasUsdtBalance && (
         <div className="p-4 rounded-2xl bg-white/5">
           <div className="text-sm opacity-80">{lang === 'ar' ? 'رصيد USDT' : 'USDT Balance'}</div>
-          <div className="text-2xl font-bold">{eltxBalanceFormatted}</div>
+          <div className="text-2xl font-bold">{usdtBalanceFormatted}</div>
         </div>
       )}
       {user && (
