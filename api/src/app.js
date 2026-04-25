@@ -3952,10 +3952,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
     ]);
 
     if (oppositeSide === 'sell') {
-      await conn.query(
-        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-        [maker.user_id, market.quote_asset, makerNetQuote.toString()]
-      );
+      await creditUserBalanceWithDecimals(conn, maker.user_id, market.quote_asset, makerNetQuote, market.quote_decimals);
     } else {
       await conn.query(
         'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
@@ -3963,10 +3960,7 @@ async function matchSpotOrder(conn, market, taker, { feeType = 'spot' } = {}) {
       );
     }
     if (refundQuote > 0n) {
-      await conn.query(
-        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-        [maker.user_id, market.quote_asset, refundQuote.toString()]
-      );
+      await creditUserBalanceWithDecimals(conn, maker.user_id, market.quote_asset, refundQuote, market.quote_decimals);
     }
 
     const buyOrderId = taker.side === 'buy' ? taker.id : maker.id;
@@ -5465,6 +5459,32 @@ function resolveStablecoinLedgerDecimals(symbol, balanceWei, preferredDecimals =
   const upgradeFactor = 10n ** BigInt(canonicalDecimals - LEGACY_STABLECOIN_DECIMALS);
   if (value > 0n && value < upgradeFactor) return LEGACY_STABLECOIN_DECIMALS;
   return canonicalDecimals;
+}
+
+async function resolveUserAssetLedgerDecimals(conn, userId, asset, preferredDecimals) {
+  const normalizedAsset = String(asset || '').toUpperCase();
+  if (!normalizedAsset) return normalizeDecimals(preferredDecimals, 18);
+  if (normalizedAsset !== 'USDT') return normalizeDecimals(preferredDecimals, getSymbolDecimals(normalizedAsset));
+  const [rows] = await conn.query(
+    'SELECT COALESCE(SUM(balance_wei), 0) AS balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=?',
+    [userId, normalizedAsset]
+  );
+  const balanceWei = rows.length ? bigIntFromValue(rows[0].balance_wei || 0) : 0n;
+  return resolveStablecoinLedgerDecimals(normalizedAsset, balanceWei, preferredDecimals);
+}
+
+async function creditUserBalanceWithDecimals(conn, userId, asset, amountWei, amountDecimals, rounding = 'floor') {
+  const amount = bigIntFromValue(amountWei);
+  if (amount <= 0n) return 0n;
+  const preferredDecimals = normalizeDecimals(amountDecimals, getSymbolDecimals(asset));
+  const ledgerDecimals = await resolveUserAssetLedgerDecimals(conn, userId, asset, preferredDecimals);
+  const ledgerAmountWei = convertDecimals(amount, preferredDecimals, ledgerDecimals, rounding);
+  if (ledgerAmountWei <= 0n) return 0n;
+  await conn.query(
+    'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+    [userId, asset, ledgerAmountWei.toString()]
+  );
+  return ledgerAmountWei;
 }
 
 function isRetryableTransactionError(err) {
@@ -11296,6 +11316,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     let reservedQuote = 0n;
     let marketBuyReservedQuote = 0n;
+    let marketBuyReservedQuoteLedger = 0n;
     let availableQuote = quoteBalance;
     if (side === 'buy') {
       if (type === 'limit') {
@@ -11319,11 +11340,12 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
         }
         await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-          quoteBalance.toString(),
+          quoteBalanceLedger.toString(),
           userId,
           quoteAsset,
         ]);
         marketBuyReservedQuote = quoteBalance;
+        marketBuyReservedQuoteLedger = quoteBalanceLedger;
         availableQuote = quoteBalance;
       }
     } else {
@@ -11765,17 +11787,25 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         }
         const marketBuyRefund = marketBuyReservedQuote > matchResult.spentQuote ? marketBuyReservedQuote - matchResult.spentQuote : 0n;
         if (marketBuyRefund > 0n) {
-          await conn.query(
-            'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-            [userId, quoteAsset, marketBuyRefund.toString()]
-          );
+          const spentQuoteLedger = convertDecimals(matchResult.spentQuote, quoteDecimals, quoteLedgerDecimals, 'ceil');
+          const marketBuyRefundLedger =
+            marketBuyReservedQuoteLedger > spentQuoteLedger ? marketBuyReservedQuoteLedger - spentQuoteLedger : 0n;
+          if (marketBuyRefundLedger > 0n) {
+            await conn.query(
+              'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+              [userId, quoteAsset, marketBuyRefundLedger.toString()]
+            );
+          }
         }
         remainingQuote = 0n;
       } else if (orderStatus !== 'open' && remainingQuote > 0n) {
-        await conn.query(
-          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-          [userId, quoteAsset, remainingQuote.toString()]
-        );
+        const remainingQuoteLedger = convertDecimals(remainingQuote, quoteDecimals, quoteLedgerDecimals, 'floor');
+        if (remainingQuoteLedger > 0n) {
+          await conn.query(
+            'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+            [userId, quoteAsset, remainingQuoteLedger.toString()]
+          );
+        }
         remainingQuote = 0n;
       }
     } else {
@@ -11787,10 +11817,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         );
       }
       if (matchResult.receivedQuote > 0n) {
-        await conn.query(
-          'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-          [userId, quoteAsset, matchResult.receivedQuote.toString()]
-        );
+        await creditUserBalanceWithDecimals(conn, userId, quoteAsset, matchResult.receivedQuote, quoteDecimals);
       }
       quoteAmountRecord = matchResult.receivedQuote + matchResult.takerFee;
     }
@@ -11901,10 +11928,7 @@ app.post('/spot/orders/:id/cancel', walletLimiter, async (req, res, next) => {
     const remainingQuote = bigIntFromValue(order.remaining_quote_wei);
 
     if (order.side === 'buy' && remainingQuote > 0n) {
-      await conn.query(
-        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-        [userId, quoteAsset, remainingQuote.toString()]
-      );
+      await creditUserBalanceWithDecimals(conn, userId, quoteAsset, remainingQuote, order.quote_decimals);
     }
     if (order.side === 'sell' && remainingBase > 0n) {
       await conn.query(
