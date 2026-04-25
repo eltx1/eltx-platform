@@ -117,6 +117,7 @@ type SpotStreamMessage =
 
 const MARKET_PRIORITY = ['BTC/USDT', 'ETH/USDT', 'WBTC/USDT', 'BNB/USDT', 'SOL/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB', 'ELTX/USDT'];
 const STREAM_TRADE_LIMIT = 50;
+const MIN_SPOT_ORDER_VALUE_USDT = new Decimal(5);
 
 function normalizeStreamTrades(trades: OrderbookResponse['trades']): OrderbookResponse['trades'] {
   return trades.slice(0, STREAM_TRADE_LIMIT);
@@ -523,6 +524,12 @@ function SpotTradePageContent() {
     return totalForDisplay.mul(rate);
   }, [totalForDisplay, formType, takerFeeRate, makerFeeRate]);
 
+  const minOrderQuoteValue = useMemo(() => {
+    if (!selectedMarketMeta) return null;
+    const marketMinQuote = safeDecimal(selectedMarketMeta.min_quote_amount);
+    return Decimal.max(MIN_SPOT_ORDER_VALUE_USDT, marketMinQuote);
+  }, [selectedMarketMeta]);
+
   const validation = useMemo<ValidationState>(() => {
     if (!selectedMarketMeta) return { valid: false, message: null };
     if (formType === 'market' && !marketAllowsMarketOrders)
@@ -561,6 +568,13 @@ function SpotTradePageContent() {
       }
 
       const total = priceDecimal.mul(amountDecimal);
+      if (minOrderQuoteValue && total.lt(minOrderQuoteValue))
+        return {
+          valid: false,
+          message: t.spotTrade.errors.minOrderValue
+            .replace('{min}', trimDecimal(minOrderQuoteValue.toFixed(Math.max(2, quoteDecimals))))
+            .replace('{asset}', quoteSymbol || 'USDT'),
+        };
       if (formSide === 'buy') {
         const required = total.plus(total.mul(makerFeeRate));
         if (availableQuote.lt(required))
@@ -569,6 +583,13 @@ function SpotTradePageContent() {
     } else {
       if (!marketEstimation || !marketEstimation.hasLiquidity || marketEstimation.filled.lt(amountDecimal))
         return { valid: false, message: t.spotTrade.errors.insufficientLiquidity };
+      if (minOrderQuoteValue && marketEstimation.totalQuote.lt(minOrderQuoteValue))
+        return {
+          valid: false,
+          message: t.spotTrade.errors.minOrderValue
+            .replace('{min}', trimDecimal(minOrderQuoteValue.toFixed(Math.max(2, quoteDecimals))))
+            .replace('{asset}', quoteSymbol || 'USDT'),
+        };
       if (formSide === 'buy') {
         if (availableQuote.lt(marketEstimation.totalQuote))
           return { valid: false, message: t.spotTrade.errors.insufficientBalance };
@@ -602,9 +623,12 @@ function SpotTradePageContent() {
     makerFeeRate,
     marketEstimation,
     marketAllowsMarketOrders,
+    minOrderQuoteValue,
     price,
     priceDecimal,
     pricePrecision,
+    quoteDecimals,
+    quoteSymbol,
     selectedMarketMeta,
     slippageFraction,
     t.spotTrade.errors,
@@ -631,6 +655,10 @@ function SpotTradePageContent() {
           return t.spotTrade.errors.insufficientLiquidity;
         case 'MARKET_ORDER_DISABLED':
           return t.spotTrade.errors.marketOrderDisabled;
+        case 'MIN_ORDER_VALUE':
+          return t.spotTrade.errors.minOrderValue
+            .replace('{min}', trimDecimal(MIN_SPOT_ORDER_VALUE_USDT.toFixed(2)))
+            .replace('{asset}', 'USDT');
         case 'SLIPPAGE_EXCEEDED':
           return t.spotTrade.errors.slippageExceeded;
         case 'PRICE_DEVIATION_EXCEEDED':
@@ -655,6 +683,7 @@ function SpotTradePageContent() {
       t.spotTrade.errors.invalidPrice,
       t.spotTrade.errors.marketNotFound,
       t.spotTrade.errors.marketOrderDisabled,
+      t.spotTrade.errors.minOrderValue,
       t.spotTrade.errors.orderNotFound,
       t.spotTrade.errors.orderNotOpen,
       t.spotTrade.errors.priceDeviationExceeded,

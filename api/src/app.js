@@ -49,6 +49,7 @@ const DEFAULT_BINANCE_LIQUIDITY_ENABLED = false;
 const DEFAULT_BINANCE_LIQUIDITY_SPREAD_BPS = 0;
 const DEFAULT_SPOT_EXTERNAL_EXECUTION_ENABLED = DEFAULT_BINANCE_LIQUIDITY_ENABLED;
 const DEFAULT_SPOT_LIQUIDITY_PROVIDER = 'binance';
+const MIN_SPOT_ORDER_VALUE_USDT = '5';
 const BINANCE_RECV_WINDOW_MS = 5_000;
 const BINANCE_EXCHANGE_INFO_TTL_MS = 60_000;
 const ELTX_SYMBOL = 'ELTX';
@@ -10298,6 +10299,15 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
 
     const assetDecimals = Number(market.quote_decimals || getSymbolDecimals(asset));
     const targetDecimals = Number(market.base_decimals || getSymbolDecimals(ELTX_SYMBOL));
+    const baseAsset = market.base_asset;
+    const quoteAsset = market.quote_asset;
+    const minQuoteFromMarketWei =
+      market.min_quote_amount && !isZeroDecimal(market.min_quote_amount)
+        ? ethers.parseUnits(market.min_quote_amount.toString(), quoteDecimals)
+        : 0n;
+    const hardMinQuoteWei = quoteAsset.toUpperCase() === 'USDT' ? ethers.parseUnits(MIN_SPOT_ORDER_VALUE_USDT, quoteDecimals) : 0n;
+    const minQuoteWei = hardMinQuoteWei > minQuoteFromMarketWei ? hardMinQuoteWei : minQuoteFromMarketWei;
+
     let amountWei;
     try {
       amountWei = ethers.parseUnits(amount, assetDecimals);
@@ -11163,6 +11173,14 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     const baseDecimals = market.base_decimals;
     const quoteDecimals = market.quote_decimals;
+    const baseAsset = market.base_asset;
+    const quoteAsset = market.quote_asset;
+    const minQuoteFromMarketWei =
+      market.min_quote_amount && !isZeroDecimal(market.min_quote_amount)
+        ? ethers.parseUnits(market.min_quote_amount.toString(), quoteDecimals)
+        : 0n;
+    const hardMinQuoteWei = quoteAsset.toUpperCase() === 'USDT' ? ethers.parseUnits(MIN_SPOT_ORDER_VALUE_USDT, quoteDecimals) : 0n;
+    const minQuoteWei = hardMinQuoteWei > minQuoteFromMarketWei ? hardMinQuoteWei : minQuoteFromMarketWei;
     let amountWei;
     try {
       amountWei = ethers.parseUnits(amount, baseDecimals);
@@ -11199,6 +11217,11 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         await conn.rollback();
         return next({ status: 400, code: 'INVALID_PRICE', message: 'Price must be greater than zero' });
       }
+      const totalQuoteWei = computeQuoteAmount(amountWei, priceWei);
+      if (minQuoteWei > 0n && totalQuoteWei < minQuoteWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'MIN_ORDER_VALUE', message: 'Order value below minimum threshold' });
+      }
     }
 
     const feeSettings = await readSpotFeeBps(conn);
@@ -11207,9 +11230,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const makerFeeBps = clampBps(BigInt(feeSettings.maker || 0));
     const takerFeeBps = clampBps(BigInt(feeSettings.taker || 0));
     const topOfBook = await getSpotTopOfBook(conn, market.id, { forUpdate: true });
-
-    const baseAsset = market.base_asset;
-    const quoteAsset = market.quote_asset;
 
     let quoteBalance = 0n;
     let baseBalance = 0n;
@@ -11292,6 +11312,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       if (bestReferenceForRisk <= 0n || estimate.filledBase <= 0n) {
         await conn.rollback();
         return next({ status: 400, code: 'NO_LIQUIDITY', message: 'Insufficient orderbook liquidity' });
+      }
+      if (minQuoteWei > 0n && estimate.totalQuote < minQuoteWei) {
+        await conn.rollback();
+        return next({ status: 400, code: 'MIN_ORDER_VALUE', message: 'Order value below minimum threshold' });
       }
       if (timeInForce === 'fok' && estimate.filledBase < amountWei) {
         await conn.rollback();
@@ -11586,7 +11610,8 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
       return next({ status: 400, code: 'FOK_INCOMPLETE', message: 'Order could not be fully filled immediately' });
     }
 
-    if (type === 'market' && matchResult.filledBase > 0n) {
+    const hasExternalExecution = matchResult.trades.some((trade) => Boolean(trade.external_liquidity));
+    if (type === 'market' && matchResult.filledBase > 0n && !hasExternalExecution) {
       const averagePriceWei = matchResult.averagePriceWei;
       const referencePrice = bestReferenceForRisk;
       if (!referencePrice || referencePrice <= 0n) {
@@ -11606,6 +11631,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           return next({ status: 400, code: 'PRICE_DEVIATION_EXCEEDED', message: 'Order deviates from reference price' });
         }
       }
+    } else if (type === 'market' && matchResult.filledBase > 0n && hasExternalExecution) {
+      console.info(
+        `[spot] risk post-check skipped for externally executed fill to avoid external/internal divergence: orderId=${orderId} market=${market.symbol}`
+      );
     }
 
     let orderStatus = 'open';
