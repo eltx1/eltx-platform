@@ -3331,11 +3331,16 @@ async function fetchBinanceOrderStatus(marketRow, externalOrderId) {
   };
 }
 
+function isTerminalBinanceOrderStatus(binanceStatus) {
+  const normalized = String(binanceStatus || '').toUpperCase();
+  return ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED'].includes(normalized);
+}
+
 function computeTerminalExternalOrderStatus(binanceStatus, remainingBaseWei) {
   const normalized = String(binanceStatus || '').toUpperCase();
-  const done = ['FILLED', 'CANCELED', 'EXPIRED', 'REJECTED'];
-  if (!done.includes(normalized)) return 'open';
-  if (remainingBaseWei <= 0n || normalized === 'FILLED') return 'filled';
+  if (!isTerminalBinanceOrderStatus(normalized)) return 'open';
+  if (remainingBaseWei <= 0n) return 'filled';
+  if (normalized === 'FILLED') return 'open';
   return 'cancelled';
 }
 
@@ -3416,6 +3421,7 @@ async function syncExternalBoundOrderById(conn, orderId) {
 
   const nextOrderStatus = computeTerminalExternalOrderStatus(external.status, nextRemainingBaseWei);
   const isTerminal = nextOrderStatus !== 'open';
+  const shouldKeepExternalBinding = !isTerminalBinanceOrderStatus(external.status);
   if (isTerminal) {
     if (order.side === 'buy' && nextRemainingQuoteWei > 0n) {
       await conn.query(
@@ -3444,7 +3450,7 @@ async function syncExternalBoundOrderById(conn, orderId) {
       nextOrderStatus,
       quoteAmountForRecordWei.toString(),
       external.status,
-      isTerminal ? 0 : 1,
+      shouldKeepExternalBinding ? 1 : 0,
       order.id,
     ]
   );
@@ -11523,9 +11529,16 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
               });
             }
             const isGtc = timeInForce === 'gtc';
-            if (isGtc && taker.remainingBase > 0n && externalLimitOrder.externalOrderId) {
+            const externalStatus = String(externalLimitOrder.status || 'NEW').toUpperCase();
+            const canRestExternally =
+              isGtc && taker.remainingBase > 0n && externalLimitOrder.externalOrderId && !isTerminalBinanceOrderStatus(externalStatus);
+            if (canRestExternally) {
               externalRestingOrderId = externalLimitOrder.externalOrderId;
-              externalRestingStatus = externalLimitOrder.status || 'NEW';
+              externalRestingStatus = externalStatus;
+            } else if (isGtc && taker.remainingBase > 0n && isTerminalBinanceOrderStatus(externalStatus)) {
+              console.info(
+                `[spot] external limit order completed with local remainder preserved: orderId=${orderId} executedBaseWei=${executedBase.toString()} status=${externalStatus} localRemainingBaseWei=${taker.remainingBase.toString()}`
+              );
             }
             if (executedBase <= 0n && !externalRestingOrderId) {
               console.info(
