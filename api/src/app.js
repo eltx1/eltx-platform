@@ -10298,6 +10298,7 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
       return next({ status: 400, code: 'UNSUPPORTED_ASSET', message: 'Asset not supported for swap' });
 
     const assetDecimals = Number(market.quote_decimals || getSymbolDecimals(asset));
+    const quoteDecimals = assetDecimals;
     const targetDecimals = Number(market.base_decimals || getSymbolDecimals(ELTX_SYMBOL));
     const baseAsset = market.base_asset;
     const quoteAsset = market.quote_asset;
@@ -10317,11 +10318,8 @@ app.post('/trade/quote', walletLimiter, async (req, res, next) => {
     if (amountWei <= 0n)
       return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Amount must be greater than zero' });
 
-    const minQuoteStr = (market.min_quote_amount || '0').toString();
-    if (!isZeroDecimal(minQuoteStr)) {
-      const minWei = ethers.parseUnits(minQuoteStr, assetDecimals);
-      if (amountWei < minWei)
-        return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount below minimum' });
+    if (minQuoteWei > 0n && amountWei < minQuoteWei) {
+      return next({ status: 400, code: 'AMOUNT_TOO_SMALL', message: 'Amount below minimum' });
     }
 
     let swapFeeBps = 0n;
