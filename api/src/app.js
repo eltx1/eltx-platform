@@ -5452,14 +5452,19 @@ async function ensurePlatformFeeBalancesTable() {
   await platformFeeBalancesEnsurePromise;
 }
 
-function resolveStablecoinLedgerDecimals(symbol, balanceWei) {
-  const decimals = getSymbolDecimals(symbol);
-  if (symbol?.toUpperCase() !== 'USDT') return decimals;
-  if (decimals <= LEGACY_STABLECOIN_DECIMALS) return decimals;
+function resolveStablecoinLedgerDecimals(symbol, balanceWei, preferredDecimals = null) {
+  const configuredDecimals = normalizeDecimals(getSymbolDecimals(symbol), 18);
+  const preferred =
+    preferredDecimals === null || preferredDecimals === undefined
+      ? configuredDecimals
+      : normalizeDecimals(preferredDecimals, configuredDecimals);
+  if (symbol?.toUpperCase() !== 'USDT') return preferred;
+  const canonicalDecimals = Math.max(preferred, configuredDecimals, 18);
+  if (canonicalDecimals <= LEGACY_STABLECOIN_DECIMALS) return LEGACY_STABLECOIN_DECIMALS;
   const value = bigIntFromValue(balanceWei || 0);
-  const upgradeFactor = 10n ** BigInt(decimals - LEGACY_STABLECOIN_DECIMALS);
+  const upgradeFactor = 10n ** BigInt(canonicalDecimals - LEGACY_STABLECOIN_DECIMALS);
   if (value > 0n && value < upgradeFactor) return LEGACY_STABLECOIN_DECIMALS;
-  return decimals;
+  return canonicalDecimals;
 }
 
 function isRetryableTransactionError(err) {
@@ -8548,8 +8553,8 @@ app.get('/admin/users/:id', async (req, res, next) => {
     );
     const balances = balancesRows.map((row) => {
       const symbol = (row.asset || '').toUpperCase();
-      const decimals = getSymbolDecimals(symbol);
       const wei = bigIntFromValue(row.balance_wei || 0);
+      const decimals = resolveStablecoinLedgerDecimals(symbol, wei, getSymbolDecimals(symbol));
       return {
         asset: symbol,
         balance_wei: wei.toString(),
@@ -8774,8 +8779,8 @@ app.get('/admin/users/:id/balances', async (req, res, next) => {
     );
     const balances = rows.map((row) => {
       const symbol = (row.asset || '').toUpperCase();
-      const decimals = getSymbolDecimals(symbol);
       const wei = bigIntFromValue(row.balance_wei || 0);
+      const decimals = resolveStablecoinLedgerDecimals(symbol, wei, getSymbolDecimals(symbol));
       return {
         asset: symbol,
         balance_wei: wei.toString(),
@@ -9954,11 +9959,12 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       const sym = (row.asset || '').toUpperCase();
       if (!sym) continue;
       const meta = tokenMetaBySymbol[sym];
-      const decimals = meta ? meta.decimals : getSymbolDecimals(sym);
+      const configuredDecimals = meta ? meta.decimals : getSymbolDecimals(sym);
       const contract = meta ? meta.contract : null;
       const chainId = meta?.chainId ?? DEFAULT_CHAIN_BY_SYMBOL[sym] ?? null;
       const rawWei = row.balance_wei?.toString() || '0';
       const wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
+      const decimals = resolveStablecoinLedgerDecimals(sym, wei, configuredDecimals);
       assets.push({
         symbol: sym,
         display_symbol: sym,
