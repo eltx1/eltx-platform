@@ -1156,6 +1156,23 @@ function bigIntFromValue(val) {
   }
 }
 
+function convertDecimals(amountWei, fromDecimals, toDecimals, rounding = 'floor') {
+  const amount = bigIntFromValue(amountWei);
+  const from = Number(fromDecimals || 0);
+  const to = Number(toDecimals || 0);
+  if (amount <= 0n) return 0n;
+  if (from === to) return amount;
+  if (from < to) {
+    const factor = 10n ** BigInt(to - from);
+    return amount * factor;
+  }
+  const factor = 10n ** BigInt(from - to);
+  if (rounding === 'ceil') {
+    return (amount + factor - 1n) / factor;
+  }
+  return amount / factor;
+}
+
 function decimalToWeiString(amount, decimals) {
   try {
     const decimalValue = new Decimal(amount);
@@ -5435,14 +5452,19 @@ async function ensurePlatformFeeBalancesTable() {
   await platformFeeBalancesEnsurePromise;
 }
 
-function resolveStablecoinLedgerDecimals(symbol, balanceWei) {
-  const decimals = getSymbolDecimals(symbol);
-  if (symbol?.toUpperCase() !== 'USDT') return decimals;
-  if (decimals <= LEGACY_STABLECOIN_DECIMALS) return decimals;
+function resolveStablecoinLedgerDecimals(symbol, balanceWei, preferredDecimals = null) {
+  const configuredDecimals = normalizeDecimals(getSymbolDecimals(symbol), 18);
+  const preferred =
+    preferredDecimals === null || preferredDecimals === undefined
+      ? configuredDecimals
+      : normalizeDecimals(preferredDecimals, configuredDecimals);
+  if (symbol?.toUpperCase() !== 'USDT') return preferred;
+  const canonicalDecimals = Math.max(preferred, configuredDecimals, 18);
+  if (canonicalDecimals <= LEGACY_STABLECOIN_DECIMALS) return LEGACY_STABLECOIN_DECIMALS;
   const value = bigIntFromValue(balanceWei || 0);
-  const upgradeFactor = 10n ** BigInt(decimals - LEGACY_STABLECOIN_DECIMALS);
+  const upgradeFactor = 10n ** BigInt(canonicalDecimals - LEGACY_STABLECOIN_DECIMALS);
   if (value > 0n && value < upgradeFactor) return LEGACY_STABLECOIN_DECIMALS;
-  return decimals;
+  return canonicalDecimals;
 }
 
 function isRetryableTransactionError(err) {
@@ -8531,8 +8553,8 @@ app.get('/admin/users/:id', async (req, res, next) => {
     );
     const balances = balancesRows.map((row) => {
       const symbol = (row.asset || '').toUpperCase();
-      const decimals = getSymbolDecimals(symbol);
       const wei = bigIntFromValue(row.balance_wei || 0);
+      const decimals = resolveStablecoinLedgerDecimals(symbol, wei, getSymbolDecimals(symbol));
       return {
         asset: symbol,
         balance_wei: wei.toString(),
@@ -8757,8 +8779,8 @@ app.get('/admin/users/:id/balances', async (req, res, next) => {
     );
     const balances = rows.map((row) => {
       const symbol = (row.asset || '').toUpperCase();
-      const decimals = getSymbolDecimals(symbol);
       const wei = bigIntFromValue(row.balance_wei || 0);
+      const decimals = resolveStablecoinLedgerDecimals(symbol, wei, getSymbolDecimals(symbol));
       return {
         asset: symbol,
         balance_wei: wei.toString(),
@@ -9937,11 +9959,12 @@ app.get('/wallet/assets', walletLimiter, async (req, res, next) => {
       const sym = (row.asset || '').toUpperCase();
       if (!sym) continue;
       const meta = tokenMetaBySymbol[sym];
-      const decimals = meta ? meta.decimals : getSymbolDecimals(sym);
+      const configuredDecimals = meta ? meta.decimals : getSymbolDecimals(sym);
       const contract = meta ? meta.contract : null;
       const chainId = meta?.chainId ?? DEFAULT_CHAIN_BY_SYMBOL[sym] ?? null;
       const rawWei = row.balance_wei?.toString() || '0';
       const wei = rawWei.includes('.') ? rawWei.split('.')[0] : rawWei;
+      const decimals = resolveStablecoinLedgerDecimals(sym, wei, configuredDecimals);
       assets.push({
         symbol: sym,
         display_symbol: sym,
@@ -11252,13 +11275,17 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     const topOfBook = await getSpotTopOfBook(conn, market.id, { forUpdate: true });
 
     let quoteBalance = 0n;
+    let quoteBalanceLedger = 0n;
+    let quoteLedgerDecimals = quoteDecimals;
     let baseBalance = 0n;
     if (side === 'buy') {
       const [rows] = await conn.query(
         'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
         [userId, quoteAsset]
       );
-      quoteBalance = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+      quoteBalanceLedger = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+      quoteLedgerDecimals = resolveStablecoinLedgerDecimals(quoteAsset, quoteBalanceLedger);
+      quoteBalance = convertDecimals(quoteBalanceLedger, quoteLedgerDecimals, quoteDecimals);
     } else {
       const [rows] = await conn.query(
         'SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE',
@@ -11268,6 +11295,8 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     }
 
     let reservedQuote = 0n;
+    let marketBuyReservedQuote = 0n;
+    let marketBuyReservedQuoteLedger = 0n;
     let availableQuote = quoteBalance;
     if (side === 'buy') {
       if (type === 'limit') {
@@ -11278,8 +11307,9 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           await conn.rollback();
           return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
         }
+        const reservedQuoteLedger = convertDecimals(reservedQuote, quoteDecimals, quoteLedgerDecimals, 'ceil');
         await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-          reservedQuote.toString(),
+          reservedQuoteLedger.toString(),
           userId,
           quoteAsset,
         ]);
@@ -11289,6 +11319,13 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           await conn.rollback();
           return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
         }
+        await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+          quoteBalanceLedger.toString(),
+          userId,
+          quoteAsset,
+        ]);
+        marketBuyReservedQuote = quoteBalance;
+        marketBuyReservedQuoteLedger = quoteBalanceLedger;
         availableQuote = quoteBalance;
       }
     } else {
@@ -11720,16 +11757,22 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         );
       }
       if (type === 'market') {
-        if (matchResult.spentQuote > 0n) {
-          if (quoteBalance < matchResult.spentQuote) {
-            await conn.rollback();
-            return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
-          }
-          await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-            matchResult.spentQuote.toString(),
-            userId,
-            quoteAsset,
-          ]);
+        const marketSpentQuoteLedger = convertDecimals(matchResult.spentQuote, quoteDecimals, quoteLedgerDecimals, 'ceil');
+        if (marketSpentQuoteLedger > marketBuyReservedQuoteLedger || matchResult.spentQuote > marketBuyReservedQuote) {
+          await conn.rollback();
+          return next({
+            status: 500,
+            code: 'SPOT_MARKET_BUY_RESERVE_EXCEEDED',
+            message: 'Market buy execution exceeded reserved quote budget',
+          });
+        }
+        const marketBuyRefundLedger =
+          marketBuyReservedQuoteLedger > marketSpentQuoteLedger ? marketBuyReservedQuoteLedger - marketSpentQuoteLedger : 0n;
+        if (marketBuyRefundLedger > 0n) {
+          await conn.query(
+            'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+            [userId, quoteAsset, marketBuyRefundLedger.toString()]
+          );
         }
         remainingQuote = 0n;
       } else if (orderStatus !== 'open' && remainingQuote > 0n) {
