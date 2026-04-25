@@ -11268,6 +11268,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     }
 
     let reservedQuote = 0n;
+    let marketBuyReservedQuote = 0n;
     let availableQuote = quoteBalance;
     if (side === 'buy') {
       if (type === 'limit') {
@@ -11289,6 +11290,12 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           await conn.rollback();
           return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
         }
+        await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+          quoteBalance.toString(),
+          userId,
+          quoteAsset,
+        ]);
+        marketBuyReservedQuote = quoteBalance;
         availableQuote = quoteBalance;
       }
     } else {
@@ -11720,16 +11727,20 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         );
       }
       if (type === 'market') {
-        if (matchResult.spentQuote > 0n) {
-          if (quoteBalance < matchResult.spentQuote) {
-            await conn.rollback();
-            return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
-          }
-          await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-            matchResult.spentQuote.toString(),
-            userId,
-            quoteAsset,
-          ]);
+        if (matchResult.spentQuote > marketBuyReservedQuote) {
+          await conn.rollback();
+          return next({
+            status: 500,
+            code: 'SPOT_MARKET_BUY_RESERVE_EXCEEDED',
+            message: 'Market buy execution exceeded reserved quote budget',
+          });
+        }
+        const marketBuyRefund = marketBuyReservedQuote > matchResult.spentQuote ? marketBuyReservedQuote - matchResult.spentQuote : 0n;
+        if (marketBuyRefund > 0n) {
+          await conn.query(
+            'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+            [userId, quoteAsset, marketBuyRefund.toString()]
+          );
         }
         remainingQuote = 0n;
       } else if (orderStatus !== 'open' && remainingQuote > 0n) {
