@@ -3769,7 +3769,7 @@ async function simulateSpotMarketBuy(conn, market, quoteAmountWei, takerFeeBps) 
   return result;
 }
 
-function estimateExternalFillFromDepth(levels, { side, maxBaseWei, takerFeeBps, limitPriceWei = 0n }) {
+function estimateExternalFillFromDepth(levels, { side, maxBaseWei, takerFeeBps, limitPriceWei = 0n, maxQuoteWithFeeWei = null }) {
   const result = {
     filledBaseWei: 0n,
     quoteWithoutFeeWei: 0n,
@@ -3779,8 +3779,11 @@ function estimateExternalFillFromDepth(levels, { side, maxBaseWei, takerFeeBps, 
   };
   let remainingBaseWei = bigIntFromValue(maxBaseWei);
   const feeBps = clampBps(bigIntFromValue(takerFeeBps || 0));
+  let remainingQuoteBudgetWei =
+    side === 'buy' && maxQuoteWithFeeWei != null ? bigIntFromValue(maxQuoteWithFeeWei) : null;
   for (const level of levels || []) {
     if (remainingBaseWei <= 0n) break;
+    if (remainingQuoteBudgetWei != null && remainingQuoteBudgetWei <= 0n) break;
     const levelBaseWei = bigIntFromValue(level.base_amount_wei);
     const levelPriceWei = bigIntFromValue(level.price_wei);
     if (levelBaseWei <= 0n || levelPriceWei <= 0n) continue;
@@ -3789,10 +3792,23 @@ function estimateExternalFillFromDepth(levels, { side, maxBaseWei, takerFeeBps, 
       if (side === 'sell' && levelPriceWei < limitPriceWei) continue;
     }
     result.limitMatched = true;
-    const tradeBaseWei = remainingBaseWei < levelBaseWei ? remainingBaseWei : levelBaseWei;
+    let tradeBaseWei = remainingBaseWei < levelBaseWei ? remainingBaseWei : levelBaseWei;
+    if (remainingQuoteBudgetWei != null) {
+      const feeMultiplier = 10000n + feeBps;
+      const costPerBaseWei = mulDiv(levelPriceWei, feeMultiplier, 10000n);
+      if (costPerBaseWei <= 0n) continue;
+      const maxAffordableBaseWei = mulDiv(remainingQuoteBudgetWei, PRICE_SCALE, costPerBaseWei);
+      if (maxAffordableBaseWei <= 0n) break;
+      if (tradeBaseWei > maxAffordableBaseWei) tradeBaseWei = maxAffordableBaseWei;
+    }
     const quoteWithoutFee = computeQuoteAmount(tradeBaseWei, levelPriceWei);
     if (tradeBaseWei <= 0n || quoteWithoutFee <= 0n) continue;
     const takerFee = (quoteWithoutFee * feeBps) / 10000n;
+    if (remainingQuoteBudgetWei != null) {
+      const totalWithFeeWei = quoteWithoutFee + takerFee;
+      if (totalWithFeeWei > remainingQuoteBudgetWei) continue;
+      remainingQuoteBudgetWei -= totalWithFeeWei;
+    }
     result.filledBaseWei += tradeBaseWei;
     result.quoteWithoutFeeWei += quoteWithoutFee;
     result.totalWithFeeWei += side === 'buy' ? quoteWithoutFee + takerFee : quoteWithoutFee - takerFee;
@@ -11395,6 +11411,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
     let externalFallbackError = null;
     let externalRestingOrderId = null;
     let externalRestingStatus = null;
+    const getBuyExternalQuoteBudget = () => {
+      if (side !== 'buy') return null;
+      return type === 'limit' ? taker.remainingQuote : taker.availableQuote;
+    };
     if (shouldExternalFallback && taker.remainingBase > 0n) {
       try {
         externalFallbackAttempted = true;
@@ -11404,88 +11424,118 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         const externalDepthRaw = await fetchBinanceDepthSnapshot(market, 50);
         const externalDepth = normalizeExternalDepthWithSpread(externalDepthRaw, liquidityState.spreadBps);
         const levels = side === 'buy' ? externalDepth.asks : externalDepth.bids;
+        const buyQuoteBudgetWei = getBuyExternalQuoteBudget();
         const externalPlan = estimateExternalFillFromDepth(levels, {
           side,
           maxBaseWei: taker.remainingBase,
           takerFeeBps,
           limitPriceWei: type === 'limit' ? priceWei : 0n,
+          maxQuoteWithFeeWei: buyQuoteBudgetWei,
         });
         if (type === 'limit') {
           let executedBase = 0n;
-          const externalLimitOrder = await executeBinanceLimitOrder(market, side, {
-            quantityWei: taker.remainingBase,
-            priceWei,
-            timeInForce: String(timeInForce || 'gtc').toUpperCase(),
-          });
-          executedBase = bigIntFromValue(externalLimitOrder.executedBaseWei);
-          if (executedBase > 0n) {
-            const externalQuoteRaw = bigIntFromValue(externalLimitOrder.quoteWithoutFeeWei);
-            const externalQuote =
-              externalQuoteRaw > 0n ? externalQuoteRaw : computeQuoteAmount(executedBase, externalLimitOrder.averagePriceWei || priceWei);
-            const externalAveragePriceWei =
-              externalLimitOrder.averagePriceWei && externalLimitOrder.averagePriceWei > 0n
-                ? externalLimitOrder.averagePriceWei
-                : priceWei;
-            const externalFee = (externalQuote * takerFeeBps) / 10000n;
-            const [tradeInsert] = await conn.query(
-              'INSERT INTO spot_trades (market_id, buy_order_id, sell_order_id, price_wei, base_amount_wei, quote_amount_wei, buy_fee_wei, sell_fee_wei, fee_asset, taker_side) VALUES (?,?,?,?,?,?,?,?,?,?)',
-              [
-                market.id,
-                orderId,
-                orderId,
-                externalAveragePriceWei.toString(),
-                executedBase.toString(),
-                externalQuote.toString(),
-                side === 'buy' ? externalFee.toString() : '0',
-                side === 'sell' ? externalFee.toString() : '0',
-                market.quote_asset,
-                side,
-              ]
-            );
-            const tradeId = tradeInsert.insertId;
-            if (externalFee > 0n) {
-              await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
-                'spot',
-                `trade:${tradeId}:external:taker`,
-                market.quote_asset,
-                externalFee.toString(),
-              ]);
-            }
-            if (side === 'buy') {
-              matchResult.spentQuote += externalQuote + externalFee;
-              matchResult.receivedBase += executedBase;
+          let externalLimitQuantityWei = taker.remainingBase;
+          if (side === 'buy') {
+            if (!buyQuoteBudgetWei || buyQuoteBudgetWei <= 0n) {
+              externalLimitQuantityWei = 0n;
             } else {
-              matchResult.receivedQuote += externalQuote - externalFee;
+              const feeMultiplier = 10000n + takerFeeBps;
+              const costPerBaseWei = mulDiv(priceWei, feeMultiplier, 10000n);
+              if (costPerBaseWei <= 0n) {
+                externalLimitQuantityWei = 0n;
+              } else {
+                const maxAffordableBaseWei = mulDiv(buyQuoteBudgetWei, PRICE_SCALE, costPerBaseWei);
+                if (maxAffordableBaseWei <= 0n) externalLimitQuantityWei = 0n;
+                else if (externalLimitQuantityWei > maxAffordableBaseWei) externalLimitQuantityWei = maxAffordableBaseWei;
+              }
             }
-            matchResult.takerFee += externalFee;
-            matchResult.filledBase += executedBase;
-            taker.remainingBase -= executedBase;
-            matchResult.averagePriceWei = recalculateMatchAveragePrice(matchResult, side);
-            matchResult.trades.push({
-              trade_id: tradeId,
-              maker_order_id: null,
-              maker_user_id: null,
-              price_wei: externalAveragePriceWei,
-              base_amount_wei: executedBase,
-              quote_amount_wei: externalQuote,
-              taker_fee_wei: externalFee,
-              maker_fee_wei: 0n,
-              external_liquidity: true,
-            });
           }
-          const isGtc = timeInForce === 'gtc';
-          if (isGtc && taker.remainingBase > 0n && externalLimitOrder.externalOrderId) {
-            externalRestingOrderId = externalLimitOrder.externalOrderId;
-            externalRestingStatus = externalLimitOrder.status || 'NEW';
-          }
-          if (executedBase <= 0n && !externalRestingOrderId) {
+          if (externalLimitQuantityWei <= 0n) {
             console.info(
-              `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
+              `[spot] external fallback skipped: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=insufficient_quote_budget`
             );
           } else {
-            console.info(
-              `[spot] external fallback filled: orderId=${orderId} executedBaseWei=${executedBase.toString()} externalOrderId=${externalLimitOrder.externalOrderId || 'n/a'} status=${externalLimitOrder.status || 'UNKNOWN'}`
-            );
+            const externalLimitOrder = await executeBinanceLimitOrder(market, side, {
+              quantityWei: externalLimitQuantityWei,
+              priceWei,
+              timeInForce: String(timeInForce || 'gtc').toUpperCase(),
+            });
+            executedBase = bigIntFromValue(externalLimitOrder.executedBaseWei);
+            if (executedBase > 0n) {
+              const externalQuoteRaw = bigIntFromValue(externalLimitOrder.quoteWithoutFeeWei);
+              const externalQuote =
+                externalQuoteRaw > 0n
+                  ? externalQuoteRaw
+                  : computeQuoteAmount(executedBase, externalLimitOrder.averagePriceWei || priceWei);
+              const externalAveragePriceWei =
+                externalLimitOrder.averagePriceWei && externalLimitOrder.averagePriceWei > 0n
+                  ? externalLimitOrder.averagePriceWei
+                  : priceWei;
+              const externalFee = (externalQuote * takerFeeBps) / 10000n;
+              const [tradeInsert] = await conn.query(
+                'INSERT INTO spot_trades (market_id, buy_order_id, sell_order_id, price_wei, base_amount_wei, quote_amount_wei, buy_fee_wei, sell_fee_wei, fee_asset, taker_side) VALUES (?,?,?,?,?,?,?,?,?,?)',
+                [
+                  market.id,
+                  orderId,
+                  orderId,
+                  externalAveragePriceWei.toString(),
+                  executedBase.toString(),
+                  externalQuote.toString(),
+                  side === 'buy' ? externalFee.toString() : '0',
+                  side === 'sell' ? externalFee.toString() : '0',
+                  market.quote_asset,
+                  side,
+                ]
+              );
+              const tradeId = tradeInsert.insertId;
+              if (externalFee > 0n) {
+                await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+                  'spot',
+                  `trade:${tradeId}:external:taker`,
+                  market.quote_asset,
+                  externalFee.toString(),
+                ]);
+              }
+              if (side === 'buy') {
+                matchResult.spentQuote += externalQuote + externalFee;
+                matchResult.receivedBase += executedBase;
+              } else {
+                matchResult.receivedQuote += externalQuote - externalFee;
+              }
+              matchResult.takerFee += externalFee;
+              matchResult.filledBase += executedBase;
+              taker.remainingBase -= executedBase;
+              if (side === 'buy') {
+                const totalSpentWei = externalQuote + externalFee;
+                taker.remainingQuote = taker.remainingQuote > totalSpentWei ? taker.remainingQuote - totalSpentWei : 0n;
+              }
+              matchResult.averagePriceWei = recalculateMatchAveragePrice(matchResult, side);
+              matchResult.trades.push({
+                trade_id: tradeId,
+                maker_order_id: null,
+                maker_user_id: null,
+                price_wei: externalAveragePriceWei,
+                base_amount_wei: executedBase,
+                quote_amount_wei: externalQuote,
+                taker_fee_wei: externalFee,
+                maker_fee_wei: 0n,
+                external_liquidity: true,
+              });
+            }
+            const isGtc = timeInForce === 'gtc';
+            if (isGtc && taker.remainingBase > 0n && externalLimitOrder.externalOrderId) {
+              externalRestingOrderId = externalLimitOrder.externalOrderId;
+              externalRestingStatus = externalLimitOrder.status || 'NEW';
+            }
+            if (executedBase <= 0n && !externalRestingOrderId) {
+              console.info(
+                `[spot] external fallback no-fill: orderId=${orderId} market=${market.symbol} side=${side} type=${type} tif=${timeInForce} reason=limit_or_depth_constraints`
+              );
+            } else {
+              console.info(
+                `[spot] external fallback filled: orderId=${orderId} executedBaseWei=${executedBase.toString()} externalOrderId=${externalLimitOrder.externalOrderId || 'n/a'} status=${externalLimitOrder.status || 'UNKNOWN'}`
+              );
+            }
           }
         } else if (externalPlan.filledBaseWei > 0n && externalPlan.quoteWithoutFeeWei > 0n) {
           const externalOrder = await executeBinanceMarketOrder(market, side, {
@@ -11538,6 +11588,10 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           matchResult.takerFee += externalFee;
           matchResult.filledBase += externalBase;
           taker.remainingBase -= externalBase;
+          if (side === 'buy') {
+            const totalSpentWei = externalQuote + externalFee;
+            taker.availableQuote = taker.availableQuote > totalSpentWei ? taker.availableQuote - totalSpentWei : 0n;
+          }
           matchResult.averagePriceWei = recalculateMatchAveragePrice(matchResult, side);
           matchResult.trades.push({
             trade_id: tradeId,
