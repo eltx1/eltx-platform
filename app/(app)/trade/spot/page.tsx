@@ -527,7 +527,9 @@ function SpotTradePageContent() {
   const minOrderQuoteValue = useMemo(() => {
     if (!selectedMarketMeta) return null;
     const marketMinQuote = safeDecimal(selectedMarketMeta.min_quote_amount);
-    return Decimal.max(MIN_SPOT_ORDER_VALUE_USDT, marketMinQuote);
+    const quoteAsset = (selectedMarketMeta.quote_asset || '').toString().trim().toUpperCase();
+    const hardMinQuote = quoteAsset === 'USDT' ? MIN_SPOT_ORDER_VALUE_USDT : ZERO;
+    return Decimal.max(hardMinQuote, marketMinQuote);
   }, [selectedMarketMeta]);
 
   const validation = useMemo<ValidationState>(() => {
@@ -656,9 +658,13 @@ function SpotTradePageContent() {
         case 'MARKET_ORDER_DISABLED':
           return t.spotTrade.errors.marketOrderDisabled;
         case 'MIN_ORDER_VALUE':
+          {
+            const effectiveMin = minOrderQuoteValue || MIN_SPOT_ORDER_VALUE_USDT;
+            const effectiveAsset = quoteSymbol || 'USDT';
           return t.spotTrade.errors.minOrderValue
-            .replace('{min}', trimDecimal(MIN_SPOT_ORDER_VALUE_USDT.toFixed(2)))
-            .replace('{asset}', 'USDT');
+            .replace('{min}', trimDecimal(effectiveMin.toFixed(Math.max(2, quoteDecimals))))
+            .replace('{asset}', effectiveAsset);
+          }
         case 'SLIPPAGE_EXCEEDED':
           return t.spotTrade.errors.slippageExceeded;
         case 'PRICE_DEVIATION_EXCEEDED':
@@ -689,6 +695,9 @@ function SpotTradePageContent() {
       t.spotTrade.errors.priceDeviationExceeded,
       t.spotTrade.errors.priceRequired,
       t.spotTrade.errors.slippageExceeded,
+      minOrderQuoteValue,
+      quoteDecimals,
+      quoteSymbol,
     ]
   );
 
