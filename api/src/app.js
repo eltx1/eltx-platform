@@ -11296,7 +11296,6 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
 
     let reservedQuote = 0n;
     let marketBuyReservedQuote = 0n;
-    let marketBuyReservedQuoteLedger = 0n;
     let availableQuote = quoteBalance;
     if (side === 'buy') {
       if (type === 'limit') {
@@ -11320,12 +11319,11 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
           return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient quote balance' });
         }
         await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-          quoteBalanceLedger.toString(),
+          quoteBalance.toString(),
           userId,
           quoteAsset,
         ]);
         marketBuyReservedQuote = quoteBalance;
-        marketBuyReservedQuoteLedger = quoteBalanceLedger;
         availableQuote = quoteBalance;
       }
     } else {
@@ -11757,8 +11755,7 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
         );
       }
       if (type === 'market') {
-        const marketSpentQuoteLedger = convertDecimals(matchResult.spentQuote, quoteDecimals, quoteLedgerDecimals, 'ceil');
-        if (marketSpentQuoteLedger > marketBuyReservedQuoteLedger || matchResult.spentQuote > marketBuyReservedQuote) {
+        if (matchResult.spentQuote > marketBuyReservedQuote) {
           await conn.rollback();
           return next({
             status: 500,
@@ -11766,12 +11763,11 @@ app.post('/spot/orders', walletLimiter, async (req, res, next) => {
             message: 'Market buy execution exceeded reserved quote budget',
           });
         }
-        const marketBuyRefundLedger =
-          marketBuyReservedQuoteLedger > marketSpentQuoteLedger ? marketBuyReservedQuoteLedger - marketSpentQuoteLedger : 0n;
-        if (marketBuyRefundLedger > 0n) {
+        const marketBuyRefund = marketBuyReservedQuote > matchResult.spentQuote ? marketBuyReservedQuote - matchResult.spentQuote : 0n;
+        if (marketBuyRefund > 0n) {
           await conn.query(
             'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
-            [userId, quoteAsset, marketBuyRefundLedger.toString()]
+            [userId, quoteAsset, marketBuyRefund.toString()]
           );
         }
         remainingQuote = 0n;
