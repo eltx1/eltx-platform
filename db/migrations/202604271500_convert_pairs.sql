@@ -1,6 +1,6 @@
 -- Convert pairs and settings
 
-INSERT INTO platform_settings (`key`, `value`) VALUES ('convert_fee_bps','50'), ('convert_min_usdt','10') ON DUPLICATE KEY UPDATE `value`=VALUES(`value`);
+INSERT INTO platform_settings (`name`, `value`) VALUES ('convert_fee_bps','50'), ('convert_min_usdt','10') ON DUPLICATE KEY UPDATE `value`=VALUES(`value`);
 
 CREATE TABLE IF NOT EXISTS convert_pairs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
