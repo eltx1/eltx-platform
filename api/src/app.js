@@ -835,6 +835,8 @@ const AdminConvertPairCreateSchema = z.object({
   symbol: z.string().min(3).max(32),
   display_name: z.string().min(1).max(80),
   token_symbol: z.string().min(2).max(32),
+  token_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional().nullable(),
+  token_decimals: z.coerce.number().int().min(1).max(36).optional(),
   logo_url: z.string().max(512).optional().nullable(),
   sort_order: z.coerce.number().int().min(0).max(10000).optional(),
   active: z.boolean().optional(),
@@ -844,6 +846,8 @@ const AdminConvertPairUpdateSchema = z
   .object({
     display_name: z.string().min(1).max(80).optional(),
     token_symbol: z.string().min(2).max(32).optional(),
+    token_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional().nullable(),
+    token_decimals: z.coerce.number().int().min(1).max(36).optional(),
     logo_url: z.string().max(512).optional().nullable(),
     sort_order: z.coerce.number().int().min(0).max(10000).optional(),
     active: z.boolean().optional(),
@@ -851,6 +855,15 @@ const AdminConvertPairUpdateSchema = z
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
   });
+
+const ConvertQuoteSchema = z.object({
+  category: z.enum(CONVERT_CATEGORY_VALUES).optional(),
+  symbol: z.string().min(3).max(32),
+  side: z.enum(['buy', 'sell']),
+  amount: z.string().min(1),
+});
+
+const ConvertExecuteSchema = ConvertQuoteSchema;
 
 const AdminStripePricingUpdateSchema = z
   .object({
@@ -926,6 +939,20 @@ const P2PDisputeResolveSchema = z.object({
 const CHAIN_ID = Number(process.env.CHAIN_ID || 56);
 const SUPPORTED_CHAINS = [56, 1];
 const DEFAULT_CHAIN_BY_SYMBOL = { BNB: 56, ETH: 1, WBTC: 56, ELTX: CHAIN_ID };
+const PANCAKE_V2_ROUTER_ABI = [
+  'function getAmountsOut(uint amountIn, address[] memory path) external view returns (uint[] memory amounts)',
+  'function getAmountsIn(uint amountOut, address[] memory path) external view returns (uint[] memory amounts)',
+  'function swapExactTokensForTokens(uint amountIn,uint amountOutMin,address[] calldata path,address to,uint deadline) external returns (uint[] memory amounts)',
+  'function swapTokensForExactTokens(uint amountOut,uint amountInMax,address[] calldata path,address to,uint deadline) external returns (uint[] memory amounts)',
+];
+const ERC20_ABI = [
+  'function approve(address spender, uint256 value) external returns (bool)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
+];
+const BSC_WBNB_ADDRESS = (process.env.TOKEN_WBNB || '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c').toLowerCase();
+const PANCAKE_V2_ROUTER_ADDRESS = (
+  process.env.PANCAKE_V2_ROUTER || '0x10ED43C718714eb63d5aA57B78B54704E256024E'
+).toLowerCase();
 
 // token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
@@ -2673,11 +2700,16 @@ async function readPlatformFeeBalances(conn = pool) {
 async function readConvertSettings(conn = pool) {
   const feeVal = await getPlatformSettingValue('convert_fee_bps', '50', conn);
   const minVal = await getPlatformSettingValue('convert_min_usdt', '10', conn);
+  const modeVal = await getPlatformSettingValue('convert_execution_mode', 'mock', conn);
+  const slippageVal = await getPlatformSettingValue('convert_slippage_bps', '120', conn);
   const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
   const minUsdt = Number.parseFloat(minVal || '10');
+  const slippageBps = clampBps(BigInt(Number.parseInt(slippageVal, 10) || 0));
   return {
     convert_fee_bps: Number(feeBps),
     convert_min_usdt: Number.isFinite(minUsdt) && minUsdt >= 0 ? minUsdt : 10,
+    convert_execution_mode: modeVal === 'live' ? 'live' : 'mock',
+    convert_slippage_bps: Number(slippageBps),
   };
 }
 
@@ -2689,6 +2721,8 @@ function mapConvertPairRow(row) {
     base_asset: row.base_asset,
     quote_asset: row.quote_asset,
     token_symbol: row.token_symbol,
+    token_address: row.token_address || null,
+    token_decimals: row.token_decimals ? Number(row.token_decimals) : null,
     display_name: row.display_name,
     logo_url: row.logo_url || null,
     sort_order: Number(row.sort_order || 0),
@@ -2704,13 +2738,129 @@ async function listConvertPairs(category, conn = pool, { includeInactive = false
     params.push(category);
   }
   const [rows] = await conn.query(
-    `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active
+    `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active
        FROM convert_pairs
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY category, sort_order, symbol`,
     params
   );
   return rows.map(mapConvertPairRow);
+}
+
+function resolveConvertAssetAddress(assetSymbol, pairAddress = null) {
+  const upper = String(assetSymbol || '').toUpperCase();
+  if (pairAddress) return String(pairAddress).toLowerCase();
+  if (upper === 'BNB') return BSC_WBNB_ADDRESS;
+  const meta = tokenMetaBySymbol[upper];
+  return meta?.contract ? String(meta.contract).toLowerCase() : null;
+}
+
+function resolveConvertAssetDecimals(assetSymbol, pairDecimals = null) {
+  if (pairDecimals !== null && pairDecimals !== undefined) return normalizeDecimals(pairDecimals, getSymbolDecimals(assetSymbol));
+  return getSymbolDecimals(assetSymbol);
+}
+
+async function getConvertPairBySymbol(symbol, category = null, conn = pool) {
+  const normalized = normalizeMarketSymbol(symbol);
+  const where = ['symbol=?', 'active=1'];
+  const params = [normalized];
+  if (category) {
+    where.push('category=?');
+    params.push(category);
+  }
+  const [rows] = await conn.query(
+    `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active
+       FROM convert_pairs WHERE ${where.join(' AND ')} LIMIT 1`,
+    params
+  );
+  return rows[0] ? mapConvertPairRow(rows[0]) : null;
+}
+
+async function buildConvertRuntime(conn = pool) {
+  const settings = await readConvertSettings(conn);
+  const rpcUrl = process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP || '';
+  const pk = process.env.HOT_WALLET_PRIVATE_KEY || process.env.PLATFORM_WALLET_PRIVATE_KEY || '';
+  const envReady = !!rpcUrl && !!pk;
+  const mode = settings.convert_execution_mode === 'live' && envReady ? 'live' : 'mock';
+  return { mode, envReady, settings, rpcUrl, pk };
+}
+
+async function quoteConvertFromPancake(pair, side, amountWei) {
+  const provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP);
+  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, provider);
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
+  if (!baseAddress || !quoteAddress) throw new Error(`Missing token address mapping for ${pair.symbol}`);
+  if (side === 'buy') {
+    const amounts = await router.getAmountsIn(amountWei, [quoteAddress, baseAddress]);
+    return {
+      quoteWithoutFeeWei: bigIntFromValue(amounts[0]),
+      baseAmountWei: bigIntFromValue(amountWei),
+      direction: 'quote_to_base',
+      path: [quoteAddress, baseAddress],
+    };
+  }
+  const amounts = await router.getAmountsOut(amountWei, [baseAddress, quoteAddress]);
+  return {
+    quoteWithoutFeeWei: bigIntFromValue(amounts[1]),
+    baseAmountWei: bigIntFromValue(amountWei),
+    direction: 'base_to_quote',
+    path: [baseAddress, quoteAddress],
+  };
+}
+
+async function ensureErc20Allowance(tokenAddress, wallet, spender, minWei) {
+  const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
+  const allowance = bigIntFromValue(await token.allowance(wallet.address, spender));
+  if (allowance >= minWei) return;
+  const tx = await token.approve(spender, ethers.MaxUint256);
+  await tx.wait();
+}
+
+async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime) {
+  if (runtime.mode !== 'live') {
+    return {
+      txHash: `mock-${Date.now()}`,
+      spentQuoteWei: quoteWei,
+      receivedQuoteWei: quoteWei,
+      receivedBaseWei: amountWei,
+      mode: 'mock',
+    };
+  }
+  const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
+  const wallet = new ethers.Wallet(runtime.pk, provider);
+  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, wallet);
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
+  if (!baseAddress || !quoteAddress) throw new Error(`Missing token address mapping for ${pair.symbol}`);
+  const deadline = Math.floor(Date.now() / 1000) + 180;
+  const slippageBps = Number(runtime.settings.convert_slippage_bps || 0);
+  if (side === 'buy') {
+    const maxIn = quoteWei + (quoteWei * BigInt(slippageBps)) / 10000n;
+    await ensureErc20Allowance(quoteAddress, wallet, PANCAKE_V2_ROUTER_ADDRESS, maxIn);
+    const tx = await router.swapTokensForExactTokens(amountWei, maxIn, [quoteAddress, baseAddress], wallet.address, deadline);
+    const receipt = await tx.wait();
+    const out = await router.getAmountsIn(amountWei, [quoteAddress, baseAddress]);
+    return {
+      txHash: receipt?.hash || tx.hash,
+      spentQuoteWei: bigIntFromValue(out[0]),
+      receivedBaseWei: amountWei,
+      receivedQuoteWei: 0n,
+      mode: 'live',
+    };
+  }
+  const minOut = quoteWei - (quoteWei * BigInt(slippageBps)) / 10000n;
+  await ensureErc20Allowance(baseAddress, wallet, PANCAKE_V2_ROUTER_ADDRESS, amountWei);
+  const tx = await router.swapExactTokensForTokens(amountWei, minOut > 0n ? minOut : 0n, [baseAddress, quoteAddress], wallet.address, deadline);
+  const receipt = await tx.wait();
+  const out = await router.getAmountsOut(amountWei, [baseAddress, quoteAddress]);
+  return {
+    txHash: receipt?.hash || tx.hash,
+    spentQuoteWei: 0n,
+    receivedQuoteWei: bigIntFromValue(out[1]),
+    receivedBaseWei: amountWei,
+    mode: 'live',
+  };
 }
 
 async function readSpotFeeBps(conn = pool) {
@@ -10350,6 +10500,187 @@ app.get('/convert/pairs', walletLimiter, async (req, res, next) => {
   }
 });
 
+app.post('/convert/quote', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const payload = ConvertQuoteSchema.parse(req.body || {});
+    const pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
+    if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
+    const amountDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+    const amountWeiStr = decimalToWeiString(payload.amount, amountDecimals);
+    if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    const amountWei = bigIntFromValue(amountWeiStr);
+    if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+
+    const runtime = await buildConvertRuntime();
+    const quoteInfo =
+      runtime.mode === 'live'
+        ? await quoteConvertFromPancake(pair, payload.side, amountWei)
+        : {
+            quoteWithoutFeeWei: payload.side === 'buy' ? amountWei : amountWei,
+            baseAmountWei: amountWei,
+            direction: payload.side === 'buy' ? 'quote_to_base' : 'base_to_quote',
+            path: [],
+          };
+    const settings = runtime.settings;
+    const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
+    const usdtDecimals = resolveConvertAssetDecimals('USDT');
+    res.json({
+      ok: true,
+      mode: runtime.mode,
+      pair,
+      quote: {
+        side: payload.side,
+        amount: trimDecimal(formatUnitsStr(amountWei.toString(), amountDecimals)),
+        quote_without_fee: trimDecimal(formatUnitsStr(quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals)),
+        fee_usdt: trimDecimal(formatUnitsStr(feeWei.toString(), usdtDecimals)),
+        total_usdt:
+          payload.side === 'buy'
+            ? trimDecimal(formatUnitsStr((quoteInfo.quoteWithoutFeeWei + feeWei).toString(), usdtDecimals))
+            : trimDecimal(formatUnitsStr((quoteInfo.quoteWithoutFeeWei - feeWei > 0n ? quoteInfo.quoteWithoutFeeWei - feeWei : 0n).toString(), usdtDecimals)),
+      },
+      settings,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.post('/convert/execute', walletLimiter, async (req, res, next) => {
+  let conn;
+  let executionId = null;
+  let userId = null;
+  let reservedDebitAsset = null;
+  let reservedDebitWei = 0n;
+  try {
+    userId = await requireUser(req);
+    const payload = ConvertExecuteSchema.parse(req.body || {});
+    const pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
+    if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
+    const settings = await readConvertSettings();
+    const usdtDecimals = resolveConvertAssetDecimals('USDT');
+    const baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+    const amountWeiStr = decimalToWeiString(payload.amount, baseDecimals);
+    if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    const amountWei = bigIntFromValue(amountWeiStr);
+    if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    const runtime = await buildConvertRuntime();
+    const quoteInfo =
+      runtime.mode === 'live'
+        ? await quoteConvertFromPancake(pair, payload.side, amountWei)
+        : { quoteWithoutFeeWei: amountWei, baseAmountWei: amountWei };
+    const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
+    const minWeiStr = decimalToWeiString(String(settings.convert_min_usdt || 10), usdtDecimals) || '0';
+    if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) {
+      return next({ status: 400, code: 'CONVERT_MIN', message: `Minimum convert is ${settings.convert_min_usdt} USDT` });
+    }
+
+    const debitAsset = payload.side === 'buy' ? 'USDT' : pair.base_asset;
+    const debitDecimals = payload.side === 'buy' ? usdtDecimals : baseDecimals;
+    const debitWei = payload.side === 'buy' ? quoteInfo.quoteWithoutFeeWei + feeWei : amountWei;
+    reservedDebitAsset = debitAsset.toUpperCase();
+    reservedDebitWei = debitWei;
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [rows] = await conn.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE', [
+      userId,
+      debitAsset.toUpperCase(),
+    ]);
+    const currentWei = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
+    if (currentWei < debitWei) {
+      await conn.rollback();
+      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+    }
+    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+      debitWei.toString(),
+      userId,
+      debitAsset.toUpperCase(),
+    ]);
+    const [insert] = await conn.query(
+      `INSERT INTO convert_executions
+       (user_id, pair_id, side, status, amount_wei, amount_decimals, quote_without_fee_wei, quote_decimals, fee_wei, debit_asset, debit_wei)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [userId, pair.id, payload.side, 'processing', amountWei.toString(), baseDecimals, quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals, feeWei.toString(), debitAsset.toUpperCase(), debitWei.toString()]
+    );
+    executionId = insert.insertId;
+    await conn.commit();
+    conn.release();
+    conn = null;
+
+    const chainResult = await executeConvertOnPancake(pair, payload.side, amountWei, quoteInfo.quoteWithoutFeeWei, runtime);
+    const creditAsset = payload.side === 'buy' ? pair.base_asset : 'USDT';
+    const creditDecimals = payload.side === 'buy' ? baseDecimals : usdtDecimals;
+    const creditWeiGross = payload.side === 'buy' ? chainResult.receivedBaseWei : chainResult.receivedQuoteWei;
+    const creditWei = payload.side === 'buy' ? creditWeiGross : creditWeiGross > feeWei ? creditWeiGross - feeWei : 0n;
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    if (creditWei > 0n) {
+      await conn.query(
+        'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+        [userId, creditAsset.toUpperCase(), creditWei.toString()]
+      );
+    }
+    if (feeWei > 0n) {
+      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+        'convert',
+        `convert:${executionId}`,
+        'USDT',
+        feeWei.toString(),
+      ]);
+    }
+    await conn.query(
+      'UPDATE convert_executions SET status=?, tx_hash=?, credited_asset=?, credited_wei=?, metadata=?, updated_at=NOW() WHERE id=?',
+      ['completed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode }), executionId]
+    );
+    await conn.commit();
+    res.json({
+      ok: true,
+      execution_id: executionId,
+      tx_hash: chainResult.txHash,
+      mode: chainResult.mode,
+      debit: { asset: debitAsset.toUpperCase(), amount: trimDecimal(formatUnitsStr(debitWei.toString(), debitDecimals)) },
+      credit: { asset: creditAsset.toUpperCase(), amount: trimDecimal(formatUnitsStr(creditWei.toString(), creditDecimals)) },
+    });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch {}
+    }
+    if (executionId && userId && reservedDebitAsset && reservedDebitWei > 0n) {
+      try {
+        const refundConn = await pool.getConnection();
+        try {
+          await refundConn.beginTransaction();
+          await refundConn.query(
+            'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
+            [userId, reservedDebitAsset, reservedDebitWei.toString()]
+          );
+          await refundConn.query('UPDATE convert_executions SET status=?, fail_reason=?, updated_at=NOW() WHERE id=?', [
+            'failed',
+            String(err?.message || 'convert_failed').slice(0, 500),
+            executionId,
+          ]);
+          await refundConn.commit();
+        } finally {
+          refundConn.release();
+        }
+      } catch {}
+    }
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    }
+    next(err);
+  } finally {
+    if (conn) conn.release();
+  }
+});
+
 app.get('/admin/convert/pairs', async (req, res, next) => {
   try {
     await requireAdmin(req);
@@ -10379,14 +10710,16 @@ app.post('/admin/convert/pairs', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Convert pair must end with /USDT' });
     }
     const [insert] = await pool.query(
-      `INSERT INTO convert_pairs (category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO convert_pairs (category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       [
         payload.category,
         symbol,
         baseAsset,
         quoteAsset,
         payload.token_symbol.trim().toUpperCase(),
+        payload.token_address ? payload.token_address.toLowerCase() : null,
+        payload.token_decimals ?? getSymbolDecimals(baseAsset),
         payload.display_name.trim(),
         payload.logo_url || null,
         payload.sort_order ?? 0,
@@ -10394,7 +10727,7 @@ app.post('/admin/convert/pairs', async (req, res, next) => {
       ]
     );
     const [[row]] = await pool.query(
-      `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active
+      `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active
          FROM convert_pairs WHERE id=?`,
       [insert.insertId]
     );
@@ -10422,6 +10755,14 @@ app.patch('/admin/convert/pairs/:id', async (req, res, next) => {
       fields.push('token_symbol=?');
       params.push(payload.token_symbol.trim().toUpperCase());
     }
+    if (payload.token_address !== undefined) {
+      fields.push('token_address=?');
+      params.push(payload.token_address ? payload.token_address.toLowerCase() : null);
+    }
+    if (payload.token_decimals !== undefined) {
+      fields.push('token_decimals=?');
+      params.push(payload.token_decimals);
+    }
     if (payload.logo_url !== undefined) {
       fields.push('logo_url=?');
       params.push(payload.logo_url || null);
@@ -10437,7 +10778,7 @@ app.patch('/admin/convert/pairs/:id', async (req, res, next) => {
     params.push(pairId);
     await pool.query(`UPDATE convert_pairs SET ${fields.join(', ')}, updated_at=NOW() WHERE id=?`, params);
     const [[row]] = await pool.query(
-      `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active
+      `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active
          FROM convert_pairs WHERE id=?`,
       [pairId]
     );
