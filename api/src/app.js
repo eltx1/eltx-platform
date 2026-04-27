@@ -1167,6 +1167,16 @@ function getSymbolDecimals(symbol) {
   return DEFAULT_ELTX_DECIMALS;
 }
 
+function getTokenDecimals(symbol, tokenAddress, amountWei = 0) {
+  const normalizedSymbol = String(symbol || '').toUpperCase();
+  const normalizedAddress = typeof tokenAddress === 'string' ? tokenAddress.trim().toLowerCase() : '';
+  if (normalizedAddress && tokenMeta[normalizedAddress]?.decimals !== undefined && tokenMeta[normalizedAddress]?.decimals !== null) {
+    return normalizeDecimals(tokenMeta[normalizedAddress].decimals, getSymbolDecimals(normalizedSymbol));
+  }
+  const fallbackDecimals = getSymbolDecimals(normalizedSymbol);
+  return resolveStablecoinLedgerDecimals(normalizedSymbol, amountWei, fallbackDecimals);
+}
+
 function normalizeDecimals(value, fallback = DEFAULT_ELTX_DECIMALS) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 36) return fallback;
@@ -8939,8 +8949,8 @@ app.get('/admin/users/:id', async (req, res, next) => {
 
     const deposits = depositRows.map((row) => {
       const symbol = (row.token_symbol || 'ELTX').toUpperCase();
-      const decimals = getSymbolDecimals(symbol);
       const wei = bigIntFromValue(row.amount_wei || 0);
+      const decimals = getTokenDecimals(symbol, row.token_address, wei);
       return {
         id: row.id,
         asset: symbol,
@@ -8964,8 +8974,8 @@ app.get('/admin/users/:id', async (req, res, next) => {
 
     const transfers = transferRows.map((row) => {
       const symbol = (row.asset || 'ELTX').toUpperCase();
-      const decimals = getSymbolDecimals(symbol);
       const wei = bigIntFromValue(row.amount_wei || 0);
+      const decimals = resolveStablecoinLedgerDecimals(symbol, wei, getSymbolDecimals(symbol));
       return {
         id: row.id,
         asset: symbol,
@@ -9262,14 +9272,14 @@ app.get('/admin/transactions', async (req, res, next) => {
       );
       results = rows.map((row) => {
         const symbol = (row.token_symbol || 'ELTX').toUpperCase();
-        const decimals = getSymbolDecimals(symbol);
         const wei = bigIntFromValue(row.amount_wei || 0);
+        const decimals = getTokenDecimals(symbol, row.token_address, wei);
         return {
           id: row.id,
           user_id: row.user_id,
           asset: symbol,
-          amount_wei: wei.toString(),
           amount: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+          amount_wei: wei.toString(),
           confirmations: row.confirmations,
           status: row.status,
           source: row.source,
@@ -9286,15 +9296,15 @@ app.get('/admin/transactions', async (req, res, next) => {
       );
       results = rows.map((row) => {
         const symbol = (row.asset || 'ELTX').toUpperCase();
-        const decimals = getSymbolDecimals(symbol);
         const wei = bigIntFromValue(row.amount_wei || 0);
+        const decimals = resolveStablecoinLedgerDecimals(symbol, wei, getSymbolDecimals(symbol));
         return {
           id: row.id,
           from_user_id: row.from_user_id,
           to_user_id: row.to_user_id,
           asset: symbol,
-          amount_wei: wei.toString(),
           amount: trimDecimal(formatUnitsStr(wei.toString(), decimals)),
+          amount_wei: wei.toString(),
           fee_wei: bigIntFromValue(row.fee_wei || 0).toString(),
           created_at: row.created_at,
         };
