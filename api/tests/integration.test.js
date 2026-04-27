@@ -602,8 +602,6 @@ test('POST /convert/quote returns runtime warning when live is misconfigured but
   testSchema.convertSettings.convert_execution_mode = 'mock';
   testSchema.convertSettings.convert_live_fallback_mock = '1';
 });
-<<<<<<< 6tgora-codex/overhaul-convert-desk-for-live-execution-and-ux
-
 test('POST /convert/quote returns PAIR_NOT_LIVE_READY when live is enabled and pair has no address mapping', async () => {
   const xautPair = {
     id: 3,
@@ -636,8 +634,6 @@ test('POST /convert/quote returns PAIR_NOT_LIVE_READY when live is enabled and p
   testSchema.convertSettings.convert_execution_mode = 'mock';
   testSchema.convertSettings.convert_live_fallback_mock = '1';
 });
-=======
->>>>>>> main
 test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {
   const res = await request.get('/fiat/stripe/rate');
   assert.equal(res.status, 401);
