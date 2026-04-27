@@ -1,6 +1,6 @@
 -- Convert on-chain execution metadata and runtime settings
 
-INSERT INTO platform_settings (`key`, `value`) VALUES
+INSERT INTO platform_settings (`name`, `value`) VALUES
   ('convert_execution_mode', 'mock'),
   ('convert_slippage_bps', '120')
 ON DUPLICATE KEY UPDATE `value`=VALUES(`value`);
