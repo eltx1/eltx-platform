@@ -2719,6 +2719,7 @@ async function readConvertSettings(conn = pool) {
   const modeVal = await getPlatformSettingValue('convert_execution_mode', 'live', conn);
   const slippageVal = await getPlatformSettingValue('convert_slippage_bps', '120', conn);
   const fallbackVal = await getPlatformSettingValue('convert_live_fallback_mock', '1', conn);
+  const requirePairAddressVal = await getPlatformSettingValue('convert_require_pair_address_live', '1', conn);
   const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
   const minUsdt = Number.parseFloat(minVal || '10');
   const slippageBps = clampBps(BigInt(Number.parseInt(slippageVal, 10) || 0));
@@ -2728,6 +2729,7 @@ async function readConvertSettings(conn = pool) {
     convert_execution_mode: modeVal === 'live' ? 'live' : 'mock',
     convert_slippage_bps: Number(slippageBps),
     convert_live_fallback_mock: fallbackVal === '0' ? 0 : 1,
+    convert_require_pair_address_live: requirePairAddressVal === '0' ? 0 : 1,
   };
 }
 
@@ -2777,11 +2779,47 @@ function resolveConvertAssetAddress(assetSymbol, pairAddress = null) {
 
 function resolveConvertAssetDecimals(assetSymbol, pairDecimals = null) {
   if (pairDecimals !== null && pairDecimals !== undefined) return normalizeDecimals(pairDecimals, getSymbolDecimals(assetSymbol));
+<<<<<<< 6tgora-codex/overhaul-convert-desk-for-live-execution-and-ux
+  const address = resolveConvertAssetAddress(assetSymbol);
+  return getTokenDecimals(assetSymbol, address);
+}
+
+function quoteConvertMock(pair, amountWei) {
+  const baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+  const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+  const baseDivisor = 10n ** BigInt(baseDecimals);
+  const notionalWei18 = mulDiv(amountWei, getSyntheticReferencePriceWei({ base_asset: pair.base_asset }), baseDivisor);
+  return convertDecimals(notionalWei18, 18, usdtDecimals);
+}
+
+function assertConvertQuoteIsSane(quoteWei, amountWei, usdtDecimals) {
+  const value = bigIntFromValue(quoteWei);
+  if (value <= 0n) {
+    throw Object.assign(new Error('Invalid convert quote value'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+  const hardCap = 10n ** BigInt(usdtDecimals + 10);
+  if (value > hardCap) {
+    throw Object.assign(new Error('Convert quote exceeded safe range'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+  if (bigIntFromValue(amountWei) > 0n && value < 1n) {
+    throw Object.assign(new Error('Convert quote precision too low'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+}
+
+function ensureConvertLivePairReady(pair, settings) {
+  if (Number(settings?.convert_require_pair_address_live || 0) !== 1) return;
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
+  if (!baseAddress || !quoteAddress) {
+    throw Object.assign(new Error(`Convert pair ${pair.symbol} missing on-chain mapping`), { code: 'PAIR_NOT_LIVE_READY' });
+  }
+=======
   const upper = String(assetSymbol || '').toUpperCase();
   if ((upper === 'USDT' || upper === 'USDC') && [BSC_USDT_ADDRESS, BSC_USDC_ADDRESS].includes(resolveConvertAssetAddress(upper))) {
     return 18;
   }
   return getSymbolDecimals(assetSymbol);
+>>>>>>> main
 }
 
 function quoteConvertMock(pair, amountWei) {
@@ -10612,7 +10650,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     }
     const quoteInfo =
       runtime.mode === 'live'
-        ? await quoteConvertFromPancake(pair, payload.side, amountWei)
+        ? (ensureConvertLivePairReady(pair, runtime.settings), await quoteConvertFromPancake(pair, payload.side, amountWei))
         : {
             quoteWithoutFeeWei: quoteConvertMock(pair, amountWei),
             baseAmountWei: amountWei,
@@ -10641,6 +10679,12 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       settings,
     });
   } catch (err) {
+<<<<<<< 6tgora-codex/overhaul-convert-desk-for-live-execution-and-ux
+    if (err?.code === 'PAIR_NOT_LIVE_READY') {
+      return next({ status: 503, code: 'PAIR_NOT_LIVE_READY', message: err.message });
+    }
+=======
+>>>>>>> main
     if (err?.code === 'QUOTE_OUT_OF_RANGE') {
       return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
     }
@@ -10695,7 +10739,11 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     const quoteInfo =
       runtime.mode === 'live'
+<<<<<<< 6tgora-codex/overhaul-convert-desk-for-live-execution-and-ux
+        ? (ensureConvertLivePairReady(pair, runtime.settings), await quoteConvertFromPancake(pair, payload.side, amountWei))
+=======
         ? await quoteConvertFromPancake(pair, payload.side, amountWei)
+>>>>>>> main
         : { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei };
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
     const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
@@ -10831,6 +10879,12 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
         }
       } catch {}
     }
+<<<<<<< 6tgora-codex/overhaul-convert-desk-for-live-execution-and-ux
+    if (err?.code === 'PAIR_NOT_LIVE_READY') {
+      return next({ status: 503, code: 'PAIR_NOT_LIVE_READY', message: err.message });
+    }
+=======
+>>>>>>> main
     if (err?.code === 'QUOTE_OUT_OF_RANGE') {
       return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
     }

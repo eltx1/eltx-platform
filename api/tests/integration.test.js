@@ -602,6 +602,42 @@ test('POST /convert/quote returns runtime warning when live is misconfigured but
   testSchema.convertSettings.convert_execution_mode = 'mock';
   testSchema.convertSettings.convert_live_fallback_mock = '1';
 });
+<<<<<<< 6tgora-codex/overhaul-convert-desk-for-live-execution-and-ux
+
+test('POST /convert/quote returns PAIR_NOT_LIVE_READY when live is enabled and pair has no address mapping', async () => {
+  const xautPair = {
+    id: 3,
+    category: 'gold',
+    symbol: 'XAUT/USDT',
+    base_asset: 'XAUT',
+    quote_asset: 'USDT',
+    token_symbol: 'XAUT',
+    token_address: null,
+    token_decimals: 18,
+    display_name: 'Tether Gold',
+    logo_url: null,
+    sort_order: 3,
+    active: 1,
+  };
+  testSchema.convertPairs.push(xautPair);
+  testSchema.convertSettings.convert_execution_mode = 'live';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+  testSchema.convertSettings.convert_require_pair_address_live = '1';
+  process.env.BSC_RPC_URL = 'https://bsc-dataseed.binance.org';
+  process.env.CONVERT_HOT_WALLET_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+  process.env.CONVERT_HOT_WALLET_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+  const res = await request
+    .post('/convert/quote')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'gold', symbol: 'XAUT/USDT', side: 'buy', amount: '1' });
+  assert.equal(res.status, 503);
+  assert.equal(res.body?.error?.code, 'PAIR_NOT_LIVE_READY');
+  testSchema.convertPairs.pop();
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+});
+=======
+>>>>>>> main
 test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {
   const res = await request.get('/fiat/stripe/rate');
   assert.equal(res.status, 401);
