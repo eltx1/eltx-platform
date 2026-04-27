@@ -131,15 +131,26 @@ export default function DashboardPage() {
       <PageAdInject placement="dashboard" />
       <div className="grid gap-2 lg:grid-cols-[260px,minmax(0,1fr)] lg:items-start">
         <aside className="x-card space-y-2 p-2 lg:sticky lg:top-20">
-          <div className="grid grid-cols-3 gap-1.5">
-            <SectionCard title={lang === 'ar' ? 'اكسبلور' : 'Explore'} href="/for-you" icon={Compass} compact />
-            <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} compact />
-            <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} compact />
-            <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} compact />
-            <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} compact />
-            <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
-            <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
-          </div>
+          <section id="dashboard-social" className="x-card space-y-2 p-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">{lang === 'ar' ? 'سوشيال' : 'Social'}</h2>
+            <div className="grid grid-cols-3 gap-1.5">
+              <SectionCard title={lang === 'ar' ? 'اكسبلور' : 'Explore'} href="/for-you" icon={Compass} compact />
+              <SectionCard title={t.dashboard.cards.profile.title} href="/profile" icon={UserRound} compact />
+              <SectionCard title={t.dashboard.cards.editProfile.title} href="/profile/edit" icon={PencilLine} compact />
+              <SectionCard title={t.dashboard.cards.pay.title} href="/pay" icon={CreditCard} compact />
+              <SectionCard title={lang === 'ar' ? 'بريميم' : 'Premium'} href="/premium" icon={ShieldCheck} compact />
+              <SectionCard title={lang === 'ar' ? 'تحقيق الربح' : 'Monetize'} href="/monetize" icon={CircleDollarSign} compact />
+            </div>
+          </section>
+          <section id="dashboard-trade" className="x-card space-y-2 p-2">
+            <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">Trade</h2>
+            <div className="grid grid-cols-3 gap-1.5">
+              <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} compact />
+              <SectionCard title={lang === 'ar' ? 'تداول' : 'Trade'} href="/trade/spot" icon={CandlestickChart} compact />
+              <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} compact />
+              <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} compact />
+            </div>
+          </section>
           <button
             type="button"
             onClick={() => router.push('/ai')}
@@ -151,10 +162,7 @@ export default function DashboardPage() {
           <section id="dashboard-shortcuts" className="x-card space-y-2 p-2">
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">Shortcuts</h2>
             <div className="grid grid-cols-3 gap-1.5">
-              <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} compact />
               <SectionCard title={t.dashboard.cards.p2p.title} href="/p2p" icon={Handshake} compact />
-              <SectionCard title="Spot Trade" href="/trade/spot" icon={CandlestickChart} compact />
-              <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} compact />
               <SectionCard title="Staking" href="/staking" icon={Coins} compact />
               <SectionCard title={t.dashboard.cards.invite.title} href="/referrals" icon={Gift} compact />
               <SectionCard title={t.dashboard.cards.aiAgent.title} href="/ai" icon={Sparkles} compact />

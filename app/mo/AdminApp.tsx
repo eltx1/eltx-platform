@@ -5171,7 +5171,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     spreadPct: '2.00',
     refreshMinutes: '30',
     userEmail: 'info.eltx@gmail.com',
-    pairs: 'ETH/USDT, WBTC/USDT, BNB/USDT',
+    pairs: 'XAUT/USDT, PAXG/USDT, WBTC/USDT, ETH/USDT, BNB/USDT, SOL/USDT, XRP/USDT, ELTX/USDT, MCOIN/USDT',
     targetBasePct: '50',
   });
   const [savingMaker, setSavingMaker] = useState(false);

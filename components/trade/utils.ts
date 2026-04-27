@@ -6,6 +6,9 @@ export function resolveSpotMarketSymbol(symbol: string): string {
     ETH: 'ETH/USDT',
     BNB: 'BNB/USDT',
     SOL: 'SOL/USDT',
+    XRP: 'XRP/USDT',
+    XAUT: 'XAUT/USDT',
+    PAXG: 'PAXG/USDT',
     WBTC: 'WBTC/USDT',
   };
 
