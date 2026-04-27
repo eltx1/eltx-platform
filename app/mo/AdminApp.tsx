@@ -145,6 +145,7 @@ type ConvertReportOverview = {
   completed_executions: number;
   failed_executions: number;
   quote_without_fee_wei: string;
+  quote_decimals: number;
   fee_wei: string;
 };
 type ConvertReportCategory = {
@@ -153,6 +154,7 @@ type ConvertReportCategory = {
   completed: number;
   failed: number;
   quote_without_fee_wei: string;
+  quote_decimals: number;
   fee_wei: string;
 };
 type ConvertReportPair = {
@@ -160,12 +162,14 @@ type ConvertReportPair = {
   symbol: string;
   executions: number;
   quote_without_fee_wei: string;
+  quote_decimals: number;
   fee_wei: string;
 };
 type ConvertReportDay = {
   day: string;
   executions: number;
   quote_without_fee_wei: string;
+  quote_decimals: number;
   fee_wei: string;
 };
 type ConvertReportRecent = {
@@ -4865,13 +4869,11 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     return (Number(convertOverview.completed_executions || 0) / Number(convertOverview.total_executions || 0)) * 100;
   }, [convertOverview]);
 
-  const formatUsdtFromWei = (value: string) => {
-    try {
-      return Number(formatUnits(value || '0', 18)).toLocaleString(undefined, { maximumFractionDigits: 4 });
-    } catch {
-      return '0';
-    }
-  };
+  const fallbackUsdtDecimals = convertReports.recent[0]?.quote_decimals || 6;
+  const formatUsdtFromWei = (value: string, decimals?: number) =>
+    Number(formatReserve(value || '0', decimals ?? fallbackUsdtDecimals)).toLocaleString(undefined, {
+      maximumFractionDigits: 4,
+    });
 
   const updateFees = async () => {
     const payload: Record<string, unknown> = {};
@@ -5317,13 +5319,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
               />
               <StatCard
                 title="USDT gross volume"
-                value={`${formatUsdtFromWei(convertOverview?.quote_without_fee_wei || '0')} USDT`}
+                value={`${formatUsdtFromWei(convertOverview?.quote_without_fee_wei || '0', convertOverview?.quote_decimals)} USDT`}
                 subtitle="Before fees"
                 icon={DollarSign}
               />
               <StatCard
                 title="USDT fees"
-                value={`${formatUsdtFromWei(convertOverview?.fee_wei || '0')} USDT`}
+                value={`${formatUsdtFromWei(convertOverview?.fee_wei || '0', convertOverview?.quote_decimals)} USDT`}
                 subtitle="Net platform convert revenue"
                 icon={Coins}
               />
@@ -5343,7 +5345,7 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                         <span>{Number(row.completed || 0).toLocaleString()} success</span>
                         <span>{Number(row.failed || 0).toLocaleString()} failed</span>
                       </div>
-                      <div className="mt-1 text-white/70">Vol: {formatUsdtFromWei(row.quote_without_fee_wei || '0')} USDT</div>
+                      <div className="mt-1 text-white/70">Vol: {formatUsdtFromWei(row.quote_without_fee_wei || '0', row.quote_decimals)} USDT</div>
                     </div>
                   ))}
                   {!convertReports.categories.length ? <div className="text-xs text-white/55">No convert data yet.</div> : null}
@@ -5369,8 +5371,8 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                           <td className="px-2 py-2 uppercase text-white/70">{row.category}</td>
                           <td className="px-2 py-2 text-white">{row.symbol}</td>
                           <td className="px-2 py-2 text-white/75">{Number(row.executions || 0).toLocaleString()}</td>
-                          <td className="px-2 py-2 text-white/75">{formatUsdtFromWei(row.quote_without_fee_wei || '0')}</td>
-                          <td className="px-2 py-2 text-emerald-200">{formatUsdtFromWei(row.fee_wei || '0')}</td>
+                          <td className="px-2 py-2 text-white/75">{formatUsdtFromWei(row.quote_without_fee_wei || '0', row.quote_decimals)}</td>
+                          <td className="px-2 py-2 text-emerald-200">{formatUsdtFromWei(row.fee_wei || '0', row.quote_decimals)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -5398,8 +5400,8 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                         <tr key={row.day}>
                           <td className="px-2 py-2 text-white">{String(row.day).slice(0, 10)}</td>
                           <td className="px-2 py-2 text-white/70">{Number(row.executions || 0).toLocaleString()}</td>
-                          <td className="px-2 py-2 text-white/70">{formatUsdtFromWei(row.quote_without_fee_wei || '0')}</td>
-                          <td className="px-2 py-2 text-emerald-200">{formatUsdtFromWei(row.fee_wei || '0')}</td>
+                          <td className="px-2 py-2 text-white/70">{formatUsdtFromWei(row.quote_without_fee_wei || '0', row.quote_decimals)}</td>
+                          <td className="px-2 py-2 text-emerald-200">{formatUsdtFromWei(row.fee_wei || '0', row.quote_decimals)}</td>
                         </tr>
                       ))}
                     </tbody>
