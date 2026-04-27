@@ -64,6 +64,9 @@ CONFIRMATIONS
 MASTER_MNEMONIC
 OMNIBUS_ADDRESS
 OMNIBUS_PK
+CONVERT_HOT_WALLET_ADDRESS
+CONVERT_HOT_WALLET_PK
+BSC_RPC_URL
 DATABASE_URL
 CORS_ORIGIN
 SESSION_COOKIE_DOMAIN
@@ -72,6 +75,8 @@ GOOGLE_OAUTH_CLIENT_ID
 GOOGLE_OAUTH_CLIENT_SECRET
 GOOGLE_OAUTH_REDIRECT_URI
 ```
+
+> Convert on-chain execution uses `CONVERT_HOT_WALLET_*` only. `OMNIBUS_*` stays dedicated to deposit/sweeper flows and is not used for convert execution.
 
 ### HD wallet guardrails
 - The platform uses a single `MASTER_MNEMONIC` per environment; do **not** rotate it once user
