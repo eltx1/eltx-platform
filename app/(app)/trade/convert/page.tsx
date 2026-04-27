@@ -24,13 +24,15 @@ type ConvertPair = {
 type ConvertConfigResponse = {
   category: Category | null;
   pairs: ConvertPair[];
-  settings: { convert_fee_bps: number; convert_min_usdt: number };
+  settings: { convert_fee_bps: number; convert_min_usdt: number; convert_execution_mode?: 'mock' | 'live' };
 };
 
-type SpotBook = {
-  orderbook: {
-    bids: Array<{ price: string; base_amount: string }>;
-    asks: Array<{ price: string; base_amount: string }>;
+type ConvertQuoteResponse = {
+  mode: 'mock' | 'live';
+  quote: {
+    quote_without_fee: string;
+    fee_usdt: string;
+    total_usdt: string;
   };
 };
 
@@ -42,22 +44,6 @@ function toCategory(value: string | null): Category {
 function parsePositive(value: string): number {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : 0;
-}
-
-function estimateQuote(levels: Array<{ price: string; base_amount: string }>, desiredBase: number): number {
-  if (!desiredBase) return 0;
-  let remaining = desiredBase;
-  let total = 0;
-  for (const level of levels) {
-    const price = parsePositive(level.price);
-    const liquidity = parsePositive(level.base_amount);
-    if (!price || !liquidity) continue;
-    const take = Math.min(remaining, liquidity);
-    total += take * price;
-    remaining -= take;
-    if (remaining <= 0) break;
-  }
-  return total;
 }
 
 function ConvertPageContent() {
@@ -72,6 +58,8 @@ function ConvertPageContent() {
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
   const [amount, setAmount] = useState('');
   const [estimate, setEstimate] = useState(0);
+  const [feeUsdt, setFeeUsdt] = useState(0);
+  const [convertMode, setConvertMode] = useState<'mock' | 'live'>('mock');
   const [minUsdt, setMinUsdt] = useState(10);
   const [feeBps, setFeeBps] = useState(50);
   const [loading, setLoading] = useState(true);
@@ -91,6 +79,7 @@ function ConvertPageContent() {
     setPairs(res.data.pairs || []);
     setMinUsdt(res.data.settings?.convert_min_usdt || 10);
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
+    setConvertMode(res.data.settings?.convert_execution_mode || 'mock');
     if ((res.data.pairs || []).length) {
       setSelectedSymbol((prev) => (prev && res.data.pairs.some((item) => item.symbol === prev) ? prev : res.data.pairs[0].symbol));
     }
@@ -104,19 +93,29 @@ function ConvertPageContent() {
     async function run() {
       if (!selectedPair || !amountNum) {
         setEstimate(0);
+        setFeeUsdt(0);
         return;
       }
-      const res = await apiFetch<SpotBook>(`/spot/orderbook?market=${encodeURIComponent(selectedPair.symbol)}`);
+      const res = await apiFetch<ConvertQuoteResponse>('/convert/quote', {
+        method: 'POST',
+        body: JSON.stringify({
+          category,
+          symbol: selectedPair.symbol,
+          side,
+          amount: amountNum.toString(),
+        }),
+      });
       if (!res.ok) {
         setEstimate(0);
+        setFeeUsdt(0);
         return;
       }
-      const levels = side === 'buy' ? res.data.orderbook.asks : res.data.orderbook.bids;
-      const quote = estimateQuote(levels, amountNum);
-      setEstimate(quote);
+      setConvertMode(res.data.mode || 'mock');
+      setEstimate(parsePositive(res.data.quote.total_usdt));
+      setFeeUsdt(parsePositive(res.data.quote.fee_usdt));
     }
     run();
-  }, [amountNum, selectedPair, side]);
+  }, [amountNum, category, selectedPair, side]);
 
   const executeSwap = useCallback(async () => {
     if (!selectedPair) return;
@@ -135,12 +134,12 @@ function ConvertPageContent() {
     }
 
     setPlacing(true);
-    const res = await apiFetch('/spot/orders', {
+    const res = await apiFetch('/convert/execute', {
       method: 'POST',
       body: JSON.stringify({
-        market: selectedPair.symbol,
+        category,
+        symbol: selectedPair.symbol,
         side,
-        type: 'market',
         amount: amountNum.toString(),
       }),
     });
@@ -149,10 +148,10 @@ function ConvertPageContent() {
       toast({ message: res.error || (isArabic ? 'فشل التنفيذ' : 'Execution failed'), variant: 'error' });
       return;
     }
-    toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Swap executed successfully', variant: 'success' });
+    toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Convert executed successfully', variant: 'success' });
     setAmount('');
     setEstimate(0);
-  }, [amountNum, estimate, isArabic, minUsdt, selectedPair, side, toast]);
+  }, [amountNum, category, estimate, isArabic, minUsdt, selectedPair, side, toast]);
 
   return (
     <section className="mx-auto w-full max-w-3xl space-y-4 p-4 md:p-6">
@@ -251,7 +250,10 @@ function ConvertPageContent() {
             {isArabic ? 'تقدير قيمة الصفقة' : 'Estimated quote value'}: <span className="font-semibold">{estimate.toFixed(4)} USDT</span>
           </div>
           <div className="mt-1 text-xs text-white/60">
-            {isArabic ? 'رسوم الكونفرت' : 'Convert fee'}: {(feeBps / 100).toFixed(2)}% · {isArabic ? 'حد ادني' : 'Min'} {minUsdt} USDT
+            {isArabic ? 'رسوم الكونفرت' : 'Convert fee'}: {(feeBps / 100).toFixed(2)}% ({feeUsdt.toFixed(4)} USDT) · {isArabic ? 'حد ادني' : 'Min'} {minUsdt} USDT
+          </div>
+          <div className="mt-1 text-xs text-white/50">
+            {isArabic ? 'وضع التنفيذ' : 'Execution mode'}: {convertMode === 'live' ? (isArabic ? 'حي - PancakeSwap' : 'Live - PancakeSwap') : isArabic ? 'تجريبي' : 'Mock'}
           </div>
         </div>
 
