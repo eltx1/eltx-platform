@@ -10812,6 +10812,86 @@ app.get('/admin/convert/pairs', async (req, res, next) => {
   }
 });
 
+app.get('/admin/convert/reports', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const [overviewRows] = await pool.query(
+      `SELECT
+         COUNT(*) AS total_executions,
+         SUM(CASE WHEN ce.status='completed' THEN 1 ELSE 0 END) AS completed_executions,
+         SUM(CASE WHEN ce.status='failed' THEN 1 ELSE 0 END) AS failed_executions,
+         COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+         COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+       FROM convert_executions ce`
+    );
+    const [categoryRows] = await pool.query(
+      `SELECT cp.category,
+              COUNT(*) AS executions,
+              SUM(CASE WHEN ce.status='completed' THEN 1 ELSE 0 END) AS completed,
+              SUM(CASE WHEN ce.status='failed' THEN 1 ELSE 0 END) AS failed,
+              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+         FROM convert_executions ce
+         JOIN convert_pairs cp ON cp.id = ce.pair_id
+        GROUP BY cp.category
+        ORDER BY FIELD(cp.category, 'gold', 'stocks', 'crypto')`
+    );
+    const [topPairsRows] = await pool.query(
+      `SELECT cp.category,
+              cp.symbol,
+              COUNT(*) AS executions,
+              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+         FROM convert_executions ce
+         JOIN convert_pairs cp ON cp.id = ce.pair_id
+        GROUP BY cp.category, cp.symbol
+        ORDER BY quote_without_fee_wei DESC
+        LIMIT 12`
+    );
+    const [dailyRows] = await pool.query(
+      `SELECT DATE(ce.created_at) AS day,
+              COUNT(*) AS executions,
+              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+         FROM convert_executions ce
+        WHERE ce.created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 14 DAY)
+        GROUP BY DATE(ce.created_at)
+        ORDER BY day DESC`
+    );
+    const [recentRows] = await pool.query(
+      `SELECT ce.id,
+              ce.user_id,
+              cp.category,
+              cp.symbol,
+              ce.side,
+              ce.status,
+              ce.debit_asset,
+              ce.debit_wei,
+              ce.credited_asset,
+              ce.credited_wei,
+              ce.quote_without_fee_wei,
+              ce.quote_decimals,
+              ce.fee_wei,
+              ce.tx_hash,
+              ce.created_at
+         FROM convert_executions ce
+         JOIN convert_pairs cp ON cp.id = ce.pair_id
+        ORDER BY ce.id DESC
+        LIMIT 20`
+    );
+    res.json({
+      ok: true,
+      overview: overviewRows[0] || null,
+      categories: categoryRows,
+      top_pairs: topPairsRows,
+      daily: dailyRows,
+      recent: recentRows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post('/admin/convert/pairs', async (req, res, next) => {
   try {
     await requireAdmin(req);

@@ -140,6 +140,58 @@ type FeeSettings = {
 };
 
 type FeeBalanceRow = { fee_type: 'swap' | 'spot' | 'withdrawal' | string; asset: string; amount: string; amount_wei: string; entries: number };
+type ConvertReportOverview = {
+  total_executions: number;
+  completed_executions: number;
+  failed_executions: number;
+  quote_without_fee_wei: string;
+  fee_wei: string;
+};
+type ConvertReportCategory = {
+  category: 'gold' | 'stocks' | 'crypto' | string;
+  executions: number;
+  completed: number;
+  failed: number;
+  quote_without_fee_wei: string;
+  fee_wei: string;
+};
+type ConvertReportPair = {
+  category: 'gold' | 'stocks' | 'crypto' | string;
+  symbol: string;
+  executions: number;
+  quote_without_fee_wei: string;
+  fee_wei: string;
+};
+type ConvertReportDay = {
+  day: string;
+  executions: number;
+  quote_without_fee_wei: string;
+  fee_wei: string;
+};
+type ConvertReportRecent = {
+  id: number;
+  user_id: number;
+  category: 'gold' | 'stocks' | 'crypto' | string;
+  symbol: string;
+  side: 'buy' | 'sell' | string;
+  status: 'completed' | 'failed' | 'processing' | string;
+  debit_asset: string;
+  debit_wei: string;
+  credited_asset: string | null;
+  credited_wei: string | null;
+  quote_without_fee_wei: string;
+  quote_decimals: number;
+  fee_wei: string;
+  tx_hash: string | null;
+  created_at: string;
+};
+type ConvertReportsResponse = {
+  overview: ConvertReportOverview | null;
+  categories: ConvertReportCategory[];
+  top_pairs: ConvertReportPair[];
+  daily: ConvertReportDay[];
+  recent: ConvertReportRecent[];
+};
 
 type AiSettings = { daily_free_messages: number; message_price_usdt: string };
 type AiRuntime = {
@@ -4691,6 +4743,13 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     candleFetchCap: '0',
   });
   const [savingProtection, setSavingProtection] = useState(false);
+  const [convertReports, setConvertReports] = useState<ConvertReportsResponse>({
+    overview: null,
+    categories: [],
+    top_pairs: [],
+    daily: [],
+    recent: [],
+  });
 
   const syncFormWithSettings = useCallback((next: FeeSettings) => {
     const makerBps = next.spot_maker_fee_bps ?? next.spot_trade_fee_bps ?? 0;
@@ -4710,9 +4769,10 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [feeRes, protectionRes] = await Promise.all([
+    const [feeRes, protectionRes, convertReportsRes] = await Promise.all([
       apiFetch<{ settings: FeeSettings; balances: FeeBalanceRow[] }>('/admin/fees'),
       apiFetch<{ settings: SpotProtectionSettings }>('/admin/spot/protection'),
+      apiFetch<ConvertReportsResponse>('/admin/convert/reports'),
     ]);
 
     if (feeRes.ok) {
@@ -4736,6 +4796,18 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
       });
     } else {
       onNotify(protectionRes.error || 'Failed to load spot protection settings', 'error');
+    }
+
+    if (convertReportsRes.ok) {
+      setConvertReports({
+        overview: convertReportsRes.data.overview || null,
+        categories: Array.isArray(convertReportsRes.data.categories) ? convertReportsRes.data.categories : [],
+        top_pairs: Array.isArray(convertReportsRes.data.top_pairs) ? convertReportsRes.data.top_pairs : [],
+        daily: Array.isArray(convertReportsRes.data.daily) ? convertReportsRes.data.daily : [],
+        recent: Array.isArray(convertReportsRes.data.recent) ? convertReportsRes.data.recent : [],
+      });
+    } else {
+      onNotify(convertReportsRes.error || 'Failed to load convert reports', 'error');
     }
     setLoading(false);
   }, [onNotify, syncFormWithSettings]);
@@ -4786,6 +4858,20 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
       { swap: [] as FeeBalanceRow[], spot: [] as FeeBalanceRow[], withdrawal: [] as FeeBalanceRow[] }
     );
   }, [balances]);
+
+  const convertOverview = convertReports.overview;
+  const convertSuccessRate = useMemo(() => {
+    if (!convertOverview || !Number(convertOverview.total_executions || 0)) return 0;
+    return (Number(convertOverview.completed_executions || 0) / Number(convertOverview.total_executions || 0)) * 100;
+  }, [convertOverview]);
+
+  const formatUsdtFromWei = (value: string) => {
+    try {
+      return Number(formatUnits(value || '0', 18)).toLocaleString(undefined, { maximumFractionDigits: 4 });
+    } catch {
+      return '0';
+    }
+  };
 
   const updateFees = async () => {
     const payload: Record<string, unknown> = {};
@@ -5203,6 +5289,166 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
             {renderBalanceTable('Swap fees collected', groupedBalances.swap)}
             {renderBalanceTable('Spot fees collected', groupedBalances.spot)}
             {renderBalanceTable('Withdrawal fees collected', groupedBalances.withdrawal)}
+          </div>
+
+          <div className="rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/10 via-slate-900/60 to-indigo-500/10 p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h4 className="text-md font-semibold text-cyan-100">Convert intelligence dashboard</h4>
+                <p className="mt-1 text-sm text-white/65">Multi-category reporting for Gold, Stocks, and Crypto convert activity.</p>
+              </div>
+              <span className="rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">
+                Last 14 days + realtime totals
+              </span>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <StatCard
+                title="Total executions"
+                value={(convertOverview?.total_executions || 0).toLocaleString()}
+                subtitle="Across all convert categories"
+                icon={Sparkles}
+              />
+              <StatCard
+                title="Success rate"
+                value={`${convertSuccessRate.toFixed(1)}%`}
+                subtitle={`${(convertOverview?.completed_executions || 0).toLocaleString()} completed / ${(convertOverview?.failed_executions || 0).toLocaleString()} failed`}
+                icon={ShieldCheck}
+              />
+              <StatCard
+                title="USDT gross volume"
+                value={`${formatUsdtFromWei(convertOverview?.quote_without_fee_wei || '0')} USDT`}
+                subtitle="Before fees"
+                icon={DollarSign}
+              />
+              <StatCard
+                title="USDT fees"
+                value={`${formatUsdtFromWei(convertOverview?.fee_wei || '0')} USDT`}
+                subtitle="Net platform convert revenue"
+                icon={Coins}
+              />
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-3">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4 xl:col-span-1">
+                <h5 className="text-sm font-semibold text-white/85">Category breakdown</h5>
+                <div className="mt-3 space-y-2">
+                  {convertReports.categories.map((row) => (
+                    <div key={row.category} className="rounded-lg border border-white/10 bg-white/[0.02] p-2.5 text-xs">
+                      <div className="flex items-center justify-between text-white/80">
+                        <span className="uppercase">{row.category}</span>
+                        <span>{Number(row.executions || 0).toLocaleString()} exec</span>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-white/60">
+                        <span>{Number(row.completed || 0).toLocaleString()} success</span>
+                        <span>{Number(row.failed || 0).toLocaleString()} failed</span>
+                      </div>
+                      <div className="mt-1 text-white/70">Vol: {formatUsdtFromWei(row.quote_without_fee_wei || '0')} USDT</div>
+                    </div>
+                  ))}
+                  {!convertReports.categories.length ? <div className="text-xs text-white/55">No convert data yet.</div> : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4 xl:col-span-2">
+                <h5 className="text-sm font-semibold text-white/85">Top pairs by volume</h5>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full divide-y divide-white/10 text-xs">
+                    <thead className="bg-white/5 text-white/60">
+                      <tr>
+                        <th className="px-2 py-2 text-left">Category</th>
+                        <th className="px-2 py-2 text-left">Pair</th>
+                        <th className="px-2 py-2 text-left">Executions</th>
+                        <th className="px-2 py-2 text-left">Volume (USDT)</th>
+                        <th className="px-2 py-2 text-left">Fees (USDT)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {convertReports.top_pairs.map((row) => (
+                        <tr key={`${row.category}-${row.symbol}`}>
+                          <td className="px-2 py-2 uppercase text-white/70">{row.category}</td>
+                          <td className="px-2 py-2 text-white">{row.symbol}</td>
+                          <td className="px-2 py-2 text-white/75">{Number(row.executions || 0).toLocaleString()}</td>
+                          <td className="px-2 py-2 text-white/75">{formatUsdtFromWei(row.quote_without_fee_wei || '0')}</td>
+                          <td className="px-2 py-2 text-emerald-200">{formatUsdtFromWei(row.fee_wei || '0')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!convertReports.top_pairs.length ? <div className="py-3 text-xs text-white/55">No pair performance data yet.</div> : null}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <h5 className="text-sm font-semibold text-white/85">Daily throughput (14d)</h5>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full divide-y divide-white/10 text-xs">
+                    <thead className="bg-white/5 text-white/60">
+                      <tr>
+                        <th className="px-2 py-2 text-left">Day</th>
+                        <th className="px-2 py-2 text-left">Executions</th>
+                        <th className="px-2 py-2 text-left">Volume (USDT)</th>
+                        <th className="px-2 py-2 text-left">Fees (USDT)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {convertReports.daily.map((row) => (
+                        <tr key={row.day}>
+                          <td className="px-2 py-2 text-white">{String(row.day).slice(0, 10)}</td>
+                          <td className="px-2 py-2 text-white/70">{Number(row.executions || 0).toLocaleString()}</td>
+                          <td className="px-2 py-2 text-white/70">{formatUsdtFromWei(row.quote_without_fee_wei || '0')}</td>
+                          <td className="px-2 py-2 text-emerald-200">{formatUsdtFromWei(row.fee_wei || '0')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!convertReports.daily.length ? <div className="py-3 text-xs text-white/55">No daily convert trend yet.</div> : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
+                <h5 className="text-sm font-semibold text-white/85">Latest executions</h5>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="min-w-full divide-y divide-white/10 text-xs">
+                    <thead className="bg-white/5 text-white/60">
+                      <tr>
+                        <th className="px-2 py-2 text-left">ID</th>
+                        <th className="px-2 py-2 text-left">Pair</th>
+                        <th className="px-2 py-2 text-left">Side</th>
+                        <th className="px-2 py-2 text-left">Status</th>
+                        <th className="px-2 py-2 text-left">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {convertReports.recent.map((row) => (
+                        <tr key={row.id}>
+                          <td className="px-2 py-2 text-white/75">#{row.id}</td>
+                          <td className="px-2 py-2 text-white">{row.symbol}</td>
+                          <td className="px-2 py-2 uppercase text-white/70">{row.side}</td>
+                          <td className="px-2 py-2">
+                            <span
+                              className={`rounded-full px-2 py-0.5 ${
+                                row.status === 'completed'
+                                  ? 'bg-emerald-500/20 text-emerald-200'
+                                  : row.status === 'failed'
+                                  ? 'bg-rose-500/20 text-rose-200'
+                                  : 'bg-amber-500/20 text-amber-200'
+                              }`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className="px-2 py-2 text-white/60">{new Date(row.created_at).toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!convertReports.recent.length ? <div className="py-3 text-xs text-white/55">No recent executions yet.</div> : null}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
