@@ -44,7 +44,7 @@ export default function AppBottomNav() {
     { href: '/dashboard', label: t.appNav.home, icon: Home },
     { href: '/wallet', label: t.appNav.wallet, icon: Wallet },
     { href: '/messages', label: t.appNav.messages, icon: Mail },
-    { href: '/trade/spot', label: t.appNav.spotTrade, icon: CandlestickChart, activeRoot: '/trade' },
+    { href: '/trade', label: t.appNav.spotTrade, icon: CandlestickChart, activeRoot: '/trade' },
     { href: '/staking', label: t.appNav.staking, icon: Coins },
   ];
 

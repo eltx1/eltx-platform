@@ -340,6 +340,29 @@ export default function TradePage() {
             <div className="space-y-1">
               <h1 className="text-2xl font-semibold tracking-tight">{t.trade.title}</h1>
               <p className="text-sm text-white/60">{t.trade.description}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push('/trade/spot?type=gold')}
+                  className="rounded-full border border-[#c9a75c]/60 bg-[#c9a75c]/20 px-3 py-1 text-xs font-semibold text-[#f4deae] transition hover:brightness-110"
+                >
+                  GOLD
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/trade/spot?type=stocks')}
+                  className="rounded-full border border-white/25 px-3 py-1 text-xs font-semibold text-white/80 transition hover:border-white/45 hover:text-white"
+                >
+                  Stocks
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/trade/spot?type=crypto')}
+                  className="rounded-full border border-white/25 px-3 py-1 text-xs font-semibold text-white/80 transition hover:border-white/45 hover:text-white"
+                >
+                  Crypto
+                </button>
+              </div>
             </div>
             {lastUpdatedLabel && (
               <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-white/50">
@@ -564,4 +587,3 @@ export default function TradePage() {
     </div>
   );
 }
-

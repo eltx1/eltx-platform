@@ -814,6 +814,7 @@ const AdminSpotMarketUpdateSchema = z
     amount_precision: z.coerce.number().int().min(0).max(18).optional(),
     active: z.boolean().optional(),
     allow_market_orders: z.boolean().optional(),
+    market_type: z.enum(['gold', 'stocks', 'crypto']).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
@@ -2665,10 +2666,16 @@ function normalizeMarketSymbol(symbol) {
   return symbol.replace(/\s+/g, '').toUpperCase().replace('-', '/');
 }
 
+function normalizeSpotMarketType(type) {
+  const normalized = String(type || '').trim().toLowerCase();
+  if (normalized === 'gold' || normalized === 'stocks' || normalized === 'crypto') return normalized;
+  return null;
+}
+
 async function getSpotMarket(conn, symbol, { forUpdate = false } = {}) {
   const normalized = normalizeMarketSymbol(symbol);
   const executor = conn.query ? conn : pool;
-  const sql = `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount, price_precision, amount_precision, active, allow_market_orders FROM spot_markets WHERE symbol=?${
+  const sql = `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount, price_precision, amount_precision, active, allow_market_orders, market_type FROM spot_markets WHERE symbol=?${
     forUpdate ? ' FOR UPDATE' : ''
   }`;
   const [rows] = await executor.query(sql, [normalized]);
@@ -9336,7 +9343,7 @@ app.get('/admin/pricing', async (req, res, next) => {
     );
     const [spotRows] = await pool.query(
       `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals,
-              min_base_amount, min_quote_amount, price_precision, amount_precision, active, allow_market_orders, created_at, updated_at
+              min_base_amount, min_quote_amount, price_precision, amount_precision, active, allow_market_orders, market_type, created_at, updated_at
          FROM spot_markets
          ORDER BY symbol`
     );
@@ -9367,6 +9374,7 @@ app.get('/admin/pricing', async (req, res, next) => {
       amount_precision: row.amount_precision,
       active: !!row.active,
       allow_market_orders: row.allow_market_orders === undefined || row.allow_market_orders === null ? true : !!row.allow_market_orders,
+      market_type: normalizeSpotMarketType(row.market_type) || 'crypto',
       created_at: row.created_at,
       updated_at: row.updated_at,
     }));
@@ -9521,12 +9529,16 @@ app.patch('/admin/pricing/spot/:symbol', async (req, res, next) => {
       fields.push('allow_market_orders = ?');
       params.push(updates.allow_market_orders ? 1 : 0);
     }
+    if (updates.market_type !== undefined) {
+      fields.push('market_type = ?');
+      params.push(updates.market_type);
+    }
     if (!fields.length) return next({ status: 400, code: 'BAD_INPUT', message: 'No fields to update' });
     params.push(symbol);
     await pool.query(`UPDATE spot_markets SET ${fields.join(', ')}, updated_at = NOW() WHERE symbol = ?`, params);
     const [[market]] = await pool.query(
       `SELECT id, symbol, base_asset, base_decimals, quote_asset, quote_decimals, min_base_amount, min_quote_amount,
-              price_precision, amount_precision, active, allow_market_orders, created_at, updated_at
+              price_precision, amount_precision, active, allow_market_orders, market_type, created_at, updated_at
          FROM spot_markets WHERE symbol=?`,
       [symbol]
     );
@@ -10642,15 +10654,20 @@ app.post('/trade/execute', walletLimiter, async (req, res, next) => {
 app.get('/spot/markets', spotLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
+    const requestedType = normalizeSpotMarketType(req.query.type);
     const liquidityState = await readBinanceLiquidityState();
     const externalMarketAvailable = liquidityState.enabled && (liquidityState.configured || liquidityState.mockMode);
+    const typeFilterSql = requestedType ? ' AND LOWER(COALESCE(sm.market_type, "crypto")) = ?' : '';
     const [rows] = await pool.query(
       `SELECT sm.id, sm.symbol, sm.base_asset, sm.base_decimals, sm.quote_asset, sm.quote_decimals, sm.min_base_amount, sm.min_quote_amount,
-              sm.price_precision, sm.amount_precision, sm.active, sm.allow_market_orders,
+              sm.price_precision, sm.amount_precision, sm.active, sm.allow_market_orders, sm.market_type,
               (SELECT price_wei FROM spot_trades WHERE market_id = sm.id ORDER BY id DESC LIMIT 1) AS last_price_wei
        FROM spot_markets sm
        WHERE sm.active = 1
+       ${typeFilterSql}
        ORDER BY sm.symbol`
+      ,
+      requestedType ? [requestedType] : []
     );
     const feeSettings = await readSpotFeeBps();
     const markets = rows.map((row) => {
@@ -10666,6 +10683,7 @@ app.get('/spot/markets', spotLimiter, async (req, res, next) => {
         min_quote_amount: trimDecimal(row.min_quote_amount),
         price_precision: row.price_precision,
         amount_precision: row.amount_precision,
+        market_type: normalizeSpotMarketType(row.market_type) || 'crypto',
         allow_market_orders:
           (row.allow_market_orders === undefined || row.allow_market_orders === null ? true : !!row.allow_market_orders) ||
           externalMarketAvailable,

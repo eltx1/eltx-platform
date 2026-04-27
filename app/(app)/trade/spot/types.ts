@@ -11,6 +11,7 @@ export type SpotMarket = {
   price_precision?: number;
   amount_precision?: number;
   allow_market_orders?: boolean;
+  market_type?: 'gold' | 'stocks' | 'crypto';
   min_price?: string | null;
   max_price?: string | null;
   price_min?: string | null;

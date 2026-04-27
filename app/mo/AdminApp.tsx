@@ -328,6 +328,7 @@ type SpotMarketRow = {
   amount_precision: number;
   active: boolean;
   allow_market_orders: boolean;
+  market_type?: 'gold' | 'stocks' | 'crypto';
   created_at?: string;
   updated_at?: string;
 };
@@ -5278,6 +5279,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
     const amountPrecision = window.prompt('Amount precision (0-18)', row.amount_precision?.toString() ?? '');
     const allowMarketOrders = window.prompt('Allow market orders? (yes/no)', row.allow_market_orders ? 'yes' : 'no');
     const activeInput = window.prompt('Market status (active/inactive)', row.active ? 'active' : 'inactive');
+    const marketType = window.prompt('Market type (gold/stocks/crypto)', row.market_type || 'crypto');
     const body: Record<string, unknown> = {};
 
     if (minBase !== null && minBase.trim() !== '') body.min_base_amount = minBase.trim();
@@ -5307,6 +5309,11 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
       if (['active', 'yes', 'true', 'y', '1'].includes(normalized)) body.active = true;
       else if (['inactive', 'no', 'false', 'n', '0', 'off'].includes(normalized)) body.active = false;
       else return onNotify('Invalid market status', 'error');
+    }
+    if (marketType !== null && marketType.trim() !== '') {
+      const normalized = marketType.trim().toLowerCase();
+      if (normalized === 'gold' || normalized === 'stocks' || normalized === 'crypto') body.market_type = normalized;
+      else return onNotify('Invalid market type', 'error');
     }
 
     if (!Object.keys(body).length) return;
@@ -5456,6 +5463,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                       <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Quote min</th>
                       <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Price precision</th>
                       <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Amount precision</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Type</th>
                       <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Market orders</th>
                       <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-white/60">Status</th>
                       <th className="px-3 py-2"></th>
@@ -5469,6 +5477,7 @@ function PricingPanel({ onNotify }: { onNotify: (message: string, variant?: 'suc
                         <td className="px-3 py-2">{row.min_quote_amount}</td>
                         <td className="px-3 py-2">{row.price_precision}</td>
                         <td className="px-3 py-2">{row.amount_precision}</td>
+                        <td className="px-3 py-2">{(row.market_type || 'crypto').toUpperCase()}</td>
                         <td className="px-3 py-2">
                           <span
                             className={`rounded-full px-3 py-1 text-[11px] font-semibold ${

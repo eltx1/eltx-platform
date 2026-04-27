@@ -126,6 +126,8 @@ const MARKET_PRIORITY = [
   'MCOIN/USDT',
   'PAXG/USDT',
 ];
+const TRADE_CATEGORIES = ['gold', 'stocks', 'crypto'] as const;
+type TradeCategory = (typeof TRADE_CATEGORIES)[number];
 const STREAM_TRADE_LIMIT = 50;
 const MIN_SPOT_ORDER_VALUE_USDT = new Decimal(5);
 
@@ -148,6 +150,12 @@ function sortMarkets(markets: SpotMarket[]): SpotMarket[] {
     if (rankA !== rankB) return rankA - rankB;
     return a.symbol.localeCompare(b.symbol);
   });
+}
+
+function normalizeTradeCategory(value: string | null | undefined): TradeCategory {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'gold' || normalized === 'stocks' || normalized === 'crypto') return normalized;
+  return 'crypto';
 }
 
 function exceedsPrecision(raw: string, precision?: number | null): boolean {
@@ -194,6 +202,7 @@ function SpotTradePageContent() {
   const toast = useToast();
 
   const [markets, setMarkets] = useState<SpotMarket[]>([]);
+  const [activeCategory, setActiveCategory] = useState<TradeCategory>('crypto');
   const [fees, setFees] = useState<SpotFees>({ maker: 0, taker: 0 });
   const [selectedMarket, setSelectedMarket] = useState('');
   const [marketSelectorOpen, setMarketSelectorOpen] = useState(false);
@@ -229,7 +238,9 @@ function SpotTradePageContent() {
 
   const loadMarkets = useCallback(async () => {
     setLoadingMarkets(true);
-    const res = await apiFetch<MarketsResponse>('/spot/markets');
+    const params = new URLSearchParams();
+    params.set('type', activeCategory);
+    const res = await apiFetch<MarketsResponse>(`/spot/markets?${params.toString()}`);
     setLoadingMarkets(false);
     if (!res.ok) {
       setErrorBanner(res.error || t.common.genericError);
@@ -240,7 +251,7 @@ function SpotTradePageContent() {
     const makerBps = res.data.fees?.maker_bps ?? 0;
     const takerBps = res.data.fees?.taker_bps ?? makerBps;
     setFees({ maker: Number.isFinite(makerBps) ? makerBps : 0, taker: Number.isFinite(takerBps) ? takerBps : 0 });
-  }, [t.common.genericError]);
+  }, [activeCategory, t.common.genericError]);
 
   const loadOrderbook = useCallback(
     async (marketSymbol: string, options: { suppressError?: boolean } = {}) => {
@@ -400,6 +411,15 @@ function SpotTradePageContent() {
     const fromUrl = searchParams?.get('market');
     return fromUrl ? fromUrl.toUpperCase() : '';
   }, [searchParams]);
+
+  const preferredCategory = useMemo(
+    () => normalizeTradeCategory(searchParams?.get('type')),
+    [searchParams]
+  );
+
+  useEffect(() => {
+    setActiveCategory(preferredCategory);
+  }, [preferredCategory]);
 
   useEffect(() => {
     if (!markets.length) return;
@@ -942,6 +962,34 @@ function SpotTradePageContent() {
 
       <div className="space-y-1.5">
         <h1 className="text-lg font-semibold">{t.spotTrade.title}</h1>
+        <div className="flex flex-wrap gap-2">
+          {TRADE_CATEGORIES.map((category) => {
+            const isActive = activeCategory === category;
+            const label =
+              category === 'gold' ? 'GOLD' : category === 'stocks' ? 'Stocks' : 'Crypto';
+            return (
+              <button
+                key={category}
+                type="button"
+                onClick={() => {
+                  setActiveCategory(category);
+                  const next = new URLSearchParams(searchParams?.toString() || '');
+                  next.set('type', category);
+                  next.delete('market');
+                  router.replace(`/trade/spot?${next.toString()}`);
+                  setSelectedMarket('');
+                }}
+                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  isActive
+                    ? 'border-[#c9a75c] bg-[#c9a75c]/25 text-[#f4deae]'
+                    : 'border-white/20 text-white/75 hover:border-white/35 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {errorBanner && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/40 rounded p-2.5">{errorBanner}</div>}

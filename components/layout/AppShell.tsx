@@ -9,7 +9,7 @@ import { useMessageUnread } from '../../app/lib/useMessageUnread';
 const items = [
   { href: '/dashboard', key: 'home', icon: Home },
   { href: '/for-you', key: 'feed', icon: Search },
-  { href: '/trade/spot', key: 'explore', icon: Search },
+  { href: '/trade', key: 'explore', icon: Search },
   { href: '/transactions', key: 'alerts', icon: Bell },
   { href: '/messages', key: 'messages', icon: Mail },
   { href: '/wallet', key: 'wallet', icon: Wallet },
