@@ -523,6 +523,19 @@ test('POST /convert/execute returns replay response for same idempotency key', a
   assert.equal(res.body?.idempotent_replay, true);
 });
 
+test('POST /convert/execute validates idempotency key header before database insert', async () => {
+  const tooLongKey = 'k'.repeat(129);
+  const beforeCount = testSchema.convertExecutions.length;
+  const res = await request
+    .post('/convert/execute')
+    .set('Cookie', 'sid=valid-session')
+    .set('idempotency-key', tooLongKey)
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '1' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body?.error?.code, 'BAD_INPUT');
+  assert.equal(testSchema.convertExecutions.length, beforeCount);
+});
+
 test('POST /convert/execute blocks live mode when wallet env is missing and fallback disabled', async () => {
   testSchema.convertSettings.convert_execution_mode = 'live';
   testSchema.convertSettings.convert_live_fallback_mock = '0';

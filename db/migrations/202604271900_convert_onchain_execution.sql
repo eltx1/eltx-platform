@@ -107,3 +107,19 @@ PREPARE alter_convert_exec_stmt FROM @alter_convert_exec_sql;
 EXECUTE alter_convert_exec_stmt;
 DEALLOCATE PREPARE alter_convert_exec_stmt;
 
+
+SET @has_exec_idempotency_idx := (
+  SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS
+  WHERE TABLE_SCHEMA=@schema_name
+    AND TABLE_NAME='convert_executions'
+    AND INDEX_NAME='idx_convert_executions_idempotency'
+);
+SET @add_convert_exec_idempotency_idx_sql := IF(
+  @has_exec_idempotency_idx = 0,
+  'ALTER TABLE convert_executions ADD KEY idx_convert_executions_idempotency (user_id, idempotency_key)',
+  'SELECT 1'
+);
+PREPARE add_convert_exec_idempotency_idx_stmt FROM @add_convert_exec_idempotency_idx_sql;
+EXECUTE add_convert_exec_idempotency_idx_stmt;
+DEALLOCATE PREPARE add_convert_exec_idempotency_idx_stmt;
+

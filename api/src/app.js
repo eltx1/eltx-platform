@@ -863,8 +863,10 @@ const ConvertQuoteSchema = z.object({
   amount: z.string().min(1),
 });
 
+const ConvertIdempotencyKeySchema = z.string().trim().min(8).max(128);
+
 const ConvertExecuteSchema = ConvertQuoteSchema.extend({
-  idempotency_key: z.string().trim().min(8).max(128).optional(),
+  idempotency_key: ConvertIdempotencyKeySchema.optional(),
 });
 
 const AdminStripePricingUpdateSchema = z
@@ -10614,7 +10616,22 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
   try {
     userId = await requireUser(req);
     const payload = ConvertExecuteSchema.parse(req.body || {});
-    const idempotencyKey = String(payload.idempotency_key || req.headers['idempotency-key'] || '').trim() || null;
+    const headerIdempotencyRaw = req.headers['idempotency-key'];
+    const headerIdempotency = Array.isArray(headerIdempotencyRaw) ? headerIdempotencyRaw[0] : headerIdempotencyRaw;
+    const idempotencySource = payload.idempotency_key ?? headerIdempotency;
+    let idempotencyKey = null;
+    if (idempotencySource != null && String(idempotencySource).trim() !== '') {
+      const parsedIdempotency = ConvertIdempotencyKeySchema.safeParse(idempotencySource);
+      if (!parsedIdempotency.success) {
+        return next({
+          status: 400,
+          code: 'BAD_INPUT',
+          message: 'Invalid idempotency key',
+          details: parsedIdempotency.error.flatten(),
+        });
+      }
+      idempotencyKey = parsedIdempotency.data;
+    }
     const pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const settings = await readConvertSettings();
