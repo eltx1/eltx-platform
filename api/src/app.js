@@ -863,7 +863,9 @@ const ConvertQuoteSchema = z.object({
   amount: z.string().min(1),
 });
 
-const ConvertExecuteSchema = ConvertQuoteSchema;
+const ConvertExecuteSchema = ConvertQuoteSchema.extend({
+  idempotency_key: z.string().trim().min(8).max(128).optional(),
+});
 
 const AdminStripePricingUpdateSchema = z
   .object({
@@ -2702,6 +2704,7 @@ async function readConvertSettings(conn = pool) {
   const minVal = await getPlatformSettingValue('convert_min_usdt', '10', conn);
   const modeVal = await getPlatformSettingValue('convert_execution_mode', 'mock', conn);
   const slippageVal = await getPlatformSettingValue('convert_slippage_bps', '120', conn);
+  const fallbackVal = await getPlatformSettingValue('convert_live_fallback_mock', '1', conn);
   const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
   const minUsdt = Number.parseFloat(minVal || '10');
   const slippageBps = clampBps(BigInt(Number.parseInt(slippageVal, 10) || 0));
@@ -2710,6 +2713,7 @@ async function readConvertSettings(conn = pool) {
     convert_min_usdt: Number.isFinite(minUsdt) && minUsdt >= 0 ? minUsdt : 10,
     convert_execution_mode: modeVal === 'live' ? 'live' : 'mock',
     convert_slippage_bps: Number(slippageBps),
+    convert_live_fallback_mock: fallbackVal === '0' ? 0 : 1,
   };
 }
 
@@ -2776,13 +2780,57 @@ async function getConvertPairBySymbol(symbol, category = null, conn = pool) {
   return rows[0] ? mapConvertPairRow(rows[0]) : null;
 }
 
+function summarizeConvertRuntimeReadiness(settings) {
+  const rpcUrl = process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP || '';
+  const pk = process.env.CONVERT_HOT_WALLET_PK || '';
+  const configuredHotWalletAddress = (process.env.CONVERT_HOT_WALLET_ADDRESS || '').toLowerCase();
+  const missingEnv = [];
+  if (!rpcUrl) missingEnv.push('BSC_RPC_URL (or BSC_RPC_HTTP)');
+  if (!pk) missingEnv.push('CONVERT_HOT_WALLET_PK');
+  if (!configuredHotWalletAddress) missingEnv.push('CONVERT_HOT_WALLET_ADDRESS');
+
+  let resolvedWalletAddress = '';
+  if (pk) {
+    try {
+      resolvedWalletAddress = ethers.computeAddress(pk).toLowerCase();
+    } catch {
+      missingEnv.push('CONVERT_HOT_WALLET_PK (invalid private key)');
+    }
+  }
+  if (
+    configuredHotWalletAddress &&
+    resolvedWalletAddress &&
+    configuredHotWalletAddress !== resolvedWalletAddress
+  ) {
+    missingEnv.push('CONVERT_HOT_WALLET_ADDRESS mismatch with CONVERT_HOT_WALLET_PK');
+  }
+  const envReady = missingEnv.length === 0;
+  const liveRequested = settings.convert_execution_mode === 'live';
+  const fallbackEnabled = Number(settings.convert_live_fallback_mock || 0) === 1;
+  const mode = liveRequested && envReady ? 'live' : 'mock';
+  const warning =
+    liveRequested && !envReady
+      ? `[convert] live mode requested but not ready; missing/invalid: ${missingEnv.join(', ')}. fallback_to_mock=${fallbackEnabled ? '1' : '0'}`
+      : '';
+  return {
+    mode,
+    envReady,
+    settings,
+    rpcUrl,
+    pk,
+    resolvedWalletAddress: resolvedWalletAddress || configuredHotWalletAddress || null,
+    missingEnv,
+    warning,
+    fallbackEnabled,
+    liveRequested,
+  };
+}
+
 async function buildConvertRuntime(conn = pool) {
   const settings = await readConvertSettings(conn);
-  const rpcUrl = process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP || '';
-  const pk = process.env.HOT_WALLET_PRIVATE_KEY || process.env.PLATFORM_WALLET_PRIVATE_KEY || '';
-  const envReady = !!rpcUrl && !!pk;
-  const mode = settings.convert_execution_mode === 'live' && envReady ? 'live' : 'mock';
-  return { mode, envReady, settings, rpcUrl, pk };
+  const runtime = summarizeConvertRuntimeReadiness(settings);
+  if (runtime.warning) console.warn(runtime.warning);
+  return runtime;
 }
 
 async function quoteConvertFromPancake(pair, side, amountWei) {
@@ -10513,6 +10561,13 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
 
     const runtime = await buildConvertRuntime();
+    if (runtime.liveRequested && !runtime.envReady && !runtime.fallbackEnabled) {
+      return next({
+        status: 503,
+        code: 'CONVERT_LIVE_NOT_READY',
+        message: `Convert live mode misconfigured: ${runtime.missingEnv.join(', ')}`,
+      });
+    }
     const quoteInfo =
       runtime.mode === 'live'
         ? await quoteConvertFromPancake(pair, payload.side, amountWei)
@@ -10528,6 +10583,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     res.json({
       ok: true,
       mode: runtime.mode,
+      runtime_warning: runtime.warning || null,
       pair,
       quote: {
         side: payload.side,
@@ -10558,6 +10614,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
   try {
     userId = await requireUser(req);
     const payload = ConvertExecuteSchema.parse(req.body || {});
+    const idempotencyKey = String(payload.idempotency_key || req.headers['idempotency-key'] || '').trim() || null;
     const pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const settings = await readConvertSettings();
@@ -10568,6 +10625,13 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     const amountWei = bigIntFromValue(amountWeiStr);
     if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
     const runtime = await buildConvertRuntime();
+    if (runtime.liveRequested && !runtime.envReady && !runtime.fallbackEnabled) {
+      return next({
+        status: 503,
+        code: 'CONVERT_LIVE_NOT_READY',
+        message: `Convert live mode misconfigured: ${runtime.missingEnv.join(', ')}`,
+      });
+    }
     const quoteInfo =
       runtime.mode === 'live'
         ? await quoteConvertFromPancake(pair, payload.side, amountWei)
@@ -10586,6 +10650,38 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    if (idempotencyKey) {
+      const [existingRows] = await conn.query(
+        `SELECT id, status, tx_hash, debit_asset, debit_wei, credited_asset, credited_wei
+           FROM convert_executions
+          WHERE user_id=? AND idempotency_key=?
+          LIMIT 1
+          FOR UPDATE`,
+        [userId, idempotencyKey]
+      );
+      const existing = existingRows[0];
+      if (existing) {
+        if (existing.status === 'completed') {
+          await conn.commit();
+          return res.json({
+            ok: true,
+            idempotent_replay: true,
+            execution_id: existing.id,
+            tx_hash: existing.tx_hash,
+            status: existing.status,
+          });
+        }
+        await conn.rollback();
+        return next({
+          status: 409,
+          code: 'IDEMPOTENCY_CONFLICT',
+          message:
+            existing.status === 'processing'
+              ? 'A convert execution with this idempotency key is still processing'
+              : 'A failed execution already exists for this idempotency key; use a new key to retry',
+        });
+      }
+    }
     const [rows] = await conn.query('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE', [
       userId,
       debitAsset.toUpperCase(),
@@ -10602,9 +10698,9 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     ]);
     const [insert] = await conn.query(
       `INSERT INTO convert_executions
-       (user_id, pair_id, side, status, amount_wei, amount_decimals, quote_without_fee_wei, quote_decimals, fee_wei, debit_asset, debit_wei)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-      [userId, pair.id, payload.side, 'processing', amountWei.toString(), baseDecimals, quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals, feeWei.toString(), debitAsset.toUpperCase(), debitWei.toString()]
+       (user_id, pair_id, side, status, amount_wei, amount_decimals, quote_without_fee_wei, quote_decimals, fee_wei, debit_asset, debit_wei, idempotency_key)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [userId, pair.id, payload.side, 'processing', amountWei.toString(), baseDecimals, quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals, feeWei.toString(), debitAsset.toUpperCase(), debitWei.toString(), idempotencyKey]
     );
     executionId = insert.insertId;
     await conn.commit();
@@ -10643,6 +10739,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       execution_id: executionId,
       tx_hash: chainResult.txHash,
       mode: chainResult.mode,
+      runtime_warning: runtime.warning || null,
       debit: { asset: debitAsset.toUpperCase(), amount: trimDecimal(formatUnitsStr(debitWei.toString(), debitDecimals)) },
       credit: { asset: creditAsset.toUpperCase(), amount: trimDecimal(formatUnitsStr(creditWei.toString(), creditDecimals)) },
     });

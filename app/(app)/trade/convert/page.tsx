@@ -29,6 +29,7 @@ type ConvertConfigResponse = {
 
 type ConvertQuoteResponse = {
   mode: 'mock' | 'live';
+  runtime_warning?: string | null;
   quote: {
     quote_without_fee: string;
     fee_usdt: string;
@@ -44,6 +45,10 @@ function toCategory(value: string | null): Category {
 function parsePositive(value: string): number {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : 0;
+}
+
+function cleanDisplayName(value: string): string {
+  return value.replace(/\bondo\b/gi, '').replace(/\s{2,}/g, ' ').trim();
 }
 
 function ConvertPageContent() {
@@ -64,6 +69,7 @@ function ConvertPageContent() {
   const [feeBps, setFeeBps] = useState(50);
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState(false);
+  const [runtimeWarning, setRuntimeWarning] = useState('');
 
   const selectedPair = useMemo(() => pairs.find((item) => item.symbol === selectedSymbol) || null, [pairs, selectedSymbol]);
   const amountNum = parsePositive(amount);
@@ -80,6 +86,7 @@ function ConvertPageContent() {
     setMinUsdt(res.data.settings?.convert_min_usdt || 10);
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
     setConvertMode(res.data.settings?.convert_execution_mode || 'mock');
+    setRuntimeWarning('');
     if ((res.data.pairs || []).length) {
       setSelectedSymbol((prev) => (prev && res.data.pairs.some((item) => item.symbol === prev) ? prev : res.data.pairs[0].symbol));
     }
@@ -111,6 +118,7 @@ function ConvertPageContent() {
         return;
       }
       setConvertMode(res.data.mode || 'mock');
+      setRuntimeWarning(String(res.data.runtime_warning || ''));
       setEstimate(parsePositive(res.data.quote.total_usdt));
       setFeeUsdt(parsePositive(res.data.quote.fee_usdt));
     }
@@ -148,6 +156,7 @@ function ConvertPageContent() {
       toast({ message: res.error || (isArabic ? 'فشل التنفيذ' : 'Execution failed'), variant: 'error' });
       return;
     }
+    setRuntimeWarning(String((res.data as { runtime_warning?: string | null })?.runtime_warning || ''));
     toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Convert executed successfully', variant: 'success' });
     setAmount('');
     setEstimate(0);
@@ -190,7 +199,7 @@ function ConvertPageContent() {
         >
           {pairs.map((pair) => (
             <option key={pair.id} value={pair.symbol}>
-              {pair.symbol} - {pair.display_name}
+              {pair.symbol} - {cleanDisplayName(pair.display_name)}
             </option>
           ))}
         </select>
@@ -202,7 +211,7 @@ function ConvertPageContent() {
             </div>
             <div>
               <div className="text-sm font-semibold">{selectedPair.symbol}</div>
-              <div className="text-xs text-white/65">{selectedPair.display_name}</div>
+              <div className="text-xs text-white/65">{cleanDisplayName(selectedPair.display_name)}</div>
             </div>
           </div>
         )}
@@ -255,6 +264,11 @@ function ConvertPageContent() {
           <div className="mt-1 text-xs text-white/50">
             {isArabic ? 'وضع التنفيذ' : 'Execution mode'}: {convertMode === 'live' ? (isArabic ? 'حي - PancakeSwap' : 'Live - PancakeSwap') : isArabic ? 'تجريبي' : 'Mock'}
           </div>
+          {runtimeWarning ? (
+            <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+              {isArabic ? 'تحذير تشغيل' : 'Runtime warning'}: {runtimeWarning}
+            </div>
+          ) : null}
         </div>
 
         <button

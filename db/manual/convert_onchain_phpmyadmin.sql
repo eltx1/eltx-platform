@@ -1,8 +1,9 @@
--- Convert on-chain execution metadata and runtime settings (schema-compatible)
+-- Manual SQL for phpMyAdmin / MySQL 8+ (safe for platform_settings.key OR platform_settings.name)
+-- Fixes #1054 Unknown column 'key' by detecting the actual schema at runtime.
 
 SET @schema_name := DATABASE();
 
--- platform_settings column compatibility (`key` or `name`)
+-- 1) Upsert convert settings in platform_settings using detected key column.
 SET @settings_key_col := (
   SELECT CASE
     WHEN EXISTS (
@@ -19,7 +20,7 @@ SET @settings_key_col := (
 
 SET @upsert_convert_settings_sql := IF(
   @settings_key_col IS NULL,
-  'SELECT ''platform_settings missing expected key/name column'' AS warning_message',
+  'SELECT ''ERROR: platform_settings must contain either `key` or `name` column'' AS error_message',
   CONCAT(
     'INSERT INTO platform_settings (`', @settings_key_col, '`, `value`) VALUES ',
     '(''convert_execution_mode'', ''mock''),',
@@ -32,7 +33,7 @@ PREPARE upsert_convert_settings_stmt FROM @upsert_convert_settings_sql;
 EXECUTE upsert_convert_settings_stmt;
 DEALLOCATE PREPARE upsert_convert_settings_stmt;
 
--- convert_pairs schema updates (safe on re-run / mixed envs)
+-- 2) Add required convert_pairs columns only if missing.
 SET @has_token_address := (
   SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
   WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='convert_pairs' AND COLUMN_NAME='token_address'
@@ -54,6 +55,7 @@ PREPARE alter_convert_pairs_stmt FROM @alter_convert_pairs_sql;
 EXECUTE alter_convert_pairs_stmt;
 DEALLOCATE PREPARE alter_convert_pairs_stmt;
 
+-- 3) Backfill token metadata defaults.
 UPDATE convert_pairs
 SET token_address = CASE UPPER(base_asset)
   WHEN 'BNB' THEN '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c'
@@ -64,6 +66,7 @@ END,
     token_decimals = COALESCE(token_decimals, 18)
 WHERE token_address IS NULL OR token_decimals IS NULL;
 
+-- 4) Create convert_executions with lifecycle + fee + tx hash + fail reason.
 CREATE TABLE IF NOT EXISTS convert_executions (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   user_id INT NOT NULL,
@@ -94,6 +97,7 @@ CREATE TABLE IF NOT EXISTS convert_executions (
   CONSTRAINT fk_convert_executions_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 5) If table existed before, ensure idempotency_key column exists.
 SET @has_exec_idempotency_col := (
   SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
   WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='convert_executions' AND COLUMN_NAME='idempotency_key'
@@ -107,3 +111,6 @@ PREPARE alter_convert_exec_stmt FROM @alter_convert_exec_sql;
 EXECUTE alter_convert_exec_stmt;
 DEALLOCATE PREPARE alter_convert_exec_stmt;
 
+-- Notes for MySQL older than 8:
+-- - INFORMATION_SCHEMA + PREPARE/EXECUTE still work in MySQL 5.7.
+-- - JSON column is supported in 5.7+, so this script usually works as-is.

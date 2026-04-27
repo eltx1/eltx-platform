@@ -24,6 +24,30 @@ const testSchema = {
   walletAddresses: {},
   oauthGoogleStates: {},
   oauthAccounts: {},
+  convertSettings: {
+    convert_execution_mode: 'mock',
+    convert_slippage_bps: '120',
+    convert_fee_bps: '50',
+    convert_min_usdt: '10',
+    convert_live_fallback_mock: '1',
+  },
+  convertPairs: [
+    {
+      id: 1,
+      category: 'crypto',
+      symbol: 'BNB/USDT',
+      base_asset: 'BNB',
+      quote_asset: 'USDT',
+      token_symbol: 'BNB',
+      token_address: '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c',
+      token_decimals: 18,
+      display_name: 'BNB',
+      logo_url: null,
+      sort_order: 1,
+      active: 1,
+    },
+  ],
+  convertExecutions: [],
 };
 
 const pool = {
@@ -102,13 +126,40 @@ const pool = {
     }
     if (sql.includes('SELECT value FROM platform_settings WHERE name=?')) {
       const name = String(params[0] || '');
+      if (Object.prototype.hasOwnProperty.call(testSchema.convertSettings, name)) {
+        return [[{ value: testSchema.convertSettings[name] }]];
+      }
       if (name === 'transfer_fee_bps') return [[{ value: '10' }]];
       return [[{ value: '0' }]];
+    }
+    if (sql.includes('FROM convert_pairs') && sql.includes('ORDER BY category, sort_order, symbol')) {
+      let rows = testSchema.convertPairs.filter((row) => Number(row.active) === 1);
+      if (sql.includes('category=?')) rows = rows.filter((row) => row.category === String(params[0]));
+      return [rows];
+    }
+    if (sql.includes('FROM convert_pairs WHERE') && sql.includes('LIMIT 1')) {
+      const symbol = String(params[0] || '').toUpperCase();
+      const category = sql.includes('category=?') ? String(params[1]) : null;
+      const row = testSchema.convertPairs.find(
+        (pair) => pair.symbol.toUpperCase() === symbol && Number(pair.active) === 1 && (!category || pair.category === category)
+      );
+      return [row ? [row] : []];
+    }
+    if (sql.includes('FROM convert_executions') && sql.includes('idempotency_key=?')) {
+      const userId = Number(params[0]);
+      const key = String(params[1]);
+      const row = testSchema.convertExecutions.find((item) => item.user_id === userId && item.idempotency_key === key);
+      return [row ? [row] : []];
     }
     if (sql.includes('SELECT asset, balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
       const balance = testSchema.balances[key];
       return [balance ? [{ asset: String(params[1]).toUpperCase(), balance_wei: balance }] : []];
+    }
+    if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
+      const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
+      const balance = testSchema.balances[key];
+      return [balance ? [{ balance_wei: balance }] : []];
     }
     if (sql.includes('SELECT balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? LIMIT 1')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
@@ -151,6 +202,49 @@ const pool = {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
       const current = BigInt(testSchema.balances[key] || '0');
       testSchema.balances[key] = (current + BigInt(params[2])).toString();
+      return [{ affectedRows: 1 }];
+    }
+    if (sql.includes('INSERT INTO convert_executions')) {
+      const id = testSchema.convertExecutions.length + 1;
+      testSchema.convertExecutions.push({
+        id,
+        user_id: Number(params[0]),
+        pair_id: Number(params[1]),
+        side: String(params[2]),
+        status: String(params[3]),
+        amount_wei: String(params[4]),
+        quote_without_fee_wei: String(params[6]),
+        fee_wei: String(params[8]),
+        debit_asset: String(params[9]),
+        debit_wei: String(params[10]),
+        idempotency_key: params[11] ? String(params[11]) : null,
+        tx_hash: null,
+        credited_asset: null,
+        credited_wei: null,
+      });
+      return [{ insertId: id }];
+    }
+    if (sql.includes('UPDATE convert_executions SET status=?, tx_hash=?, credited_asset=?, credited_wei=?, metadata=?, updated_at=NOW() WHERE id=?')) {
+      const id = Number(params[5]);
+      const row = testSchema.convertExecutions.find((item) => item.id === id);
+      if (row) {
+        row.status = String(params[0]);
+        row.tx_hash = String(params[1]);
+        row.credited_asset = String(params[2]);
+        row.credited_wei = String(params[3]);
+      }
+      return [{ affectedRows: row ? 1 : 0 }];
+    }
+    if (sql.includes('UPDATE convert_executions SET status=?, fail_reason=?, updated_at=NOW() WHERE id=?')) {
+      const id = Number(params[2]);
+      const row = testSchema.convertExecutions.find((item) => item.id === id);
+      if (row) {
+        row.status = String(params[0]);
+        row.fail_reason = String(params[1]);
+      }
+      return [{ affectedRows: row ? 1 : 0 }];
+    }
+    if (sql.includes('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)')) {
       return [{ affectedRows: 1 }];
     }
     if (sql.includes('INSERT INTO wallet_transfers')) {
@@ -386,6 +480,60 @@ test('POST /wallet/transfer allows USDT transfers for authenticated users', asyn
   assert.equal(res.body?.ok, true);
   assert.equal(testSchema.balances['1:USDT'], '0');
   assert.equal(testSchema.balances['2:USDT'], '9990000000000000000');
+});
+
+test('POST /convert/quote returns mock quote and fee details', async () => {
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  const res = await request
+    .post('/convert/quote')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '10' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(res.body?.mode, 'mock');
+  assert.equal(res.body?.quote?.total_usdt, '10.05');
+});
+
+test('POST /convert/execute performs debit/credit lifecycle in mock mode', async () => {
+  testSchema.convertExecutions.length = 0;
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+  testSchema.balances['1:USDT'] = '11000000000000000000';
+  testSchema.balances['1:BNB'] = '0';
+
+  const res = await request
+    .post('/convert/execute')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '10', idempotency_key: 'exec-smoke-0001' });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(testSchema.convertExecutions.length, 1);
+  assert.equal(testSchema.convertExecutions[0].status, 'completed');
+  assert.equal(testSchema.balances['1:USDT'], '950000000000000000');
+  assert.equal(testSchema.balances['1:BNB'], '10000000000000000000');
+});
+
+test('POST /convert/execute returns replay response for same idempotency key', async () => {
+  const res = await request
+    .post('/convert/execute')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '10', idempotency_key: 'exec-smoke-0001' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.idempotent_replay, true);
+});
+
+test('POST /convert/execute blocks live mode when wallet env is missing and fallback disabled', async () => {
+  testSchema.convertSettings.convert_execution_mode = 'live';
+  testSchema.convertSettings.convert_live_fallback_mock = '0';
+  const res = await request
+    .post('/convert/execute')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '1', idempotency_key: 'exec-live-missing-1' });
+  assert.equal(res.status, 503);
+  assert.equal(res.body?.error?.code, 'CONVERT_LIVE_NOT_READY');
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
 });
 test('GET /fiat/stripe/rate blocks unauthenticated requests', async () => {
   const res = await request.get('/fiat/stripe/rate');
