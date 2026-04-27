@@ -535,6 +535,10 @@ VALUES
   ('ELTX/ETH', 'ELTX', 18, 'ETH', 18, 0.0001, 0.0001),
   ('USDT/USDC', 'USDT', 18, 'USDC', 18, 0.1, 0.1),
   ('ETH/USDT', 'ETH', 18, 'USDT', 18, 0.0001, 0.1),
+  ('SOL/USDT', 'SOL', 18, 'USDT', 18, 0.001, 0.1),
+  ('XRP/USDT', 'XRP', 18, 'USDT', 18, 1, 0.1),
+  ('XAUT/USDT', 'XAUT', 18, 'USDT', 18, 0.00001, 0.1),
+  ('PAXG/USDT', 'PAXG', 18, 'USDT', 18, 0.00001, 0.1),
   ('MCOIN/USDT', 'MCOIN', 18, 'USDT', 18, 0.0001, 0.1);
 
 UPDATE spot_markets

@@ -119,6 +119,28 @@ INSERT IGNORE INTO platform_settings (name, value) VALUES
   ('spot_stream_heartbeat_ms', '12000'),
   ('spot_stream_delta_interval_ms', '1200');
 
+-- 2026-04-27: Add requested spot pairs (XAUT, PAXG, SOL, XRP) and enable them.
+INSERT IGNORE INTO spot_markets (
+  symbol,
+  base_asset,
+  base_decimals,
+  quote_asset,
+  quote_decimals,
+  min_base_amount,
+  min_quote_amount
+)
+VALUES
+  ('XAUT/USDT', 'XAUT', 18, 'USDT', 18, 0.00001, 0.1),
+  ('PAXG/USDT', 'PAXG', 18, 'USDT', 18, 0.00001, 0.1),
+  ('SOL/USDT', 'SOL', 18, 'USDT', 18, 0.001, 0.1),
+  ('XRP/USDT', 'XRP', 18, 'USDT', 18, 1, 0.1);
+
+UPDATE spot_markets
+   SET active = 1,
+       allow_market_orders = 1,
+       updated_at = NOW()
+ WHERE symbol IN ('XAUT/USDT', 'PAXG/USDT', 'SOL/USDT', 'XRP/USDT');
+
 -- Wallet schema alignment
 ALTER TABLE wallet_addresses
   ADD COLUMN IF NOT EXISTS chain_id INT UNSIGNED NOT NULL AFTER user_id,

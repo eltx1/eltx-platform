@@ -115,7 +115,17 @@ type SpotStreamMessage =
   | { type: 'ping'; payload?: { ts?: number } }
   | { type: 'error'; payload?: { message?: string } };
 
-const MARKET_PRIORITY = ['BTC/USDT', 'ETH/USDT', 'WBTC/USDT', 'BNB/USDT', 'SOL/USDT', 'USDT/USDC', 'MCOIN/USDT', 'ELTX/USDC', 'ELTX/ETH', 'ELTX/BNB', 'ELTX/USDT'];
+const MARKET_PRIORITY = [
+  'XAUT/USDT',
+  'WBTC/USDT',
+  'ETH/USDT',
+  'BNB/USDT',
+  'SOL/USDT',
+  'XRP/USDT',
+  'ELTX/USDT',
+  'MCOIN/USDT',
+  'PAXG/USDT',
+];
 const STREAM_TRADE_LIMIT = 50;
 const MIN_SPOT_ORDER_VALUE_USDT = new Decimal(5);
 
