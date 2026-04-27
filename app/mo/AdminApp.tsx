@@ -134,6 +134,8 @@ type FeeSettings = {
   spot_taker_fee_bps: number;
   transfer_fee_bps: number;
   withdrawal_fee_bps: number;
+  convert_fee_bps: number;
+  convert_min_usdt: number;
   withdrawal_limits: Record<string, { min: string | null; max: string | null }>;
 };
 
@@ -4661,10 +4663,20 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     spot_taker_fee_bps: 0,
     transfer_fee_bps: 0,
     withdrawal_fee_bps: 0,
+    convert_fee_bps: 0,
+    convert_min_usdt: 10,
     withdrawal_limits: buildDefaultWithdrawalLimits(),
   });
   const [balances, setBalances] = useState<FeeBalanceRow[]>([]);
-  const [form, setForm] = useState({ swap: '0.50', spotMaker: '0.50', spotTaker: '0.50', transfer: '0.00', withdrawal: '10.00' });
+  const [form, setForm] = useState({
+    swap: '0.50',
+    spotMaker: '0.50',
+    spotTaker: '0.50',
+    transfer: '0.00',
+    withdrawal: '10.00',
+    convert: '0.50',
+    convertMin: '10.00',
+  });
   const [withdrawalLimits, setWithdrawalLimits] = useState<Record<(typeof WITHDRAWAL_ASSETS)[number], { min: string | null; max: string | null }>>(
     buildDefaultWithdrawalLimits()
   );
@@ -4690,6 +4702,8 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
       spotTaker: (takerBps / 100).toFixed(2),
       transfer: (next.transfer_fee_bps / 100).toFixed(2),
       withdrawal: (withdrawalBps / 100).toFixed(2),
+      convert: ((next.convert_fee_bps ?? next.swap_fee_bps ?? 0) / 100).toFixed(2),
+      convertMin: Number(next.convert_min_usdt ?? 10).toFixed(2),
     });
     setWithdrawalLimits(normalizeWithdrawalLimits(next.withdrawal_limits));
   }, []);
@@ -4780,8 +4794,19 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     const spotTakerBps = parsePercentToBps(form.spotTaker);
     const transferBps = parsePercentToBps(form.transfer);
     const withdrawalBps = parsePercentToBps(form.withdrawal);
+    const convertBps = parsePercentToBps(form.convert);
+    const convertMin = Number(form.convertMin);
 
-    if (swapBps === null || spotMakerBps === null || spotTakerBps === null || transferBps === null || withdrawalBps === null) {
+    if (
+      swapBps === null ||
+      spotMakerBps === null ||
+      spotTakerBps === null ||
+      transferBps === null ||
+      withdrawalBps === null ||
+      convertBps === null ||
+      !Number.isFinite(convertMin) ||
+      convertMin < 0
+    ) {
       onNotify('Enter valid percentage values between 0 and 100', 'error');
       return;
     }
@@ -4791,6 +4816,9 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     if (spotTakerBps !== settings.spot_taker_fee_bps) payload.spot_taker_fee_bps = spotTakerBps;
     if (transferBps !== settings.transfer_fee_bps) payload.transfer_fee_bps = transferBps;
     if (withdrawalBps !== settings.withdrawal_fee_bps) payload.withdrawal_fee_bps = withdrawalBps;
+    if (convertBps !== settings.convert_fee_bps) payload.convert_fee_bps = convertBps;
+    if (Number(convertMin.toFixed(2)) !== Number(settings.convert_min_usdt ?? 10))
+      payload.convert_min_usdt = Number(convertMin.toFixed(2));
     const normalizedLimits = normalizeLimitsForCompare(withdrawalLimits);
     const currentLimits = normalizeLimitsForCompare(normalizeWithdrawalLimits(settings.withdrawal_limits));
     if (JSON.stringify(normalizedLimits) !== JSON.stringify(currentLimits)) {
@@ -5008,6 +5036,29 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
                   step={0.01}
                   value={form.withdrawal}
                   onChange={(e) => setForm((prev) => ({ ...prev, withdrawal: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Convert fee (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  value={form.convert}
+                  onChange={(e) => setForm((prev) => ({ ...prev, convert: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-xs uppercase text-white/60">Convert minimum (USDT)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={form.convertMin}
+                  onChange={(e) => setForm((prev) => ({ ...prev, convertMin: e.target.value }))}
                   className="mt-1 w-full rounded-lg border border-white/10 bg-black/40 p-3 focus:border-blue-500 focus:outline-none"
                 />
               </div>

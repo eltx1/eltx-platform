@@ -749,6 +749,8 @@ const AdminFeeUpdateSchema = z
     spot_taker_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     transfer_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
     withdrawal_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    convert_fee_bps: z.coerce.number().int().min(0).max(10000).optional(),
+    convert_min_usdt: z.coerce.number().min(0).max(1000000).optional(),
     withdrawal_limits: z
       .array(
         z.object({
@@ -767,6 +769,8 @@ const AdminFeeUpdateSchema = z
       data.spot_taker_fee_bps !== undefined ||
       data.transfer_fee_bps !== undefined ||
       data.withdrawal_fee_bps !== undefined ||
+      data.convert_fee_bps !== undefined ||
+      data.convert_min_usdt !== undefined ||
       data.withdrawal_limits !== undefined,
     {
       message: 'At least one fee field must be provided',
@@ -814,6 +818,35 @@ const AdminSpotMarketUpdateSchema = z
     amount_precision: z.coerce.number().int().min(0).max(18).optional(),
     active: z.boolean().optional(),
     allow_market_orders: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'No update fields provided',
+  });
+
+
+const CONVERT_CATEGORY_VALUES = ['gold', 'stocks', 'crypto'];
+
+const ConvertPairsQuerySchema = z.object({
+  category: z.enum(CONVERT_CATEGORY_VALUES).optional(),
+});
+
+const AdminConvertPairCreateSchema = z.object({
+  category: z.enum(CONVERT_CATEGORY_VALUES),
+  symbol: z.string().min(3).max(32),
+  display_name: z.string().min(1).max(80),
+  token_symbol: z.string().min(2).max(32),
+  logo_url: z.string().max(512).optional().nullable(),
+  sort_order: z.coerce.number().int().min(0).max(10000).optional(),
+  active: z.boolean().optional(),
+});
+
+const AdminConvertPairUpdateSchema = z
+  .object({
+    display_name: z.string().min(1).max(80).optional(),
+    token_symbol: z.string().min(2).max(32).optional(),
+    logo_url: z.string().max(512).optional().nullable(),
+    sort_order: z.coerce.number().int().min(0).max(10000).optional(),
+    active: z.boolean().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
@@ -2592,11 +2625,15 @@ async function readPlatformFeeSettings(conn = pool) {
   const takerVal = await getPlatformSettingValue('spot_taker_fee_bps', spotVal, conn);
   const transferVal = await getPlatformSettingValue('transfer_fee_bps', '0', conn);
   const withdrawalVal = await getPlatformSettingValue('withdrawal_fee_bps', DEFAULT_WITHDRAWAL_FEE_BPS.toString(), conn);
+  const convertFeeVal = await getPlatformSettingValue('convert_fee_bps', swapVal, conn);
+  const convertMinVal = await getPlatformSettingValue('convert_min_usdt', '10', conn);
   const swapFeeBps = clampBps(BigInt(Number.parseInt(swapVal, 10) || 0));
   const spotMakerFeeBps = clampBps(BigInt(Number.parseInt(makerVal, 10) || 0));
   const spotTakerFeeBps = clampBps(BigInt(Number.parseInt(takerVal, 10) || 0));
   const transferFeeBps = clampBps(BigInt(Number.parseInt(transferVal, 10) || 0));
   const withdrawalFeeBps = clampBps(BigInt(Number.parseInt(withdrawalVal, 10) || 0));
+  const convertFeeBps = clampBps(BigInt(Number.parseInt(convertFeeVal, 10) || 0));
+  const convertMinUsdt = Number.parseFloat(convertMinVal || '10');
   return {
     swap_fee_bps: Number(swapFeeBps),
     spot_trade_fee_bps: Number(spotTakerFeeBps),
@@ -2604,6 +2641,8 @@ async function readPlatformFeeSettings(conn = pool) {
     spot_taker_fee_bps: Number(spotTakerFeeBps),
     transfer_fee_bps: Number(transferFeeBps),
     withdrawal_fee_bps: Number(withdrawalFeeBps),
+    convert_fee_bps: Number(convertFeeBps),
+    convert_min_usdt: Number.isFinite(convertMinUsdt) && convertMinUsdt >= 0 ? convertMinUsdt : 10,
     withdrawal_limits: await readWithdrawalLimits(conn),
   };
 }
@@ -2628,6 +2667,50 @@ async function readPlatformFeeBalances(conn = pool) {
       amount: trimDecimal(formatUnitsStr(totalWei.toString(), decimals)),
     };
   });
+}
+
+
+async function readConvertSettings(conn = pool) {
+  const feeVal = await getPlatformSettingValue('convert_fee_bps', '50', conn);
+  const minVal = await getPlatformSettingValue('convert_min_usdt', '10', conn);
+  const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
+  const minUsdt = Number.parseFloat(minVal || '10');
+  return {
+    convert_fee_bps: Number(feeBps),
+    convert_min_usdt: Number.isFinite(minUsdt) && minUsdt >= 0 ? minUsdt : 10,
+  };
+}
+
+function mapConvertPairRow(row) {
+  return {
+    id: row.id,
+    category: row.category,
+    symbol: row.symbol,
+    base_asset: row.base_asset,
+    quote_asset: row.quote_asset,
+    token_symbol: row.token_symbol,
+    display_name: row.display_name,
+    logo_url: row.logo_url || null,
+    sort_order: Number(row.sort_order || 0),
+    active: !!row.active,
+  };
+}
+
+async function listConvertPairs(category, conn = pool, { includeInactive = false } = {}) {
+  const where = includeInactive ? [] : ['active=1'];
+  const params = [];
+  if (category) {
+    where.push('category=?');
+    params.push(category);
+  }
+  const [rows] = await conn.query(
+    `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active
+       FROM convert_pairs
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY category, sort_order, symbol`,
+    params
+  );
+  return rows.map(mapConvertPairRow);
 }
 
 async function readSpotFeeBps(conn = pool) {
@@ -8034,6 +8117,10 @@ app.patch('/admin/fees', async (req, res, next) => {
       tasks.push(setPlatformSettingValue('transfer_fee_bps', updates.transfer_fee_bps.toString()));
     if (updates.withdrawal_fee_bps !== undefined)
       tasks.push(setPlatformSettingValue('withdrawal_fee_bps', updates.withdrawal_fee_bps.toString()));
+    if (updates.convert_fee_bps !== undefined)
+      tasks.push(setPlatformSettingValue('convert_fee_bps', updates.convert_fee_bps.toString()));
+    if (updates.convert_min_usdt !== undefined)
+      tasks.push(setPlatformSettingValue('convert_min_usdt', updates.convert_min_usdt.toString()));
     if (updates.withdrawal_limits !== undefined) {
       const limits = validateWithdrawalLimitsShape(
         updates.withdrawal_limits.reduce((acc, curr) => {
@@ -10245,6 +10332,134 @@ app.post('/wallet/withdrawals', walletLimiter, async (req, res, next) => {
     next(err);
   } finally {
     if (conn) conn.release();
+  }
+});
+
+
+app.get('/convert/pairs', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const { category } = ConvertPairsQuerySchema.parse(req.query || {});
+    const [pairs, settings] = await Promise.all([listConvertPairs(category), readConvertSettings()]);
+    res.json({ ok: true, category: category || null, pairs, settings });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/admin/convert/pairs', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const { category } = ConvertPairsQuerySchema.parse(req.query || {});
+    const [rows, settings] = await Promise.all([
+      listConvertPairs(category, pool, { includeInactive: true }),
+      readConvertSettings(),
+    ]);
+    res.json({ ok: true, pairs: rows, settings });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.post('/admin/convert/pairs', async (req, res, next) => {
+  try {
+    await requireAdmin(req);
+    const payload = AdminConvertPairCreateSchema.parse(req.body || {});
+    const symbol = normalizeMarketSymbol(payload.symbol);
+    const [baseAssetRaw, quoteAssetRaw] = symbol.split('/');
+    const baseAsset = (baseAssetRaw || '').toUpperCase();
+    const quoteAsset = (quoteAssetRaw || '').toUpperCase();
+    if (!baseAsset || !quoteAsset || quoteAsset !== 'USDT') {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Convert pair must end with /USDT' });
+    }
+    const [insert] = await pool.query(
+      `INSERT INTO convert_pairs (category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+      [
+        payload.category,
+        symbol,
+        baseAsset,
+        quoteAsset,
+        payload.token_symbol.trim().toUpperCase(),
+        payload.display_name.trim(),
+        payload.logo_url || null,
+        payload.sort_order ?? 0,
+        payload.active === undefined ? 1 : payload.active ? 1 : 0,
+      ]
+    );
+    const [[row]] = await pool.query(
+      `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active
+         FROM convert_pairs WHERE id=?`,
+      [insert.insertId]
+    );
+    res.json({ ok: true, pair: mapConvertPairRow(row) });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.patch('/admin/convert/pairs/:id', async (req, res, next) => {
+  const pairId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(pairId) || pairId <= 0) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid pair id' });
+  try {
+    await requireAdmin(req);
+    const payload = AdminConvertPairUpdateSchema.parse(req.body || {});
+    const fields = [];
+    const params = [];
+    if (payload.display_name !== undefined) {
+      fields.push('display_name=?');
+      params.push(payload.display_name.trim());
+    }
+    if (payload.token_symbol !== undefined) {
+      fields.push('token_symbol=?');
+      params.push(payload.token_symbol.trim().toUpperCase());
+    }
+    if (payload.logo_url !== undefined) {
+      fields.push('logo_url=?');
+      params.push(payload.logo_url || null);
+    }
+    if (payload.sort_order !== undefined) {
+      fields.push('sort_order=?');
+      params.push(payload.sort_order);
+    }
+    if (payload.active !== undefined) {
+      fields.push('active=?');
+      params.push(payload.active ? 1 : 0);
+    }
+    params.push(pairId);
+    await pool.query(`UPDATE convert_pairs SET ${fields.join(', ')}, updated_at=NOW() WHERE id=?`, params);
+    const [[row]] = await pool.query(
+      `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, display_name, logo_url, sort_order, active
+         FROM convert_pairs WHERE id=?`,
+      [pairId]
+    );
+    if (!row) return next({ status: 404, code: 'NOT_FOUND', message: 'Pair not found' });
+    res.json({ ok: true, pair: mapConvertPairRow(row) });
+  } catch (err) {
+    if (err instanceof z.ZodError)
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.delete('/admin/convert/pairs/:id', async (req, res, next) => {
+  const pairId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(pairId) || pairId <= 0) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid pair id' });
+  try {
+    await requireAdmin(req);
+    const [result] = await pool.query('DELETE FROM convert_pairs WHERE id=?', [pairId]);
+    if (!result.affectedRows) return next({ status: 404, code: 'NOT_FOUND', message: 'Pair not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
 

@@ -177,7 +177,7 @@ export default function DashboardMarketBoard() {
           return (
             <Link
               key={market.symbol}
-              href={`/trade/spot?market=${encodeURIComponent(resolveSpotMarketSymbol(market.symbol))}`}
+              href={`/trade?market=${encodeURIComponent(resolveSpotMarketSymbol(market.symbol))}`}
               className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 border-b border-white/5 bg-gradient-to-r from-white/[0.01] via-white/[0.02] to-transparent px-3.5 py-2 transition hover:bg-white/[0.05] last:border-b-0 sm:px-5"
               aria-label={`${market.label} spot market`}
             >
@@ -250,7 +250,7 @@ export default function DashboardMarketBoard() {
             <span>{t.dashboard.market.refresh}</span>
           </button>
           <Link
-            href="/trade/spot"
+            href="/trade"
             className="inline-flex items-center gap-2 rounded-full bg-white/5 px-3 py-2 text-xs font-semibold text-white/90 ring-1 ring-inset ring-white/10 transition hover:-translate-y-[1px] hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
           >
             {t.dashboard.market.tradeCta}

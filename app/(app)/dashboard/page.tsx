@@ -146,7 +146,7 @@ export default function DashboardPage() {
             <h2 className="text-[11px] font-semibold uppercase tracking-wide text-white/65">Trade</h2>
             <div className="grid grid-cols-3 gap-1.5">
               <SectionCard title={t.dashboard.cards.wallet.title} href="/wallet" icon={Wallet} compact />
-              <SectionCard title={lang === 'ar' ? 'تداول' : 'Trade'} href="/trade/spot" icon={CandlestickChart} compact />
+              <SectionCard title={lang === 'ar' ? 'تداول' : 'Trade'} href="/trade" icon={CandlestickChart} compact />
               <SectionCard title={t.dashboard.cards.transactions.title} href="/transactions" icon={ReceiptText} compact />
               <SectionCard title={t.dashboard.market.title} href="/market" icon={CandlestickChart} compact />
             </div>
