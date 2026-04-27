@@ -1,6 +1,6 @@
 import 'server-only';
 import './globals.css';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { LangProvider } from './lib/i18n';
 import { ToastProvider } from './lib/toast';
 import { AuthProvider } from './lib/auth';
@@ -12,6 +12,14 @@ import AnalyticsRuntime from './AnalyticsRuntime';
 import ActivityTracker from './ActivityTracker';
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://lordai.net';
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
