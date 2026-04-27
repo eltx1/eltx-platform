@@ -10821,6 +10821,7 @@ app.get('/admin/convert/reports', async (req, res, next) => {
          SUM(CASE WHEN ce.status='completed' THEN 1 ELSE 0 END) AS completed_executions,
          SUM(CASE WHEN ce.status='failed' THEN 1 ELSE 0 END) AS failed_executions,
          COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+         COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
          COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
        FROM convert_executions ce`
     );
@@ -10830,6 +10831,7 @@ app.get('/admin/convert/reports', async (req, res, next) => {
               SUM(CASE WHEN ce.status='completed' THEN 1 ELSE 0 END) AS completed,
               SUM(CASE WHEN ce.status='failed' THEN 1 ELSE 0 END) AS failed,
               COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
               COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
          FROM convert_executions ce
          JOIN convert_pairs cp ON cp.id = ce.pair_id
@@ -10841,6 +10843,7 @@ app.get('/admin/convert/reports', async (req, res, next) => {
               cp.symbol,
               COUNT(*) AS executions,
               COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
               COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
          FROM convert_executions ce
          JOIN convert_pairs cp ON cp.id = ce.pair_id
@@ -10852,6 +10855,7 @@ app.get('/admin/convert/reports', async (req, res, next) => {
       `SELECT DATE(ce.created_at) AS day,
               COUNT(*) AS executions,
               COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
               COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
          FROM convert_executions ce
         WHERE ce.created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 14 DAY)
