@@ -491,14 +491,45 @@ test('POST /convert/quote returns mock quote and fee details', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body?.ok, true);
   assert.equal(res.body?.mode, 'mock');
-  assert.equal(res.body?.quote?.total_usdt, '10.05');
+  assert.equal(res.body?.quote?.quote_without_fee, '6000');
+  assert.equal(res.body?.quote?.fee_usdt, '30');
+  assert.equal(res.body?.quote?.total_usdt, '6030');
+});
+
+test('POST /convert/quote uses sane mock reference pricing for XAUT/USDT', async () => {
+  const xautPair = {
+    id: 2,
+    category: 'gold',
+    symbol: 'XAUT/USDT',
+    base_asset: 'XAUT',
+    quote_asset: 'USDT',
+    token_symbol: 'XAUT',
+    token_address: null,
+    token_decimals: 18,
+    display_name: 'Tether Gold',
+    logo_url: null,
+    sort_order: 2,
+    active: 1,
+  };
+  testSchema.convertPairs.push(xautPair);
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  const res = await request
+    .post('/convert/quote')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'gold', symbol: 'XAUT/USDT', side: 'buy', amount: '1' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.ok, true);
+  assert.equal(res.body?.mode, 'mock');
+  assert.equal(res.body?.quote?.quote_without_fee, '3300');
+  assert.equal(res.body?.quote?.total_usdt, '3316.5');
+  testSchema.convertPairs.pop();
 });
 
 test('POST /convert/execute performs debit/credit lifecycle in mock mode', async () => {
   testSchema.convertExecutions.length = 0;
   testSchema.convertSettings.convert_execution_mode = 'mock';
   testSchema.convertSettings.convert_live_fallback_mock = '1';
-  testSchema.balances['1:USDT'] = '11000000000000000000';
+  testSchema.balances['1:USDT'] = '11000000000000000000000';
   testSchema.balances['1:BNB'] = '0';
 
   const res = await request
@@ -510,7 +541,7 @@ test('POST /convert/execute performs debit/credit lifecycle in mock mode', async
   assert.equal(res.body?.ok, true);
   assert.equal(testSchema.convertExecutions.length, 1);
   assert.equal(testSchema.convertExecutions[0].status, 'completed');
-  assert.equal(testSchema.balances['1:USDT'], '950000000000000000');
+  assert.equal(testSchema.balances['1:USDT'], '4970000000000000000000');
   assert.equal(testSchema.balances['1:BNB'], '10000000000000000000');
 });
 
@@ -545,6 +576,62 @@ test('POST /convert/execute blocks live mode when wallet env is missing and fall
     .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '1', idempotency_key: 'exec-live-missing-1' });
   assert.equal(res.status, 503);
   assert.equal(res.body?.error?.code, 'CONVERT_LIVE_NOT_READY');
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+});
+
+test('POST /convert/quote returns runtime warning when live is misconfigured but fallback is enabled', async () => {
+  testSchema.convertSettings.convert_execution_mode = 'live';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+  const originalPk = process.env.CONVERT_HOT_WALLET_PK;
+  const originalAddress = process.env.CONVERT_HOT_WALLET_ADDRESS;
+  const originalRpc = process.env.BSC_RPC_URL;
+  delete process.env.CONVERT_HOT_WALLET_PK;
+  delete process.env.CONVERT_HOT_WALLET_ADDRESS;
+  delete process.env.BSC_RPC_URL;
+  const res = await request
+    .post('/convert/quote')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '1' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.mode, 'mock');
+  assert.ok(res.body?.runtime_warning);
+  process.env.CONVERT_HOT_WALLET_PK = originalPk;
+  process.env.CONVERT_HOT_WALLET_ADDRESS = originalAddress;
+  process.env.BSC_RPC_URL = originalRpc;
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+});
+
+test('POST /convert/quote returns PAIR_NOT_LIVE_READY when live is enabled and pair has no address mapping', async () => {
+  const xautPair = {
+    id: 3,
+    category: 'gold',
+    symbol: 'XAUT/USDT',
+    base_asset: 'XAUT',
+    quote_asset: 'USDT',
+    token_symbol: 'XAUT',
+    token_address: null,
+    token_decimals: 18,
+    display_name: 'Tether Gold',
+    logo_url: null,
+    sort_order: 3,
+    active: 1,
+  };
+  testSchema.convertPairs.push(xautPair);
+  testSchema.convertSettings.convert_execution_mode = 'live';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+  testSchema.convertSettings.convert_require_pair_address_live = '1';
+  process.env.BSC_RPC_URL = 'https://bsc-dataseed.binance.org';
+  process.env.CONVERT_HOT_WALLET_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+  process.env.CONVERT_HOT_WALLET_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+  const res = await request
+    .post('/convert/quote')
+    .set('Cookie', 'sid=valid-session')
+    .send({ category: 'gold', symbol: 'XAUT/USDT', side: 'buy', amount: '1' });
+  assert.equal(res.status, 503);
+  assert.equal(res.body?.error?.code, 'PAIR_NOT_LIVE_READY');
+  testSchema.convertPairs.pop();
   testSchema.convertSettings.convert_execution_mode = 'mock';
   testSchema.convertSettings.convert_live_fallback_mock = '1';
 });

@@ -954,6 +954,8 @@ const ERC20_ABI = [
   'function allowance(address owner, address spender) external view returns (uint256)',
 ];
 const BSC_WBNB_ADDRESS = (process.env.TOKEN_WBNB || '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c').toLowerCase();
+const BSC_USDT_ADDRESS = (process.env.TOKEN_USDT || '0x55d398326f99059fF775485246999027B3197955').toLowerCase();
+const BSC_USDC_ADDRESS = (process.env.TOKEN_USDC || '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d').toLowerCase();
 const PANCAKE_V2_ROUTER_ADDRESS = (
   process.env.PANCAKE_V2_ROUTER || '0x10ED43C718714eb63d5aA57B78B54704E256024E'
 ).toLowerCase();
@@ -2714,9 +2716,10 @@ async function readPlatformFeeBalances(conn = pool) {
 async function readConvertSettings(conn = pool) {
   const feeVal = await getPlatformSettingValue('convert_fee_bps', '50', conn);
   const minVal = await getPlatformSettingValue('convert_min_usdt', '10', conn);
-  const modeVal = await getPlatformSettingValue('convert_execution_mode', 'mock', conn);
+  const modeVal = await getPlatformSettingValue('convert_execution_mode', 'live', conn);
   const slippageVal = await getPlatformSettingValue('convert_slippage_bps', '120', conn);
   const fallbackVal = await getPlatformSettingValue('convert_live_fallback_mock', '1', conn);
+  const requirePairAddressVal = await getPlatformSettingValue('convert_require_pair_address_live', '1', conn);
   const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
   const minUsdt = Number.parseFloat(minVal || '10');
   const slippageBps = clampBps(BigInt(Number.parseInt(slippageVal, 10) || 0));
@@ -2726,6 +2729,7 @@ async function readConvertSettings(conn = pool) {
     convert_execution_mode: modeVal === 'live' ? 'live' : 'mock',
     convert_slippage_bps: Number(slippageBps),
     convert_live_fallback_mock: fallbackVal === '0' ? 0 : 1,
+    convert_require_pair_address_live: requirePairAddressVal === '0' ? 0 : 1,
   };
 }
 
@@ -2767,13 +2771,47 @@ function resolveConvertAssetAddress(assetSymbol, pairAddress = null) {
   const upper = String(assetSymbol || '').toUpperCase();
   if (pairAddress) return String(pairAddress).toLowerCase();
   if (upper === 'BNB') return BSC_WBNB_ADDRESS;
+  if (upper === 'USDT') return BSC_USDT_ADDRESS;
+  if (upper === 'USDC') return BSC_USDC_ADDRESS;
   const meta = tokenMetaBySymbol[upper];
   return meta?.contract ? String(meta.contract).toLowerCase() : null;
 }
 
 function resolveConvertAssetDecimals(assetSymbol, pairDecimals = null) {
   if (pairDecimals !== null && pairDecimals !== undefined) return normalizeDecimals(pairDecimals, getSymbolDecimals(assetSymbol));
-  return getSymbolDecimals(assetSymbol);
+  const address = resolveConvertAssetAddress(assetSymbol);
+  return getTokenDecimals(assetSymbol, address);
+}
+
+function quoteConvertMock(pair, amountWei) {
+  const baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+  const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+  const baseDivisor = 10n ** BigInt(baseDecimals);
+  const notionalWei18 = mulDiv(amountWei, getSyntheticReferencePriceWei({ base_asset: pair.base_asset }), baseDivisor);
+  return convertDecimals(notionalWei18, 18, usdtDecimals);
+}
+
+function assertConvertQuoteIsSane(quoteWei, amountWei, usdtDecimals) {
+  const value = bigIntFromValue(quoteWei);
+  if (value <= 0n) {
+    throw Object.assign(new Error('Invalid convert quote value'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+  const hardCap = 10n ** BigInt(usdtDecimals + 10);
+  if (value > hardCap) {
+    throw Object.assign(new Error('Convert quote exceeded safe range'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+  if (bigIntFromValue(amountWei) > 0n && value < 1n) {
+    throw Object.assign(new Error('Convert quote precision too low'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+}
+
+function ensureConvertLivePairReady(pair, settings) {
+  if (Number(settings?.convert_require_pair_address_live || 0) !== 1) return;
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
+  if (!baseAddress || !quoteAddress) {
+    throw Object.assign(new Error(`Convert pair ${pair.symbol} missing on-chain mapping`), { code: 'PAIR_NOT_LIVE_READY' });
+  }
 }
 
 async function getConvertPairBySymbol(symbol, category = null, conn = pool) {
@@ -10582,16 +10620,17 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     }
     const quoteInfo =
       runtime.mode === 'live'
-        ? await quoteConvertFromPancake(pair, payload.side, amountWei)
+        ? (ensureConvertLivePairReady(pair, runtime.settings), await quoteConvertFromPancake(pair, payload.side, amountWei))
         : {
-            quoteWithoutFeeWei: payload.side === 'buy' ? amountWei : amountWei,
+            quoteWithoutFeeWei: quoteConvertMock(pair, amountWei),
             baseAmountWei: amountWei,
             direction: payload.side === 'buy' ? 'quote_to_base' : 'base_to_quote',
             path: [],
           };
     const settings = runtime.settings;
     const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
-    const usdtDecimals = resolveConvertAssetDecimals('USDT');
+    const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+    assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
     res.json({
       ok: true,
       mode: runtime.mode,
@@ -10610,6 +10649,12 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       settings,
     });
   } catch (err) {
+    if (err?.code === 'PAIR_NOT_LIVE_READY') {
+      return next({ status: 503, code: 'PAIR_NOT_LIVE_READY', message: err.message });
+    }
+    if (err?.code === 'QUOTE_OUT_OF_RANGE') {
+      return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
+    }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
     }
@@ -10645,7 +10690,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     const pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const settings = await readConvertSettings();
-    const usdtDecimals = resolveConvertAssetDecimals('USDT');
+    const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
     const baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
     const amountWeiStr = decimalToWeiString(payload.amount, baseDecimals);
     if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
@@ -10661,8 +10706,9 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     const quoteInfo =
       runtime.mode === 'live'
-        ? await quoteConvertFromPancake(pair, payload.side, amountWei)
-        : { quoteWithoutFeeWei: amountWei, baseAmountWei: amountWei };
+        ? (ensureConvertLivePairReady(pair, runtime.settings), await quoteConvertFromPancake(pair, payload.side, amountWei))
+        : { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei };
+    assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
     const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     const minWeiStr = decimalToWeiString(String(settings.convert_min_usdt || 10), usdtDecimals) || '0';
     if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) {
@@ -10795,6 +10841,12 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
           refundConn.release();
         }
       } catch {}
+    }
+    if (err?.code === 'PAIR_NOT_LIVE_READY') {
+      return next({ status: 503, code: 'PAIR_NOT_LIVE_READY', message: err.message });
+    }
+    if (err?.code === 'QUOTE_OUT_OF_RANGE') {
+      return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
     }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });

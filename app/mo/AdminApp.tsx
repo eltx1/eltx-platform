@@ -196,6 +196,20 @@ type ConvertReportsResponse = {
   daily: ConvertReportDay[];
   recent: ConvertReportRecent[];
 };
+type AdminConvertPair = {
+  id: number;
+  category: 'gold' | 'stocks' | 'crypto' | string;
+  symbol: string;
+  base_asset: string;
+  quote_asset: string;
+  token_symbol: string;
+  token_address: string | null;
+  token_decimals: number | null;
+  display_name: string;
+  logo_url: string | null;
+  sort_order: number;
+  active: boolean;
+};
 
 type AiSettings = { daily_free_messages: number; message_price_usdt: string };
 type AiRuntime = {
@@ -4754,6 +4768,20 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     daily: [],
     recent: [],
   });
+  const [convertPairs, setConvertPairs] = useState<AdminConvertPair[]>([]);
+  const [savingConvertPair, setSavingConvertPair] = useState(false);
+  const [convertPairForm, setConvertPairForm] = useState({
+    id: 0,
+    category: 'crypto' as 'gold' | 'stocks' | 'crypto',
+    symbol: '',
+    display_name: '',
+    token_symbol: '',
+    token_address: '',
+    token_decimals: '18',
+    logo_url: '',
+    sort_order: '0',
+    active: true,
+  });
 
   const syncFormWithSettings = useCallback((next: FeeSettings) => {
     const makerBps = next.spot_maker_fee_bps ?? next.spot_trade_fee_bps ?? 0;
@@ -4773,10 +4801,11 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [feeRes, protectionRes, convertReportsRes] = await Promise.all([
+    const [feeRes, protectionRes, convertReportsRes, convertPairsRes] = await Promise.all([
       apiFetch<{ settings: FeeSettings; balances: FeeBalanceRow[] }>('/admin/fees'),
       apiFetch<{ settings: SpotProtectionSettings }>('/admin/spot/protection'),
       apiFetch<ConvertReportsResponse>('/admin/convert/reports'),
+      apiFetch<{ pairs: AdminConvertPair[] }>('/admin/convert/pairs'),
     ]);
 
     if (feeRes.ok) {
@@ -4812,6 +4841,11 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
       });
     } else {
       onNotify(convertReportsRes.error || 'Failed to load convert reports', 'error');
+    }
+    if (convertPairsRes.ok) {
+      setConvertPairs(Array.isArray(convertPairsRes.data.pairs) ? convertPairsRes.data.pairs : []);
+    } else {
+      onNotify(convertPairsRes.error || 'Failed to load convert pairs', 'error');
     }
     setLoading(false);
   }, [onNotify, syncFormWithSettings]);
@@ -4978,6 +5012,98 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
     } else {
       onNotify(res.error || 'Failed to update spot protection', 'error');
     }
+  };
+
+  const resetConvertPairForm = () =>
+    setConvertPairForm({
+      id: 0,
+      category: 'crypto',
+      symbol: '',
+      display_name: '',
+      token_symbol: '',
+      token_address: '',
+      token_decimals: '18',
+      logo_url: '',
+      sort_order: '0',
+      active: true,
+    });
+
+  const editConvertPair = (pair: AdminConvertPair) => {
+    setConvertPairForm({
+      id: pair.id,
+      category: (pair.category === 'gold' || pair.category === 'stocks' || pair.category === 'crypto' ? pair.category : 'crypto') as
+        | 'gold'
+        | 'stocks'
+        | 'crypto',
+      symbol: pair.symbol,
+      display_name: pair.display_name,
+      token_symbol: pair.token_symbol,
+      token_address: pair.token_address || '',
+      token_decimals: String(pair.token_decimals ?? 18),
+      logo_url: pair.logo_url || '',
+      sort_order: String(pair.sort_order || 0),
+      active: !!pair.active,
+    });
+  };
+
+  const saveConvertPair = async () => {
+    const payload = {
+      category: convertPairForm.category,
+      symbol: convertPairForm.symbol.trim(),
+      display_name: convertPairForm.display_name.trim(),
+      token_symbol: convertPairForm.token_symbol.trim(),
+      token_address: convertPairForm.token_address.trim() || null,
+      token_decimals: Number(convertPairForm.token_decimals),
+      logo_url: convertPairForm.logo_url.trim() || null,
+      sort_order: Number(convertPairForm.sort_order),
+      active: !!convertPairForm.active,
+    };
+
+    if (!payload.symbol || !payload.display_name || !payload.token_symbol || !Number.isFinite(payload.token_decimals)) {
+      onNotify('Fill symbol/display/token symbol/decimals before saving', 'error');
+      return;
+    }
+    setSavingConvertPair(true);
+    const res =
+      convertPairForm.id > 0
+        ? await apiFetch<{ pair: AdminConvertPair }>(`/admin/convert/pairs/${convertPairForm.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+              display_name: payload.display_name,
+              token_symbol: payload.token_symbol,
+              token_address: payload.token_address,
+              token_decimals: payload.token_decimals,
+              logo_url: payload.logo_url,
+              sort_order: payload.sort_order,
+              active: payload.active,
+            }),
+          })
+        : await apiFetch<{ pair: AdminConvertPair }>('/admin/convert/pairs', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+    setSavingConvertPair(false);
+    if (!res.ok) {
+      onNotify(res.error || 'Failed to save convert pair', 'error');
+      return;
+    }
+    onNotify(convertPairForm.id > 0 ? 'Convert pair updated' : 'Convert pair created', 'success');
+    resetConvertPairForm();
+    await load();
+  };
+
+  const removeConvertPair = async (pair: AdminConvertPair) => {
+    if (!window.confirm(`Delete convert pair ${pair.symbol}?`)) return;
+    setSavingConvertPair(true);
+    const res = await apiFetch(`/admin/convert/pairs/${pair.id}`, { method: 'DELETE' });
+    setSavingConvertPair(false);
+    if (!res.ok) {
+      onNotify(res.error || 'Failed to delete convert pair', 'error');
+      return;
+    }
+    onNotify('Convert pair deleted', 'success');
+    if (convertPairForm.id === pair.id) resetConvertPairForm();
+    await load();
   };
 
   const renderBalanceTable = (label: string, rows: FeeBalanceRow[]) => {
@@ -5291,6 +5417,168 @@ function FeesPanel({ onNotify }: { onNotify: (message: string, variant?: 'succes
             {renderBalanceTable('Swap fees collected', groupedBalances.swap)}
             {renderBalanceTable('Spot fees collected', groupedBalances.spot)}
             {renderBalanceTable('Withdrawal fees collected', groupedBalances.withdrawal)}
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="text-md font-semibold">Convert pairs & on-chain mapping</h4>
+                <p className="mt-1 text-sm text-white/60">Manage all Gold / Stocks / Crypto convert pairs, addresses, decimals, and active status.</p>
+              </div>
+              <button
+                onClick={load}
+                className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/70 transition hover:border-white/30 hover:text-white"
+              >
+                Refresh pairs
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <label className="space-y-1 text-xs text-white/70">
+                <span>Category</span>
+                <select
+                  value={convertPairForm.category}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, category: e.target.value as 'gold' | 'stocks' | 'crypto' }))}
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                >
+                  <option value="gold">Gold</option>
+                  <option value="stocks">Stocks</option>
+                  <option value="crypto">Crypto</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-xs text-white/70">
+                <span>Symbol (BASE/USDT)</span>
+                <input
+                  value={convertPairForm.symbol}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, symbol: e.target.value }))}
+                  placeholder="XAUT/USDT"
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-white/70">
+                <span>Display name</span>
+                <input
+                  value={convertPairForm.display_name}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, display_name: e.target.value }))}
+                  placeholder="Tether Gold"
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-white/70">
+                <span>Token symbol</span>
+                <input
+                  value={convertPairForm.token_symbol}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, token_symbol: e.target.value }))}
+                  placeholder="XAUT"
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-white/70 md:col-span-2">
+                <span>Token address</span>
+                <input
+                  value={convertPairForm.token_address}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, token_address: e.target.value }))}
+                  placeholder="0x..."
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-white/70">
+                <span>Token decimals</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={36}
+                  value={convertPairForm.token_decimals}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, token_decimals: e.target.value }))}
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-white/70">
+                <span>Sort order</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={convertPairForm.sort_order}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, sort_order: e.target.value }))}
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="space-y-1 text-xs text-white/70 md:col-span-3">
+                <span>Logo URL</span>
+                <input
+                  value={convertPairForm.logo_url}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, logo_url: e.target.value }))}
+                  placeholder="https://..."
+                  className="w-full rounded-md border border-white/10 bg-black/40 px-2 py-2 text-white"
+                />
+              </label>
+              <label className="inline-flex items-center gap-2 text-xs text-white/70">
+                <input
+                  type="checkbox"
+                  checked={convertPairForm.active}
+                  onChange={(e) => setConvertPairForm((prev) => ({ ...prev, active: e.target.checked }))}
+                />
+                Active
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <button
+                onClick={saveConvertPair}
+                disabled={savingConvertPair}
+                className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-cyan-500 disabled:opacity-60"
+              >
+                {savingConvertPair ? 'Saving…' : convertPairForm.id > 0 ? 'Update pair' : 'Add pair'}
+              </button>
+              <button
+                onClick={resetConvertPairForm}
+                className="rounded-lg border border-white/10 px-4 py-2 text-sm text-white/80 transition hover:border-white/30 hover:text-white"
+              >
+                Clear form
+              </button>
+            </div>
+
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full divide-y divide-white/10 text-xs">
+                <thead className="bg-white/5 text-white/60">
+                  <tr>
+                    <th className="px-2 py-2 text-left">Category</th>
+                    <th className="px-2 py-2 text-left">Symbol</th>
+                    <th className="px-2 py-2 text-left">Address</th>
+                    <th className="px-2 py-2 text-left">Decimals</th>
+                    <th className="px-2 py-2 text-left">Active</th>
+                    <th className="px-2 py-2 text-left">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/10">
+                  {convertPairs.map((pair) => (
+                    <tr key={pair.id}>
+                      <td className="px-2 py-2 uppercase text-white/70">{pair.category}</td>
+                      <td className="px-2 py-2 text-white">{pair.symbol}</td>
+                      <td className="px-2 py-2 text-white/70">{pair.token_address || '—'}</td>
+                      <td className="px-2 py-2 text-white/70">{pair.token_decimals ?? '—'}</td>
+                      <td className="px-2 py-2 text-white/70">{pair.active ? 'Yes' : 'No'}</td>
+                      <td className="px-2 py-2">
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => editConvertPair(pair)}
+                            className="rounded border border-blue-400/30 px-2 py-1 text-[11px] text-blue-200 transition hover:border-blue-300"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => removeConvertPair(pair)}
+                            className="rounded border border-rose-400/30 px-2 py-1 text-[11px] text-rose-200 transition hover:border-rose-300"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!convertPairs.length ? <div className="py-3 text-xs text-white/55">No convert pairs found.</div> : null}
+            </div>
           </div>
 
           <div className="rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-500/10 via-slate-900/60 to-indigo-500/10 p-6">

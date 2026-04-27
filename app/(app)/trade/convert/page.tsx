@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDownUp, BadgeDollarSign, RefreshCw, ShieldCheck, Sparkles, Wallet } from 'lucide-react';
+import { ArrowDownUp, BadgeDollarSign, ChevronLeft, RefreshCw, Wallet } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
@@ -51,12 +51,31 @@ function cleanDisplayName(value: string): string {
   return value.replace(/\bondo\b/gi, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+function assetIconFallback(symbol: string): string {
+  const upper = symbol.toUpperCase();
+  const map: Record<string, string> = {
+    BNB: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/assets/0x0000000000000000000000000000000000000000/logo.png',
+    WBTC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/assets/0x7130d2A12B9BCBfAe4f2634d864A1Ee1Ce3Ead9c/logo.png',
+    XRP: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/xrp/info/logo.png',
+    SOL: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/solana/info/logo.png',
+    LINK: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/assets/0xF8A0BF9cF54Bb92F17374d9e9A321E6a111a51bD/logo.png',
+    XAUT: 'https://assets.coingecko.com/coins/images/10481/standard/Tether_Gold.png',
+    NVDA: 'https://logo.clearbit.com/nvidia.com',
+    TSLA: 'https://logo.clearbit.com/tesla.com',
+    AAPL: 'https://logo.clearbit.com/apple.com',
+    MSFT: 'https://logo.clearbit.com/microsoft.com',
+    AMZN: 'https://logo.clearbit.com/amazon.com',
+    GOOGL: 'https://logo.clearbit.com/google.com',
+  };
+  return map[upper] || '';
+}
+
 function categoryStyle(item: Category, active: boolean): string {
   const base = 'rounded-xl border px-3 py-2 text-center text-sm font-medium transition';
-  if (!active) return `${base} border-white/10 bg-white/[0.03] text-white/70 hover:border-white/25 hover:text-white`;
-  if (item === 'gold') return `${base} border-amber-300/70 bg-amber-500/15 text-amber-100`;
-  if (item === 'stocks') return `${base} border-indigo-300/70 bg-indigo-500/15 text-indigo-100`;
-  return `${base} border-cyan-300/70 bg-cyan-500/15 text-cyan-100`;
+  if (!active) return `${base} border-white/10 bg-[#111a30] text-white/70 hover:border-cyan-400/40 hover:text-white`;
+  if (item === 'gold') return `${base} border-amber-400/50 bg-amber-500/10 text-amber-200`;
+  if (item === 'stocks') return `${base} border-blue-400/50 bg-blue-500/10 text-blue-200`;
+  return `${base} border-cyan-400/60 bg-cyan-500/10 text-cyan-200`;
 }
 
 function formatPrice(value: number): string {
@@ -79,7 +98,7 @@ function ConvertPageContent() {
   const [amount, setAmount] = useState('');
   const [estimate, setEstimate] = useState(0);
   const [feeUsdt, setFeeUsdt] = useState(0);
-  const [convertMode, setConvertMode] = useState<'mock' | 'live'>('mock');
+  const [convertMode, setConvertMode] = useState<'mock' | 'live'>('live');
   const [minUsdt, setMinUsdt] = useState(10);
   const [feeBps, setFeeBps] = useState(50);
   const [loading, setLoading] = useState(true);
@@ -91,10 +110,6 @@ function ConvertPageContent() {
 
   const labels = useMemo(
     () => ({
-      title: isArabic ? 'منصة تحويل احترافية' : 'Professional Convert Desk',
-      subtitle: isArabic
-        ? 'تحويل الذهب، الاسهم، والكريبتو بسرعة مع تجربة احترافية'
-        : 'Convert gold, stocks, and crypto with a polished institutional flow',
       back: isArabic ? 'رجوع' : 'Back',
       choosePair: isArabic ? 'اختار الزوج' : 'Choose pair',
       buy: isArabic ? 'شراء' : 'Buy',
@@ -105,7 +120,7 @@ function ConvertPageContent() {
       executing: isArabic ? 'جاري التنفيذ...' : 'Executing...',
       runtimeWarning: isArabic ? 'تحذير تشغيل' : 'Runtime warning',
       mode: isArabic ? 'وضع التنفيذ' : 'Execution mode',
-      live: isArabic ? 'حي - PancakeSwap' : 'Live - PancakeSwap',
+      live: isArabic ? 'حي' : 'Live',
       mock: isArabic ? 'تجريبي' : 'Mock',
       quickAmounts: isArabic ? 'مبالغ سريعة' : 'Quick amounts',
     }),
@@ -123,7 +138,7 @@ function ConvertPageContent() {
     setPairs(res.data.pairs || []);
     setMinUsdt(res.data.settings?.convert_min_usdt || 10);
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
-    setConvertMode(res.data.settings?.convert_execution_mode || 'mock');
+    setConvertMode(res.data.settings?.convert_execution_mode || 'live');
     setRuntimeWarning('');
     if ((res.data.pairs || []).length) {
       setSelectedSymbol((prev) => (prev && res.data.pairs.some((item) => item.symbol === prev) ? prev : res.data.pairs[0].symbol));
@@ -150,7 +165,7 @@ function ConvertPageContent() {
         setFeeUsdt(0);
         return;
       }
-      setConvertMode(res.data.mode || 'mock');
+      setConvertMode(res.data.mode || 'live');
       setRuntimeWarning(String(res.data.runtime_warning || ''));
       setEstimate(parsePositive(res.data.quote.total_usdt));
       setFeeUsdt(parsePositive(res.data.quote.fee_usdt));
@@ -189,22 +204,11 @@ function ConvertPageContent() {
   }, [amountNum, category, estimate, isArabic, minUsdt, selectedPair, side, toast]);
 
   return (
-    <section className="mx-auto w-full max-w-5xl space-y-5 px-4 py-4 md:px-6 md:py-6">
-      <div className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#0e1730] via-[#0f243c] to-[#111629] p-5 text-white md:p-7">
-        <div className="absolute -right-12 -top-12 h-40 w-40 rounded-full bg-cyan-400/20 blur-3xl" />
-        <div className="absolute -bottom-16 left-1/4 h-44 w-44 rounded-full bg-indigo-400/10 blur-3xl" />
-        <div className="relative flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-100">
-              <Sparkles className="h-3.5 w-3.5" /> {isArabic ? 'ELTX Convert Pro' : 'ELTX Convert Pro'}
-            </div>
-            <h1 className="text-2xl font-bold md:text-3xl">{labels.title}</h1>
-            <p className="max-w-2xl text-sm text-white/70 md:text-base">{labels.subtitle}</p>
-          </div>
-          <Link href="/trade" className="rounded-full border border-white/20 bg-black/20 px-3 py-1.5 text-xs text-white/80 transition hover:border-white/40 hover:text-white">
-            {labels.back}
-          </Link>
-        </div>
+    <section className="mx-auto w-full max-w-5xl space-y-4 px-4 py-4 md:px-6 md:py-6">
+      <div className="flex items-center">
+        <Link href="/trade" className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-[#11172a] px-3 py-2 text-xs text-white/80 transition hover:border-cyan-400/50 hover:text-white">
+          <ChevronLeft className="h-4 w-4" /> {labels.back}
+        </Link>
       </div>
 
       <div className="grid grid-cols-3 gap-2">
@@ -215,16 +219,12 @@ function ConvertPageContent() {
         ))}
       </div>
 
-      <div className="rounded-3xl border border-white/10 bg-[#0e1327]/95 p-4 text-white shadow-2xl shadow-black/20 md:p-6">
+      <div className="rounded-3xl border border-white/10 bg-[#0f172a] p-4 text-white shadow-xl shadow-black/20 md:p-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-sm text-white/80">
             <BadgeDollarSign className="h-4 w-4 text-cyan-200" /> {labels.choosePair}
           </div>
-          <button
-            onClick={loadPairs}
-            className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/70 transition hover:border-white/25 hover:text-white"
-            type="button"
-          >
+          <button onClick={loadPairs} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/70 transition hover:border-cyan-400/50 hover:text-white" type="button">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> {isArabic ? 'تحديث' : 'Refresh'}
           </button>
         </div>
@@ -238,10 +238,20 @@ function ConvertPageContent() {
         </select>
 
         {selectedPair && (
-          <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#111a30] p-3">
             <div className="flex items-center gap-3">
               <div className="relative h-10 w-10 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/15">
-                {selectedPair.logo_url ? <img src={selectedPair.logo_url} alt={selectedPair.token_symbol} className="h-full w-full object-cover" /> : null}
+                <img
+                  src={selectedPair.logo_url || assetIconFallback(selectedPair.token_symbol)}
+                  alt={`${selectedPair.token_symbol} icon`}
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    const fallback = assetIconFallback(selectedPair.token_symbol);
+                    const target = e.currentTarget;
+                    if (fallback && target.src !== fallback) target.src = fallback;
+                    else target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" rx="24" fill="%23111f34"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="16" fill="%23ffffff" font-family="Arial">%</text></svg>';
+                  }}
+                />
               </div>
               <div>
                 <div className="text-sm font-semibold">{selectedPair.symbol}</div>
@@ -250,7 +260,7 @@ function ConvertPageContent() {
             </div>
             <div className="text-right text-xs text-white/60">
               <div>{labels.mode}</div>
-              <div className="font-semibold text-white/80">{convertMode === 'live' ? labels.live : labels.mock}</div>
+              <div className={`font-semibold ${convertMode === 'live' ? 'text-emerald-300' : 'text-amber-300'}`}>{convertMode === 'live' ? labels.live : labels.mock}</div>
             </div>
           </div>
         )}
@@ -276,7 +286,7 @@ function ConvertPageContent() {
           </button>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.05] to-white/[0.02] p-4">
+        <div className="mt-4 rounded-2xl border border-white/10 bg-[#111a2e] p-4">
           <div className="text-xs text-white/60">
             {side === 'buy'
               ? isArabic
@@ -326,11 +336,6 @@ function ConvertPageContent() {
               <div className="text-white/50">{isArabic ? 'الحد الادنى' : 'Minimum'}</div>
               <div className="mt-1 text-sm font-semibold text-white">{minUsdt.toFixed(2)} USDT</div>
             </div>
-          </div>
-
-          <div className="mt-3 flex items-center gap-2 rounded-xl border border-emerald-300/20 bg-emerald-500/10 p-2.5 text-xs text-emerald-100">
-            <ShieldCheck className="h-3.5 w-3.5" />
-            <span>{isArabic ? 'تنفيذ مع فحص الرسوم والحد الادنى قبل الارسال' : 'Execution validates fee and minimum threshold before submit'}</span>
           </div>
 
           {runtimeWarning ? (
