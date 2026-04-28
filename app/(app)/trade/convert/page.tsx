@@ -36,12 +36,15 @@ type ConvertHealthResponse = {
 };
 
 type ConvertQuoteResponse = {
-  mode: 'mock' | 'live';
+  mode: 'mock' | 'live' | 'unavailable';
+  executionMode: 'live' | 'unavailable';
+  valid: boolean;
+  blockingReason?: string | null;
   runtime_warning?: string | null;
   quote: {
-    quote_without_fee: string;
-    fee_usdt: string;
-    total_usdt: string;
+    estimatedQuote: string;
+    feeAmount: string;
+    totalQuote: string;
   };
 };
 
@@ -88,9 +91,10 @@ function categoryStyle(item: Category, active: boolean): string {
 
 function formatPrice(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '0.0000';
+  if (value < 0.0001) return '<0.0001';
   if (value >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
   if (value >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
+  return value.toLocaleString(undefined, { maximumFractionDigits: 8 });
 }
 
 function normalizeConvertWarning(raw: string, isArabic: boolean): string {
@@ -99,6 +103,12 @@ function normalizeConvertWarning(raw: string, isArabic: boolean): string {
   const lower = message.toLowerCase();
   if (lower.includes('price deviation')) {
     return isArabic ? 'فرق السعر عالي حاليا. حاول تاني بعد ثواني أو قلل الكمية.' : 'Price deviation is currently high. Please retry in a few seconds or reduce the amount.';
+  }
+  if (lower.includes('below minimum') || lower.includes('amount_below_minimum')) {
+    return isArabic ? 'الكمية أقل من الحد الأدنى.' : 'Amount is below minimum.';
+  }
+  if (lower.includes('live quote unavailable')) {
+    return isArabic ? 'التسعير المباشر غير متاح الآن.' : 'Live quote unavailable.';
   }
   if (lower.includes('execution reverted') || lower.includes('call_exception') || lower.includes('require(false)')) {
     return isArabic ? 'المسار غير متاح حاليا في السيولة. جرّب كمية أقل أو حاول لاحقًا.' : 'Liquidity route is temporarily unavailable. Try a smaller amount or retry later.';
@@ -133,6 +143,9 @@ function ConvertPageContent() {
   const [runtimeWarning, setRuntimeWarning] = useState('');
   const [liveReady, setLiveReady] = useState(false);
   const [healthError, setHealthError] = useState('');
+  const [quoteValid, setQuoteValid] = useState(false);
+  const [blockingReason, setBlockingReason] = useState('');
+  const [quoteLoading, setQuoteLoading] = useState(false);
 
   const selectedPair = useMemo(() => pairs.find((item) => item.symbol === selectedSymbol) || null, [pairs, selectedSymbol]);
   const amountNum = parsePositive(amount);
@@ -181,11 +194,11 @@ function ConvertPageContent() {
       const res = await apiFetch<ConvertHealthResponse>(`/convert/health?category=${category}&symbol=${encodeURIComponent(pairSymbol)}`);
       if (!res.ok) {
         setLiveReady(false);
-        setConvertMode('mock');
+        setConvertMode('live');
         setHealthError(normalizeConvertWarning(res.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
         return;
       }
-      setConvertMode(res.data.effectiveMode || 'mock');
+      setConvertMode(res.data.effectiveMode || 'live');
       setLiveReady(Boolean(res.data.liveReady && res.data.effectiveMode === 'live'));
       setHealthError(normalizeConvertWarning(String(res.data.lastError || ''), isArabic));
     },
@@ -206,29 +219,37 @@ function ConvertPageContent() {
       if (!selectedPair || !amountNum) {
         setEstimate(0);
         setFeeUsdt(0);
+        setQuoteValid(false);
+        setBlockingReason('');
         return;
       }
+      setQuoteLoading(true);
       const res = await apiFetch<ConvertQuoteResponse>('/convert/quote', {
         method: 'POST',
         body: JSON.stringify({ category, symbol: selectedPair.symbol, side, amount: amountNum.toString() }),
       });
+      setQuoteLoading(false);
       if (!res.ok) {
         setEstimate(0);
         setFeeUsdt(0);
+        setQuoteValid(false);
+        setBlockingReason('LIVE_QUOTE_UNAVAILABLE');
         setRuntimeWarning(normalizeConvertWarning(res.error || '', isArabic));
         return;
       }
-      setConvertMode(res.data.mode || 'live');
+      setConvertMode(res.data.executionMode === 'live' ? 'live' : 'mock');
       setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
-      setEstimate(parsePositive(res.data.quote.total_usdt));
-      setFeeUsdt(parsePositive(res.data.quote.fee_usdt));
+      setEstimate(parsePositive(res.data.quote.estimatedQuote));
+      setFeeUsdt(parsePositive(res.data.quote.feeAmount));
+      setQuoteValid(Boolean(res.data.valid));
+      setBlockingReason(String(res.data.blockingReason || ''));
     }
     run();
   }, [amountNum, category, isArabic, selectedPair, side]);
 
   const executeSwap = useCallback(async () => {
     if (!selectedPair) return;
-    if (!liveReady) {
+    if (!liveReady || !quoteValid) {
       toast({ message: healthError || (isArabic ? 'وضع Live غير جاهز حاليا' : 'Live mode is not ready right now'), variant: 'error' });
       return;
     }
@@ -238,7 +259,7 @@ function ConvertPageContent() {
     }
     if (estimate < minUsdt) {
       toast({
-        message: isArabic ? `اقل قيمة تنفيذ حاليا ${minUsdt.toFixed(2)} USDT` : `Minimum convert value is ${minUsdt.toFixed(2)} USDT`,
+        message: isArabic ? `القيمة أقل من الحد الأدنى ${minUsdt.toFixed(2)} USDT. زوّد الكمية.` : `Estimated value is below the ${minUsdt.toFixed(2)} USDT minimum.`,
         variant: 'error',
       });
       return;
@@ -258,7 +279,7 @@ function ConvertPageContent() {
     toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Convert executed successfully', variant: 'success' });
     setAmount('');
     setEstimate(0);
-  }, [amountNum, category, estimate, healthError, isArabic, liveReady, minUsdt, selectedPair, side, toast]);
+  }, [amountNum, category, estimate, healthError, isArabic, liveReady, minUsdt, quoteValid, selectedPair, side, toast]);
 
   return (
     <section className="mx-auto w-full max-w-5xl space-y-4 px-4 py-4 md:px-6 md:py-6">
@@ -318,7 +339,7 @@ function ConvertPageContent() {
             <div className="text-right text-xs text-white/60">
               <div>{labels.mode}</div>
               <div className={`font-semibold ${convertMode === 'live' && liveReady ? 'text-emerald-300' : 'text-amber-300'}`}>
-                {convertMode === 'live' && liveReady ? labels.live : labels.mock}
+                {convertMode === 'live' && liveReady ? labels.live : isArabic ? 'غير متاح' : 'Live unavailable'}
               </div>
             </div>
           </div>
@@ -368,19 +389,7 @@ function ConvertPageContent() {
             <ArrowDownUp className="h-4 w-4 text-white/40" />
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-white/55">{labels.quickAmounts}:</span>
-            {['10', '25', '50', '100'].map((quick) => (
-              <button
-                key={quick}
-                type="button"
-                onClick={() => setAmount(quick)}
-                className="rounded-full border border-white/15 bg-white/[0.04] px-2.5 py-1 text-xs text-white/75 transition hover:border-white/30 hover:text-white"
-              >
-                {quick}
-              </button>
-            ))}
-          </div>
+          <div className="mt-3 text-xs text-white/55">{isArabic ? 'Quick amounts معطلة لهذا الزوج لتجنب اللبس (الادخال هنا كمية الأصل).' : 'Quick amounts disabled for this pair to avoid ambiguity (input is base-asset amount).'}</div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-xs text-white/70">
@@ -397,9 +406,15 @@ function ConvertPageContent() {
             </div>
           </div>
 
+          {quoteLoading ? <div className="mt-2 text-xs text-cyan-200">{isArabic ? 'جاري جلب السعر المباشر...' : 'Fetching live quote...'}</div> : null}
           {runtimeWarning ? (
             <div className="mt-2 break-words rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
               {labels.runtimeWarning}: {runtimeWarning}
+            </div>
+          ) : null}
+          {blockingReason === 'AMOUNT_BELOW_MINIMUM' ? (
+            <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+              {isArabic ? `القيمة أقل من الحد الأدنى ${minUsdt.toFixed(2)} USDT. زوّد الكمية.` : `Estimated value is below the ${minUsdt.toFixed(2)} USDT minimum.`}
             </div>
           ) : null}
           {!liveReady ? (
@@ -412,7 +427,7 @@ function ConvertPageContent() {
         <button
           type="button"
           onClick={executeSwap}
-          disabled={placing || loading || !selectedPair || !liveReady}
+          disabled={placing || loading || !selectedPair || !liveReady || !quoteValid || estimate < minUsdt}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-500 py-3 text-center font-semibold text-black transition hover:bg-cyan-400 disabled:opacity-60"
         >
           <Wallet className="h-4 w-4" /> {placing ? labels.executing : labels.execute}
