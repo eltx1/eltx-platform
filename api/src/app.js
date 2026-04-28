@@ -949,9 +949,19 @@ const PANCAKE_V2_ROUTER_ABI = [
   'function swapExactTokensForTokens(uint amountIn,uint amountOutMin,address[] calldata path,address to,uint deadline) external returns (uint[] memory amounts)',
   'function swapTokensForExactTokens(uint amountOut,uint amountInMax,address[] calldata path,address to,uint deadline) external returns (uint[] memory amounts)',
 ];
+const PANCAKE_SMART_ROUTER_ABI = [
+  'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+  'function exactOutputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountOut,uint256 amountInMaximum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountIn)',
+];
+const PANCAKE_QUOTER_V2_ABI = [
+  'function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) external returns (uint256 amountOut,uint160,uint32,uint256)',
+  'function quoteExactOutputSingle((address tokenIn,address tokenOut,uint256 amountOut,uint24 fee,uint160 sqrtPriceLimitX96)) external returns (uint256 amountIn,uint160,uint32,uint256)',
+];
 const ERC20_ABI = [
   'function approve(address spender, uint256 value) external returns (bool)',
   'function allowance(address owner, address spender) external view returns (uint256)',
+  'function balanceOf(address owner) external view returns (uint256)',
+  'function decimals() external view returns (uint8)',
 ];
 const BSC_WBNB_ADDRESS = (process.env.TOKEN_WBNB || '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c').toLowerCase();
 const BSC_USDT_ADDRESS = (process.env.TOKEN_USDT || '0x55d398326f99059fF775485246999027B3197955').toLowerCase();
@@ -959,6 +969,17 @@ const BSC_USDC_ADDRESS = (process.env.TOKEN_USDC || '0x8ac76a51cc950d9822d68b83f
 const PANCAKE_V2_ROUTER_ADDRESS = (
   process.env.PANCAKE_V2_ROUTER || '0x10ED43C718714eb63d5aA57B78B54704E256024E'
 ).toLowerCase();
+const PANCAKE_SMART_ROUTER_ADDRESS = (process.env.PANCAKE_SMART_ROUTER || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4').toLowerCase();
+const PANCAKE_QUOTER_V2_ADDRESS = (process.env.PANCAKE_QUOTER_V2 || '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997').toLowerCase();
+const CONVERT_V3_FEES = [100, 500, 2500, 10000];
+const CONVERT_PRICE_MAX_DEVIATION_BPS = Number(process.env.CONVERT_PRICE_MAX_DEVIATION_BPS || 700);
+const CONVERT_CHAIN_ID = 56;
+const CONVERT_TOKEN_REGISTRY = {
+  56: {
+    XAUT: { address: '0x21cAef8A43163Eea865baeE23b9C2E327696A3bf'.toLowerCase(), decimals: 6 },
+    USDT: { address: '0x55d398326f99059ff775485246999027b3197955'.toLowerCase(), decimals: 18 },
+  },
+};
 
 // token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
@@ -2718,18 +2739,22 @@ async function readConvertSettings(conn = pool) {
   const minVal = await getPlatformSettingValue('convert_min_usdt', '10', conn);
   const modeVal = await getPlatformSettingValue('convert_execution_mode', 'live', conn);
   const slippageVal = await getPlatformSettingValue('convert_slippage_bps', '120', conn);
-  const fallbackVal = await getPlatformSettingValue('convert_live_fallback_mock', '1', conn);
+  const fallbackVal = await getPlatformSettingValue('convert_live_fallback_mock', '0', conn);
   const requirePairAddressVal = await getPlatformSettingValue('convert_require_pair_address_live', '1', conn);
   const feeBps = clampBps(BigInt(Number.parseInt(feeVal, 10) || 0));
   const minUsdt = Number.parseFloat(minVal || '10');
   const slippageBps = clampBps(BigInt(Number.parseInt(slippageVal, 10) || 0));
+  const requestedMode = modeVal === 'mock' ? 'mock' : 'live';
+  const mockPermittedByEnv = process.env.NODE_ENV !== 'production' && process.env.CONVERT_ALLOW_MOCK === 'true';
   return {
     convert_fee_bps: Number(feeBps),
     convert_min_usdt: Number.isFinite(minUsdt) && minUsdt >= 0 ? minUsdt : 10,
-    convert_execution_mode: modeVal === 'live' ? 'live' : 'mock',
+    convert_execution_mode: process.env.NODE_ENV === 'production' ? 'live' : requestedMode,
+    convert_requested_mode: requestedMode,
     convert_slippage_bps: Number(slippageBps),
-    convert_live_fallback_mock: fallbackVal === '0' ? 0 : 1,
+    convert_live_fallback_mock: fallbackVal === '1' && mockPermittedByEnv ? 1 : 0,
     convert_require_pair_address_live: requirePairAddressVal === '0' ? 0 : 1,
+    convert_mock_allowed: mockPermittedByEnv,
   };
 }
 
@@ -2769,6 +2794,8 @@ async function listConvertPairs(category, conn = pool, { includeInactive = false
 
 function resolveConvertAssetAddress(assetSymbol, pairAddress = null) {
   const upper = String(assetSymbol || '').toUpperCase();
+  const registryMeta = CONVERT_TOKEN_REGISTRY[CONVERT_CHAIN_ID]?.[upper];
+  if (registryMeta?.address) return registryMeta.address;
   if (pairAddress) return String(pairAddress).toLowerCase();
   if (upper === 'BNB') return BSC_WBNB_ADDRESS;
   if (upper === 'USDT') return BSC_USDT_ADDRESS;
@@ -2778,6 +2805,9 @@ function resolveConvertAssetAddress(assetSymbol, pairAddress = null) {
 }
 
 function resolveConvertAssetDecimals(assetSymbol, pairDecimals = null) {
+  const upper = String(assetSymbol || '').toUpperCase();
+  const registryMeta = CONVERT_TOKEN_REGISTRY[CONVERT_CHAIN_ID]?.[upper];
+  if (registryMeta?.decimals !== undefined && registryMeta?.decimals !== null) return normalizeDecimals(registryMeta.decimals, getSymbolDecimals(assetSymbol));
   if (pairDecimals !== null && pairDecimals !== undefined) return normalizeDecimals(pairDecimals, getSymbolDecimals(assetSymbol));
   const address = resolveConvertAssetAddress(assetSymbol);
   return getTokenDecimals(assetSymbol, address);
@@ -2809,8 +2839,12 @@ function ensureConvertLivePairReady(pair, settings) {
   if (Number(settings?.convert_require_pair_address_live || 0) !== 1) return;
   const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
   const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
-  if (!baseAddress || !quoteAddress) {
+  const registryBase = CONVERT_TOKEN_REGISTRY[CONVERT_CHAIN_ID]?.[String(pair.base_asset || '').toUpperCase()]?.address || null;
+  if (!pair.token_address || !baseAddress || !quoteAddress) {
     throw Object.assign(new Error(`Convert pair ${pair.symbol} missing on-chain mapping`), { code: 'PAIR_NOT_LIVE_READY' });
+  }
+  if (registryBase && String(pair.token_address).toLowerCase() !== registryBase) {
+    throw Object.assign(new Error(`Convert pair ${pair.symbol} address mismatch with registry`), { code: 'PAIR_NOT_LIVE_READY' });
   }
 }
 
@@ -2830,21 +2864,40 @@ async function getConvertPairBySymbol(symbol, category = null, conn = pool) {
   return rows[0] ? mapConvertPairRow(rows[0]) : null;
 }
 
+function normalizeConvertPrivateKey(rawPk) {
+  const value = String(rawPk || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r/g, '')
+    .replace(/["']/g, '')
+    .trim();
+  if (!value) return { normalizedPk: '', valid: false, reason: 'empty' };
+  if (value.startsWith('0x')) {
+    return { normalizedPk: value, valid: /^0x[0-9a-fA-F]{64}$/.test(value), reason: '0x-prefixed' };
+  }
+  if (/^[0-9a-fA-F]{64}$/.test(value)) {
+    return { normalizedPk: `0x${value}`, valid: true, reason: 'hex-normalized' };
+  }
+  return { normalizedPk: value, valid: false, reason: 'bad-format' };
+}
+
 function summarizeConvertRuntimeReadiness(settings) {
   const rpcUrl = process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP || '';
-  const pk = process.env.CONVERT_HOT_WALLET_PK || '';
+  const rawPk = process.env.CONVERT_HOT_WALLET_PK || '';
+  const normalizedPk = normalizeConvertPrivateKey(rawPk);
   const configuredHotWalletAddress = (process.env.CONVERT_HOT_WALLET_ADDRESS || '').toLowerCase();
   const missingEnv = [];
+  const invalidEnv = [];
   if (!rpcUrl) missingEnv.push('BSC_RPC_URL (or BSC_RPC_HTTP)');
-  if (!pk) missingEnv.push('CONVERT_HOT_WALLET_PK');
+  if (!rawPk) missingEnv.push('CONVERT_HOT_WALLET_PK');
   if (!configuredHotWalletAddress) missingEnv.push('CONVERT_HOT_WALLET_ADDRESS');
+  if (rawPk && !normalizedPk.valid) invalidEnv.push('CONVERT_HOT_WALLET_PK (invalid private key)');
 
   let resolvedWalletAddress = '';
-  if (pk) {
+  if (normalizedPk.valid) {
     try {
-      resolvedWalletAddress = ethers.computeAddress(pk).toLowerCase();
+      resolvedWalletAddress = ethers.computeAddress(normalizedPk.normalizedPk).toLowerCase();
     } catch {
-      missingEnv.push('CONVERT_HOT_WALLET_PK (invalid private key)');
+      invalidEnv.push('CONVERT_HOT_WALLET_PK (invalid private key)');
     }
   }
   if (
@@ -2852,27 +2905,36 @@ function summarizeConvertRuntimeReadiness(settings) {
     resolvedWalletAddress &&
     configuredHotWalletAddress !== resolvedWalletAddress
   ) {
-    missingEnv.push('CONVERT_HOT_WALLET_ADDRESS mismatch with CONVERT_HOT_WALLET_PK');
+    invalidEnv.push('CONVERT_HOT_WALLET_ADDRESS mismatch with CONVERT_HOT_WALLET_PK');
   }
-  const envReady = missingEnv.length === 0;
-  const liveRequested = settings.convert_execution_mode === 'live';
+  const envReady = missingEnv.length === 0 && invalidEnv.length === 0;
+  const liveRequested = settings.convert_execution_mode === 'live' || settings.convert_requested_mode === 'live';
   const fallbackEnabled = Number(settings.convert_live_fallback_mock || 0) === 1;
-  const mode = liveRequested && envReady ? 'live' : 'mock';
+  const mode = liveRequested && envReady ? 'live' : fallbackEnabled ? 'mock' : 'live';
   const warning =
     liveRequested && !envReady
-      ? `[convert] live mode requested but not ready; missing/invalid: ${missingEnv.join(', ')}. fallback_to_mock=${fallbackEnabled ? '1' : '0'}`
+      ? `[convert] live mode requested but not ready; missing/invalid: ${missingEnv.concat(invalidEnv).join(', ')}. fallback_to_mock=${fallbackEnabled ? '1' : '0'}`
       : '';
+  const normalizedFingerprint = normalizedPk.normalizedPk
+    ? `${normalizedPk.normalizedPk.slice(0, 6)}...${normalizedPk.normalizedPk.slice(-4)}`
+    : 'empty';
+  console.info(
+    `[convert] hot wallet key normalized=${normalizedPk.valid ? '1' : '0'} source=${normalizedPk.reason} fingerprint=${normalizedFingerprint} derived=${resolvedWalletAddress ? `${resolvedWalletAddress.slice(0, 6)}...${resolvedWalletAddress.slice(-4)}` : 'n/a'}`
+  );
   return {
     mode,
     envReady,
     settings,
     rpcUrl,
-    pk,
+    pk: normalizedPk.valid ? normalizedPk.normalizedPk : '',
     resolvedWalletAddress: resolvedWalletAddress || configuredHotWalletAddress || null,
     missingEnv,
+    invalidEnv,
     warning,
     fallbackEnabled,
     liveRequested,
+    derivedAddressMatches: !configuredHotWalletAddress || !resolvedWalletAddress ? false : configuredHotWalletAddress === resolvedWalletAddress,
+    requestedMode: settings.convert_requested_mode || settings.convert_execution_mode,
   };
 }
 
@@ -2883,28 +2945,71 @@ async function buildConvertRuntime(conn = pool) {
   return runtime;
 }
 
-async function quoteConvertFromPancake(pair, side, amountWei) {
-  const provider = new ethers.JsonRpcProvider(process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP);
-  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, provider);
+async function readConvertTokenDecimals(provider, tokenAddress) {
+  const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+  return Number(await token.decimals());
+}
+
+async function readConvertTokenBalance(provider, tokenAddress, walletAddress) {
+  const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+  return bigIntFromValue(await token.balanceOf(walletAddress));
+}
+
+async function readGlobalGoldPriceUsdt() {
+  const fallback = Number(trimDecimal(formatUnitsStr(getSyntheticReferencePriceWei({ base_asset: 'XAUT' }).toString(), 18)));
+  try {
+    const response = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=tether-gold&vs_currencies=usd', { method: 'GET' });
+    if (!response.ok) return fallback;
+    const json = await response.json();
+    const price = Number(json?.['tether-gold']?.usd || 0);
+    return Number.isFinite(price) && price > 0 ? price : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function assertQuoteDeviationSafe(quoteInfo, amountWei, pair, side, usdtDecimals, globalPrice) {
+  const amountBase = Number(trimDecimal(formatUnitsStr(amountWei.toString(), resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals))));
+  const amountUsdt = Number(trimDecimal(formatUnitsStr(quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals)));
+  if (!Number.isFinite(amountBase) || amountBase <= 0 || !Number.isFinite(amountUsdt) || amountUsdt <= 0) {
+    throw Object.assign(new Error('Invalid quote amount'), { code: 'QUOTE_OUT_OF_RANGE' });
+  }
+  const effective = side === 'buy' ? amountUsdt / amountBase : amountUsdt / amountBase;
+  const deviationBps = Math.abs((effective - globalPrice) / globalPrice) * 10000;
+  if (deviationBps > CONVERT_PRICE_MAX_DEVIATION_BPS) {
+    throw Object.assign(new Error('price deviation too high'), { code: 'PRICE_DEVIATION' });
+  }
+}
+
+async function quoteConvertFromPancake(pair, side, amountWei, provider) {
+  const quoter = new ethers.Contract(PANCAKE_QUOTER_V2_ADDRESS, PANCAKE_QUOTER_V2_ABI, provider);
   const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
   const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
   if (!baseAddress || !quoteAddress) throw new Error(`Missing token address mapping for ${pair.symbol}`);
-  if (side === 'buy') {
-    const amounts = await router.getAmountsIn(amountWei, [quoteAddress, baseAddress]);
-    return {
-      quoteWithoutFeeWei: bigIntFromValue(amounts[0]),
-      baseAmountWei: bigIntFromValue(amountWei),
-      direction: 'quote_to_base',
-      path: [quoteAddress, baseAddress],
-    };
+  let best = null;
+  let quoteErr = null;
+  for (const fee of CONVERT_V3_FEES) {
+    try {
+      if (side === 'buy') {
+        const quoted = await quoter.quoteExactOutputSingle.staticCall([quoteAddress, baseAddress, amountWei, fee, 0]);
+        const quotedIn = bigIntFromValue(Array.isArray(quoted) ? quoted[0] : quoted.amountIn || 0);
+        if (quotedIn > 0n && (!best || quotedIn < best.quoteWithoutFeeWei)) {
+          best = { quoteWithoutFeeWei: quotedIn, baseAmountWei: bigIntFromValue(amountWei), direction: 'quote_to_base', fee, path: [quoteAddress, baseAddress] };
+        }
+      } else {
+        const quoted = await quoter.quoteExactInputSingle.staticCall([baseAddress, quoteAddress, amountWei, fee, 0]);
+        const quotedOut = bigIntFromValue(Array.isArray(quoted) ? quoted[0] : quoted.amountOut || 0);
+        if (quotedOut > 0n && (!best || quotedOut > best.quoteWithoutFeeWei)) {
+          best = { quoteWithoutFeeWei: quotedOut, baseAmountWei: bigIntFromValue(amountWei), direction: 'base_to_quote', fee, path: [baseAddress, quoteAddress] };
+        }
+      }
+    } catch (err) {
+      quoteErr = err;
+    }
   }
-  const amounts = await router.getAmountsOut(amountWei, [baseAddress, quoteAddress]);
-  return {
-    quoteWithoutFeeWei: bigIntFromValue(amounts[1]),
-    baseAmountWei: bigIntFromValue(amountWei),
-    direction: 'base_to_quote',
-    path: [baseAddress, quoteAddress],
-  };
+  if (best) return best;
+  if (quoteErr) throw quoteErr;
+  throw new Error(`No PancakeSwap route found for ${pair.symbol}`);
 }
 
 async function ensureErc20Allowance(tokenAddress, wallet, spender, minWei) {
@@ -2917,6 +3022,7 @@ async function ensureErc20Allowance(tokenAddress, wallet, spender, minWei) {
 
 async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime) {
   if (runtime.mode !== 'live') {
+    if (!runtime.fallbackEnabled) throw new Error('Live execution is required for convert');
     return {
       txHash: `mock-${Date.now()}`,
       spentQuoteWei: quoteWei,
@@ -2927,35 +3033,33 @@ async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime)
   }
   const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
   const wallet = new ethers.Wallet(runtime.pk, provider);
-  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, wallet);
+  const router = new ethers.Contract(PANCAKE_SMART_ROUTER_ADDRESS, PANCAKE_SMART_ROUTER_ABI, wallet);
   const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
   const quoteAddress = resolveConvertAssetAddress(pair.quote_asset);
   if (!baseAddress || !quoteAddress) throw new Error(`Missing token address mapping for ${pair.symbol}`);
-  const deadline = Math.floor(Date.now() / 1000) + 180;
+  const feeTier = Number(runtime.quoteFeeTier || CONVERT_V3_FEES[1]);
   const slippageBps = Number(runtime.settings.convert_slippage_bps || 0);
   if (side === 'buy') {
     const maxIn = quoteWei + (quoteWei * BigInt(slippageBps)) / 10000n;
-    await ensureErc20Allowance(quoteAddress, wallet, PANCAKE_V2_ROUTER_ADDRESS, maxIn);
-    const tx = await router.swapTokensForExactTokens(amountWei, maxIn, [quoteAddress, baseAddress], wallet.address, deadline);
+    await ensureErc20Allowance(quoteAddress, wallet, PANCAKE_SMART_ROUTER_ADDRESS, maxIn);
+    const tx = await router.exactOutputSingle([quoteAddress, baseAddress, feeTier, wallet.address, amountWei, maxIn, 0]);
     const receipt = await tx.wait();
-    const out = await router.getAmountsIn(amountWei, [quoteAddress, baseAddress]);
     return {
       txHash: receipt?.hash || tx.hash,
-      spentQuoteWei: bigIntFromValue(out[0]),
+      spentQuoteWei: maxIn,
       receivedBaseWei: amountWei,
       receivedQuoteWei: 0n,
       mode: 'live',
     };
   }
   const minOut = quoteWei - (quoteWei * BigInt(slippageBps)) / 10000n;
-  await ensureErc20Allowance(baseAddress, wallet, PANCAKE_V2_ROUTER_ADDRESS, amountWei);
-  const tx = await router.swapExactTokensForTokens(amountWei, minOut > 0n ? minOut : 0n, [baseAddress, quoteAddress], wallet.address, deadline);
+  await ensureErc20Allowance(baseAddress, wallet, PANCAKE_SMART_ROUTER_ADDRESS, amountWei);
+  const tx = await router.exactInputSingle([baseAddress, quoteAddress, feeTier, wallet.address, amountWei, minOut > 0n ? minOut : 0n, 0]);
   const receipt = await tx.wait();
-  const out = await router.getAmountsOut(amountWei, [baseAddress, quoteAddress]);
   return {
     txHash: receipt?.hash || tx.hash,
     spentQuoteWei: 0n,
-    receivedQuoteWei: bigIntFromValue(out[1]),
+    receivedQuoteWei: minOut > 0n ? minOut : 0n,
     receivedBaseWei: amountWei,
     mode: 'live',
   };
@@ -10588,8 +10692,98 @@ app.get('/convert/pairs', walletLimiter, async (req, res, next) => {
   try {
     await requireUser(req);
     const { category } = ConvertPairsQuerySchema.parse(req.query || {});
-    const [pairs, settings] = await Promise.all([listConvertPairs(category), readConvertSettings()]);
+    const [pairs, settings, runtime] = await Promise.all([listConvertPairs(category), readConvertSettings(), buildConvertRuntime()]);
     res.json({ ok: true, category: category || null, pairs, settings });
+    if (runtime.liveRequested && !runtime.envReady) {
+      console.warn('[convert] pairs requested while live runtime is not ready');
+    }
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
+app.get('/convert/health', walletLimiter, async (req, res, next) => {
+  try {
+    await requireUser(req);
+    const { category, symbol } = ConvertQuoteSchema.pick({ category: true, symbol: true }).parse(req.query || {});
+    const pair = await getConvertPairBySymbol(symbol, category || null);
+    if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
+    const runtime = await buildConvertRuntime();
+    const tokenIn = resolveConvertAssetAddress(pair.quote_asset);
+    const tokenOut = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+    const quoteDecimals = resolveConvertAssetDecimals(pair.quote_asset);
+    const baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+    const provider = runtime.rpcUrl ? new ethers.JsonRpcProvider(runtime.rpcUrl) : null;
+    let rpcReady = false;
+    let quoteReady = false;
+    let liquidityRouteFound = false;
+    let lastError = runtime.warning || '';
+    let bnbBalance = '0';
+    let usdtBalance = '0';
+    let xautBalance = '0';
+    let decimalsMatch = true;
+    if (provider && runtime.envReady) {
+      try {
+        await provider.getBlockNumber();
+        rpcReady = true;
+        const walletAddress = runtime.resolvedWalletAddress;
+        const [nativeWei, usdtWei, xautWei, onchainXautDecimals, onchainUsdtDecimals] = await Promise.all([
+          provider.getBalance(walletAddress),
+          readConvertTokenBalance(provider, CONVERT_TOKEN_REGISTRY[56].USDT.address, walletAddress),
+          readConvertTokenBalance(provider, CONVERT_TOKEN_REGISTRY[56].XAUT.address, walletAddress),
+          readConvertTokenDecimals(provider, CONVERT_TOKEN_REGISTRY[56].XAUT.address),
+          readConvertTokenDecimals(provider, CONVERT_TOKEN_REGISTRY[56].USDT.address),
+        ]);
+        bnbBalance = trimDecimal(formatUnitsStr(nativeWei.toString(), 18));
+        usdtBalance = trimDecimal(formatUnitsStr(usdtWei.toString(), CONVERT_TOKEN_REGISTRY[56].USDT.decimals));
+        xautBalance = trimDecimal(formatUnitsStr(xautWei.toString(), CONVERT_TOKEN_REGISTRY[56].XAUT.decimals));
+        decimalsMatch =
+          onchainXautDecimals === CONVERT_TOKEN_REGISTRY[56].XAUT.decimals &&
+          onchainUsdtDecimals === CONVERT_TOKEN_REGISTRY[56].USDT.decimals &&
+          baseDecimals === CONVERT_TOKEN_REGISTRY[56].XAUT.decimals &&
+          quoteDecimals === CONVERT_TOKEN_REGISTRY[56].USDT.decimals;
+        const probeAmount = decimalToWeiString('0.001', baseDecimals) || '0';
+        if (bigIntFromValue(probeAmount) > 0n) {
+          const quoteInfo = await quoteConvertFromPancake(pair, 'buy', bigIntFromValue(probeAmount), provider);
+          quoteReady = quoteInfo.quoteWithoutFeeWei > 0n;
+          liquidityRouteFound = !!quoteInfo.fee;
+        }
+      } catch (err) {
+        lastError = String(err?.message || err || 'health_failed');
+      }
+    }
+    if (!decimalsMatch) {
+      return next({ status: 503, code: 'PAIR_NOT_LIVE_READY', message: 'token decimals mismatch for configured convert pair' });
+    }
+    res.json({
+      ok: true,
+      requestedMode: runtime.requestedMode,
+      effectiveMode: runtime.mode,
+      liveReady: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound,
+      provider: 'pancakeswap',
+      chainId: CONVERT_CHAIN_ID,
+      rpcReady,
+      hotWalletAddress: runtime.resolvedWalletAddress ? `${runtime.resolvedWalletAddress.slice(0, 6)}...${runtime.resolvedWalletAddress.slice(-4)}` : null,
+      derivedAddressMatches: runtime.derivedAddressMatches,
+      routerAddress: PANCAKE_SMART_ROUTER_ADDRESS,
+      quoterAddress: PANCAKE_QUOTER_V2_ADDRESS,
+      tokenIn,
+      tokenOut,
+      tokenInDecimals: quoteDecimals,
+      tokenOutDecimals: baseDecimals,
+      hotWalletBnbGasBalance: bnbBalance,
+      hotWalletUsdtBalance: usdtBalance,
+      hotWalletXautBalance: xautBalance,
+      priceSource: 'pancakeswap-quoter-v2',
+      quoteReady,
+      liquidityRouteFound,
+      lastError: lastError || null,
+      missingEnv: runtime.missingEnv,
+      invalidEnv: runtime.invalidEnv || [],
+    });
   } catch (err) {
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
@@ -10611,26 +10805,32 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
 
     const runtime = await buildConvertRuntime();
-    if (runtime.liveRequested && !runtime.envReady && !runtime.fallbackEnabled) {
+    if (!runtime.envReady && !runtime.fallbackEnabled) {
       return next({
         status: 503,
         code: 'CONVERT_LIVE_NOT_READY',
-        message: `Convert live mode misconfigured: ${runtime.missingEnv.join(', ')}`,
+        message: `Convert live mode misconfigured: ${runtime.missingEnv.concat(runtime.invalidEnv || []).join(', ')}`,
       });
     }
-    const quoteInfo =
-      runtime.mode === 'live'
-        ? (ensureConvertLivePairReady(pair, runtime.settings), await quoteConvertFromPancake(pair, payload.side, amountWei))
-        : {
-            quoteWithoutFeeWei: quoteConvertMock(pair, amountWei),
-            baseAmountWei: amountWei,
-            direction: payload.side === 'buy' ? 'quote_to_base' : 'base_to_quote',
-            path: [],
-          };
+    let quoteInfo;
+    if (runtime.mode === 'live') {
+      ensureConvertLivePairReady(pair, runtime.settings);
+      const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
+      quoteInfo = await quoteConvertFromPancake(pair, payload.side, amountWei, provider);
+    } else {
+      quoteInfo = {
+        quoteWithoutFeeWei: quoteConvertMock(pair, amountWei),
+        baseAmountWei: amountWei,
+        direction: payload.side === 'buy' ? 'quote_to_base' : 'base_to_quote',
+        fee: null,
+      };
+    }
     const settings = runtime.settings;
     const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+    const globalGoldPrice = await readGlobalGoldPriceUsdt();
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
+    if (runtime.mode === 'live') assertQuoteDeviationSafe(quoteInfo, amountWei, pair, payload.side, usdtDecimals, globalGoldPrice);
     res.json({
       ok: true,
       mode: runtime.mode,
@@ -10645,6 +10845,9 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
           payload.side === 'buy'
             ? trimDecimal(formatUnitsStr((quoteInfo.quoteWithoutFeeWei + feeWei).toString(), usdtDecimals))
             : trimDecimal(formatUnitsStr((quoteInfo.quoteWithoutFeeWei - feeWei > 0n ? quoteInfo.quoteWithoutFeeWei - feeWei : 0n).toString(), usdtDecimals)),
+        quote_fee_tier: quoteInfo.fee,
+        quote_timestamp: new Date().toISOString(),
+        price_source: 'pancakeswap-quoter-v2',
       },
       settings,
     });
@@ -10654,6 +10857,9 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     }
     if (err?.code === 'QUOTE_OUT_OF_RANGE') {
       return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
+    }
+    if (err?.code === 'PRICE_DEVIATION') {
+      return next({ status: 409, code: 'PRICE_DEVIATION', message: 'price deviation too high' });
     }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
@@ -10697,17 +10903,22 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     const amountWei = bigIntFromValue(amountWeiStr);
     if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
     const runtime = await buildConvertRuntime();
-    if (runtime.liveRequested && !runtime.envReady && !runtime.fallbackEnabled) {
+    if (!runtime.envReady && !runtime.fallbackEnabled) {
       return next({
         status: 503,
         code: 'CONVERT_LIVE_NOT_READY',
-        message: `Convert live mode misconfigured: ${runtime.missingEnv.join(', ')}`,
+        message: `Convert live mode misconfigured: ${runtime.missingEnv.concat(runtime.invalidEnv || []).join(', ')}`,
       });
     }
-    const quoteInfo =
-      runtime.mode === 'live'
-        ? (ensureConvertLivePairReady(pair, runtime.settings), await quoteConvertFromPancake(pair, payload.side, amountWei))
-        : { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei };
+    let quoteInfo;
+    if (runtime.mode === 'live') {
+      ensureConvertLivePairReady(pair, runtime.settings);
+      const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
+      quoteInfo = await quoteConvertFromPancake(pair, payload.side, amountWei, provider);
+      runtime.quoteFeeTier = quoteInfo.fee;
+    } else {
+      quoteInfo = { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei, fee: null };
+    }
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
     const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     const minWeiStr = decimalToWeiString(String(settings.convert_min_usdt || 10), usdtDecimals) || '0';
@@ -10804,7 +11015,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     await conn.query(
       'UPDATE convert_executions SET status=?, tx_hash=?, credited_asset=?, credited_wei=?, metadata=?, updated_at=NOW() WHERE id=?',
-      ['completed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode }), executionId]
+      ['completed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap', router: PANCAKE_SMART_ROUTER_ADDRESS, quote_fee_tier: quoteInfo.fee }), executionId]
     );
     await conn.commit();
     res.json({

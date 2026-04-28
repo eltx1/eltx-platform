@@ -27,6 +27,14 @@ type ConvertConfigResponse = {
   settings: { convert_fee_bps: number; convert_min_usdt: number; convert_execution_mode?: 'mock' | 'live' };
 };
 
+type ConvertHealthResponse = {
+  requestedMode: 'mock' | 'live';
+  effectiveMode: 'mock' | 'live';
+  liveReady: boolean;
+  provider: string;
+  lastError?: string | null;
+};
+
 type ConvertQuoteResponse = {
   mode: 'mock' | 'live';
   runtime_warning?: string | null;
@@ -104,6 +112,8 @@ function ConvertPageContent() {
   const [loading, setLoading] = useState(true);
   const [placing, setPlacing] = useState(false);
   const [runtimeWarning, setRuntimeWarning] = useState('');
+  const [liveReady, setLiveReady] = useState(false);
+  const [healthError, setHealthError] = useState('');
 
   const selectedPair = useMemo(() => pairs.find((item) => item.symbol === selectedSymbol) || null, [pairs, selectedSymbol]);
   const amountNum = parsePositive(amount);
@@ -140,14 +150,37 @@ function ConvertPageContent() {
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
     setConvertMode(res.data.settings?.convert_execution_mode || 'live');
     setRuntimeWarning('');
+    setHealthError('');
+    setLiveReady(false);
     if ((res.data.pairs || []).length) {
       setSelectedSymbol((prev) => (prev && res.data.pairs.some((item) => item.symbol === prev) ? prev : res.data.pairs[0].symbol));
     }
   }, [category, isArabic, toast]);
 
+  const loadHealth = useCallback(
+    async (pairSymbol: string) => {
+      const res = await apiFetch<ConvertHealthResponse>(`/convert/health?category=${category}&symbol=${encodeURIComponent(pairSymbol)}`);
+      if (!res.ok) {
+        setLiveReady(false);
+        setConvertMode('mock');
+        setHealthError(res.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'));
+        return;
+      }
+      setConvertMode(res.data.effectiveMode || 'mock');
+      setLiveReady(Boolean(res.data.liveReady && res.data.effectiveMode === 'live'));
+      setHealthError(String(res.data.lastError || ''));
+    },
+    [category, isArabic]
+  );
+
   useEffect(() => {
     loadPairs();
   }, [loadPairs]);
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+    loadHealth(selectedSymbol);
+  }, [selectedSymbol, loadHealth]);
 
   useEffect(() => {
     async function run() {
@@ -163,6 +196,7 @@ function ConvertPageContent() {
       if (!res.ok) {
         setEstimate(0);
         setFeeUsdt(0);
+        setRuntimeWarning(res.error || '');
         return;
       }
       setConvertMode(res.data.mode || 'live');
@@ -175,6 +209,10 @@ function ConvertPageContent() {
 
   const executeSwap = useCallback(async () => {
     if (!selectedPair) return;
+    if (!liveReady) {
+      toast({ message: healthError || (isArabic ? 'وضع Live غير جاهز حاليا' : 'Live mode is not ready right now'), variant: 'error' });
+      return;
+    }
     if (!amountNum) {
       toast({ message: isArabic ? 'اكتب الكمية الاول' : 'Enter an amount first', variant: 'error' });
       return;
@@ -201,7 +239,7 @@ function ConvertPageContent() {
     toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Convert executed successfully', variant: 'success' });
     setAmount('');
     setEstimate(0);
-  }, [amountNum, category, estimate, isArabic, minUsdt, selectedPair, side, toast]);
+  }, [amountNum, category, estimate, healthError, isArabic, liveReady, minUsdt, selectedPair, side, toast]);
 
   return (
     <section className="mx-auto w-full max-w-5xl space-y-4 px-4 py-4 md:px-6 md:py-6">
@@ -260,7 +298,9 @@ function ConvertPageContent() {
             </div>
             <div className="text-right text-xs text-white/60">
               <div>{labels.mode}</div>
-              <div className={`font-semibold ${convertMode === 'live' ? 'text-emerald-300' : 'text-amber-300'}`}>{convertMode === 'live' ? labels.live : labels.mock}</div>
+              <div className={`font-semibold ${convertMode === 'live' && liveReady ? 'text-emerald-300' : 'text-amber-300'}`}>
+                {convertMode === 'live' && liveReady ? labels.live : labels.mock}
+              </div>
             </div>
           </div>
         )}
@@ -343,12 +383,17 @@ function ConvertPageContent() {
               {labels.runtimeWarning}: {runtimeWarning}
             </div>
           ) : null}
+          {!liveReady ? (
+            <div className="mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
+              {isArabic ? 'Live غير جاهز حاليا' : 'Live mode is not ready'}{healthError ? `: ${healthError}` : ''}
+            </div>
+          ) : null}
         </div>
 
         <button
           type="button"
           onClick={executeSwap}
-          disabled={placing || loading || !selectedPair}
+          disabled={placing || loading || !selectedPair || !liveReady}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-cyan-500 py-3 text-center font-semibold text-black transition hover:bg-cyan-400 disabled:opacity-60"
         >
           <Wallet className="h-4 w-4" /> {placing ? labels.executing : labels.execute}
