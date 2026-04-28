@@ -13,6 +13,7 @@ process.env.MASTER_MNEMONIC = process.env.MASTER_MNEMONIC || 'test test test tes
 process.env.DATABASE_URL = process.env.DATABASE_URL || 'mysql://root@localhost/eltx_test';
 process.env.GOOGLE_OAUTH_CLIENT_ID = process.env.GOOGLE_OAUTH_CLIENT_ID || 'test-google-client-id';
 process.env.GOOGLE_OAUTH_CLIENT_SECRET = process.env.GOOGLE_OAUTH_CLIENT_SECRET || 'test-google-client-secret';
+process.env.CONVERT_ALLOW_MOCK = 'true';
 
 const testSchema = {
   users: [{ id: 1, email: 'user@example.com', password_hash: '$argon2id$v=19$m=65536,t=3,p=4$0O4HViXmWtx2WnYIob2P0Q$5h6yA7yrWzXUOqYdW+awh7Y8/4Iv7pGGNqvLFxY2QWo' }, { id: 2, email: 'recipient@example.com', password_hash: '' }],
