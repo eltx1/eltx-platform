@@ -19,6 +19,10 @@ type ConvertPair = {
   token_symbol: string;
   display_name: string;
   logo_url: string | null;
+  live_enabled?: boolean;
+  live_status?: string | null;
+  execution_availability?: 'live' | 'reference_only';
+  last_live_error?: string | null;
 };
 
 type ConvertConfigResponse = {
@@ -36,7 +40,7 @@ type ConvertHealthResponse = {
 };
 
 type ConvertQuoteResponse = {
-  mode: 'mock' | 'live' | 'unavailable';
+  mode: 'mock' | 'live' | 'reference' | 'unavailable';
   executionMode: 'live' | 'unavailable';
   valid: boolean;
   blockingReason?: string | null;
@@ -110,6 +114,9 @@ function normalizeConvertWarning(raw: string, isArabic: boolean): string {
   if (lower.includes('live quote unavailable')) {
     return isArabic ? 'التسعير المباشر غير متاح الآن.' : 'Live quote unavailable.';
   }
+  if (lower.includes('reference-only') || lower.includes('pair_reference_only') || lower.includes('quote_provider_reference_only')) {
+    return isArabic ? 'الزوج متاح للتسعير المرجعي فقط حاليا وليس تنفيذ Live.' : 'This pair is currently reference-only and not executable in live mode.';
+  }
   if (lower.includes('execution reverted') || lower.includes('call_exception') || lower.includes('require(false)')) {
     return isArabic ? 'المسار غير متاح حاليا في السيولة. جرّب كمية أقل أو حاول لاحقًا.' : 'Liquidity route is temporarily unavailable. Try a smaller amount or retry later.';
   }
@@ -135,7 +142,7 @@ function ConvertPageContent() {
   const [amount, setAmount] = useState('');
   const [estimate, setEstimate] = useState(0);
   const [feeUsdt, setFeeUsdt] = useState(0);
-  const [convertMode, setConvertMode] = useState<'mock' | 'live'>('live');
+  const [convertMode, setConvertMode] = useState<'mock' | 'live' | 'reference'>('live');
   const [minUsdt, setMinUsdt] = useState(10);
   const [feeBps, setFeeBps] = useState(50);
   const [loading, setLoading] = useState(true);
@@ -237,12 +244,15 @@ function ConvertPageContent() {
         setRuntimeWarning(normalizeConvertWarning(res.error || '', isArabic));
         return;
       }
-      setConvertMode(res.data.executionMode === 'live' ? 'live' : 'mock');
+      setConvertMode(res.data.executionMode === 'live' ? 'live' : res.data.mode === 'reference' ? 'reference' : 'mock');
       setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
       setEstimate(parsePositive(res.data.quote.estimatedQuote));
       setFeeUsdt(parsePositive(res.data.quote.feeAmount));
       setQuoteValid(Boolean(res.data.valid));
       setBlockingReason(String(res.data.blockingReason || ''));
+      if (res.data.blockingReason === 'PAIR_REFERENCE_ONLY' || res.data.blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY') {
+        setLiveReady(false);
+      }
     }
     run();
   }, [amountNum, category, isArabic, selectedPair, side]);
@@ -339,7 +349,15 @@ function ConvertPageContent() {
             <div className="text-right text-xs text-white/60">
               <div>{labels.mode}</div>
               <div className={`font-semibold ${convertMode === 'live' && liveReady ? 'text-emerald-300' : 'text-amber-300'}`}>
-                {convertMode === 'live' && liveReady ? labels.live : isArabic ? 'غير متاح' : 'Live unavailable'}
+                {selectedPair.execution_availability === 'reference_only'
+                  ? isArabic
+                    ? 'تسعير مرجعي فقط'
+                    : 'Reference only'
+                  : convertMode === 'live' && liveReady
+                    ? labels.live
+                    : isArabic
+                      ? 'غير متاح'
+                      : 'Live unavailable'}
               </div>
             </div>
           </div>
@@ -415,6 +433,11 @@ function ConvertPageContent() {
           {blockingReason === 'AMOUNT_BELOW_MINIMUM' ? (
             <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
               {isArabic ? `القيمة أقل من الحد الأدنى ${minUsdt.toFixed(2)} USDT. زوّد الكمية.` : `Estimated value is below the ${minUsdt.toFixed(2)} USDT minimum.`}
+            </div>
+          ) : null}
+          {blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY' ? (
+            <div className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 p-2 text-xs text-blue-200">
+              {isArabic ? 'الزوج حاليا للتسعير المرجعي فقط لحين توفر مسار تنفيذ Live.' : 'This pair is currently reference-only until a live executable route becomes available.'}
             </div>
           ) : null}
           {!liveReady ? (
