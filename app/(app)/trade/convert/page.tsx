@@ -93,6 +93,25 @@ function formatPrice(value: number): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: 6 });
 }
 
+function normalizeConvertWarning(raw: string, isArabic: boolean): string {
+  const message = String(raw || '').trim();
+  if (!message) return '';
+  const lower = message.toLowerCase();
+  if (lower.includes('price deviation')) {
+    return isArabic ? 'فرق السعر عالي حاليا. حاول تاني بعد ثواني أو قلل الكمية.' : 'Price deviation is currently high. Please retry in a few seconds or reduce the amount.';
+  }
+  if (lower.includes('execution reverted') || lower.includes('call_exception') || lower.includes('require(false)')) {
+    return isArabic ? 'المسار غير متاح حاليا في السيولة. جرّب كمية أقل أو حاول لاحقًا.' : 'Liquidity route is temporarily unavailable. Try a smaller amount or retry later.';
+  }
+  if (lower.includes('insufficient') && lower.includes('balance')) {
+    return isArabic ? 'الرصيد غير كافي لإتمام العملية.' : 'Insufficient balance to execute this convert.';
+  }
+  if (lower.includes('pair_not_live_ready') || lower.includes('live mode is not ready') || lower.includes('live connectivity')) {
+    return isArabic ? 'وضع التنفيذ المباشر غير جاهز حاليا. سيتم استخدام الوضع التجريبي عند توفره.' : 'Live execution mode is not ready right now. Mock mode will be used when available.';
+  }
+  return message.slice(0, 180);
+}
+
 function ConvertPageContent() {
   const searchParams = useSearchParams();
   const toast = useToast();
@@ -163,12 +182,12 @@ function ConvertPageContent() {
       if (!res.ok) {
         setLiveReady(false);
         setConvertMode('mock');
-        setHealthError(res.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'));
+        setHealthError(normalizeConvertWarning(res.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
         return;
       }
       setConvertMode(res.data.effectiveMode || 'mock');
       setLiveReady(Boolean(res.data.liveReady && res.data.effectiveMode === 'live'));
-      setHealthError(String(res.data.lastError || ''));
+      setHealthError(normalizeConvertWarning(String(res.data.lastError || ''), isArabic));
     },
     [category, isArabic]
   );
@@ -196,16 +215,16 @@ function ConvertPageContent() {
       if (!res.ok) {
         setEstimate(0);
         setFeeUsdt(0);
-        setRuntimeWarning(res.error || '');
+        setRuntimeWarning(normalizeConvertWarning(res.error || '', isArabic));
         return;
       }
       setConvertMode(res.data.mode || 'live');
-      setRuntimeWarning(String(res.data.runtime_warning || ''));
+      setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
       setEstimate(parsePositive(res.data.quote.total_usdt));
       setFeeUsdt(parsePositive(res.data.quote.fee_usdt));
     }
     run();
-  }, [amountNum, category, selectedPair, side]);
+  }, [amountNum, category, isArabic, selectedPair, side]);
 
   const executeSwap = useCallback(async () => {
     if (!selectedPair) return;
@@ -235,7 +254,7 @@ function ConvertPageContent() {
       toast({ message: res.error || (isArabic ? 'فشل التنفيذ' : 'Execution failed'), variant: 'error' });
       return;
     }
-    setRuntimeWarning(String((res.data as { runtime_warning?: string | null })?.runtime_warning || ''));
+    setRuntimeWarning(normalizeConvertWarning(String((res.data as { runtime_warning?: string | null })?.runtime_warning || ''), isArabic));
     toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Convert executed successfully', variant: 'success' });
     setAmount('');
     setEstimate(0);
@@ -379,7 +398,7 @@ function ConvertPageContent() {
           </div>
 
           {runtimeWarning ? (
-            <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+            <div className="mt-2 break-words rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
               {labels.runtimeWarning}: {runtimeWarning}
             </div>
           ) : null}
