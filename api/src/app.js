@@ -3167,11 +3167,7 @@ async function quoteConvertFromOneInch(pair, side, amountWei) {
 }
 
 async function quoteConvertLiveWithFallback(pair, side, amountWei, provider) {
-  const providers = [
-    { name: 'pancakeswap-v2', fn: () => quoteConvertFromPancakeV2(pair, side, amountWei, provider), executable: true },
-    { name: 'pancakeswap-v3', fn: () => quoteConvertFromPancakeV3(pair, side, amountWei, provider), executable: false },
-    { name: '1inch-aggregator', fn: () => quoteConvertFromOneInch(pair, side, amountWei), executable: false },
-  ];
+  const providers = [{ name: 'pancakeswap-v2', fn: () => quoteConvertFromPancakeV2(pair, side, amountWei, provider), executable: true }];
   const diagnostics = [];
   for (const candidate of providers) {
     try {
@@ -3186,8 +3182,26 @@ async function quoteConvertLiveWithFallback(pair, side, amountWei, provider) {
   }
   throw Object.assign(new Error(`No live route found for ${pair.symbol}`), {
     code: 'LIVE_QUOTE_UNAVAILABLE',
+    provider: 'pancakeswap-v2',
     providerDiagnostics: diagnostics,
   });
+}
+
+function buildConvertErrorDetails(err, pair, side, amountWei, amountDecimals, quoteDecimals) {
+  return {
+    provider: 'pancakeswap-v2',
+    pair: pair?.symbol || null,
+    side: side || null,
+    chainId: CONVERT_CHAIN_ID,
+    routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
+    amount: amountWei != null ? trimDecimal(formatUnitsStr(String(amountWei), amountDecimals || 18)) : null,
+    amountDecimals: Number(amountDecimals || 18),
+    quoteDecimals: Number(quoteDecimals || 6),
+    code: err?.code || 'CONVERT_ERROR',
+    message: String(err?.message || 'convert_error'),
+    attemptedPaths: err?.attemptedPaths || [],
+    providerDiagnostics: err?.providerDiagnostics || [],
+  };
 }
 
 async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime) {
@@ -10961,15 +10975,19 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
 
 app.post('/convert/quote', walletLimiter, async (req, res, next) => {
   let pair = null;
+  let payload = null;
+  let amountWei = 0n;
+  let amountDecimals = 18;
+  let usdtDecimals = 6;
   try {
     await requireUser(req);
-    const payload = ConvertQuoteSchema.parse(req.body || {});
+    payload = ConvertQuoteSchema.parse(req.body || {});
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
-    const amountDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+    amountDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
     const amountWeiStr = decimalToWeiString(payload.amount, amountDecimals);
     if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
-    const amountWei = bigIntFromValue(amountWeiStr);
+    amountWei = bigIntFromValue(amountWeiStr);
     if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
 
     const runtime = await buildConvertRuntime();
@@ -10985,7 +11003,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     let routerVersion = 'n/a';
     let executionMode = 'unavailable';
     let responseMode = 'reference';
-    const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+    usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
     const minWeiStr = decimalToWeiString(String(runtime.settings.convert_min_usdt || 10), usdtDecimals) || '0';
     let blockingReason = null;
     if (runtime.mode === 'live') {
@@ -11098,8 +11116,10 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
     }
     if (err?.code === 'LIVE_QUOTE_UNAVAILABLE') {
+      const details = buildConvertErrorDetails(err, pair, payload?.side, amountWei, amountDecimals, usdtDecimals);
+      console.error('[convert][quote][LIVE_QUOTE_UNAVAILABLE]', JSON.stringify(details));
       await markConvertPairLiveProbe(pair?.id, false, err?.message || 'live_quote_unavailable').catch(() => null);
-      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable' });
+      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable on PancakeSwap V2', details });
     }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
@@ -11115,9 +11135,13 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
   let reservedDebitAsset = null;
   let reservedDebitWei = 0n;
   let pair = null;
+  let payload = null;
+  let amountWei = 0n;
+  let baseDecimals = 18;
+  let usdtDecimals = 6;
   try {
     userId = await requireUser(req);
-    const payload = ConvertExecuteSchema.parse(req.body || {});
+    payload = ConvertExecuteSchema.parse(req.body || {});
     const headerIdempotencyRaw = req.headers['idempotency-key'];
     const headerIdempotency = Array.isArray(headerIdempotencyRaw) ? headerIdempotencyRaw[0] : headerIdempotencyRaw;
     const idempotencySource = payload.idempotency_key ?? headerIdempotency;
@@ -11137,11 +11161,11 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const settings = await readConvertSettings();
-    const usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
-    const baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
+    usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+    baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
     const amountWeiStr = decimalToWeiString(payload.amount, baseDecimals);
     if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
-    const amountWei = bigIntFromValue(amountWeiStr);
+    amountWei = bigIntFromValue(amountWeiStr);
     if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
     const runtime = await buildConvertRuntime();
     if (!runtime.envReady && !runtime.fallbackEnabled) {
@@ -11313,8 +11337,10 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       return next({ status: 502, code: 'QUOTE_OUT_OF_RANGE', message: 'Convert quote is outside allowed range' });
     }
     if (err?.code === 'LIVE_QUOTE_UNAVAILABLE') {
+      const details = buildConvertErrorDetails(err, pair, payload?.side, amountWei, baseDecimals, usdtDecimals);
+      console.error('[convert][execute][LIVE_QUOTE_UNAVAILABLE]', JSON.stringify(details));
       if (pair?.id) await markConvertPairLiveProbe(pair.id, false, err?.message || 'live_quote_unavailable').catch(() => null);
-      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable' });
+      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable on PancakeSwap V2', details });
     }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
