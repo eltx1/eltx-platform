@@ -2885,12 +2885,11 @@ async function markConvertPairLiveProbe(pairId, success, reason = null, conn = p
   await conn.query(
     `UPDATE convert_pairs
         SET live_status=?,
-            live_enabled=?,
             last_live_error=?,
             last_live_probe_at=NOW(),
             updated_at=NOW()
       WHERE id=?`,
-    [status, success ? 1 : 0, err, pairId]
+    [status, err, pairId]
   );
 }
 
@@ -3000,6 +2999,13 @@ async function readConvertTokenDecimals(provider, tokenAddress) {
 async function readConvertTokenBalance(provider, tokenAddress, walletAddress) {
   const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
   return bigIntFromValue(await token.balanceOf(walletAddress));
+}
+
+
+async function verifyConvertTokenDecimals(provider, tokenAddress, expectedDecimals) {
+  if (!tokenAddress || !/^0x[a-f0-9]{40}$/i.test(String(tokenAddress))) return true;
+  const onchainDecimals = await readConvertTokenDecimals(provider, tokenAddress);
+  return Number(onchainDecimals) === Number(expectedDecimals);
 }
 
 function buildConvertRouteCandidates(pair, side) {
@@ -10894,21 +10900,17 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
         await provider.getBlockNumber();
         rpcReady = true;
         const walletAddress = runtime.resolvedWalletAddress;
-        const [nativeWei, usdtWei, xautWei, onchainXautDecimals, onchainUsdtDecimals] = await Promise.all([
+        const [nativeWei, usdtWei, xautWei] = await Promise.all([
           provider.getBalance(walletAddress),
           readConvertTokenBalance(provider, CONVERT_TOKEN_REGISTRY[56].USDT.address, walletAddress),
           readConvertTokenBalance(provider, CONVERT_TOKEN_REGISTRY[56].XAUT.address, walletAddress),
-          readConvertTokenDecimals(provider, CONVERT_TOKEN_REGISTRY[56].XAUT.address),
-          readConvertTokenDecimals(provider, CONVERT_TOKEN_REGISTRY[56].USDT.address),
         ]);
         bnbBalance = trimDecimal(formatUnitsStr(nativeWei.toString(), 18));
         usdtBalance = trimDecimal(formatUnitsStr(usdtWei.toString(), CONVERT_TOKEN_REGISTRY[56].USDT.decimals));
         xautBalance = trimDecimal(formatUnitsStr(xautWei.toString(), CONVERT_TOKEN_REGISTRY[56].XAUT.decimals));
         decimalsMatch =
-          onchainXautDecimals === CONVERT_TOKEN_REGISTRY[56].XAUT.decimals &&
-          onchainUsdtDecimals === CONVERT_TOKEN_REGISTRY[56].USDT.decimals &&
-          baseDecimals === CONVERT_TOKEN_REGISTRY[56].XAUT.decimals &&
-          quoteDecimals === CONVERT_TOKEN_REGISTRY[56].USDT.decimals;
+          (await verifyConvertTokenDecimals(provider, tokenOut, baseDecimals)) &&
+          (await verifyConvertTokenDecimals(provider, tokenIn, quoteDecimals));
         const probeAmount = decimalToWeiString('0.001', baseDecimals) || '0';
         if (bigIntFromValue(probeAmount) > 0n) {
           const quoteInfo = await quoteConvertLiveWithFallback(pair, 'buy', bigIntFromValue(probeAmount), provider);
