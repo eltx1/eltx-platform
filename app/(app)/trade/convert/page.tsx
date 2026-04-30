@@ -57,8 +57,16 @@ function toCategory(value: string | null): Category {
   return 'crypto';
 }
 
+function normalizeNumericInput(value: string): string {
+  return value
+    .replace(/[٠-٩]/g, (digit) => String(digit.charCodeAt(0) - 1632))
+    .replace(/,/g, '.')
+    .replace(/[^\d.]/g, '')
+    .replace(/(\..*)\./g, '$1');
+}
+
 function parsePositive(value: string): number {
-  const num = Number(value);
+  const num = Number(normalizeNumericInput(value));
   return Number.isFinite(num) && num > 0 ? num : 0;
 }
 
@@ -156,6 +164,11 @@ function ConvertPageContent() {
 
   const selectedPair = useMemo(() => pairs.find((item) => item.symbol === selectedSymbol) || null, [pairs, selectedSymbol]);
   const amountNum = parsePositive(amount);
+
+  const handleAmountChange = useCallback((raw: string) => {
+    const normalized = normalizeNumericInput(raw);
+    setAmount(normalized);
+  }, []);
 
   const labels = useMemo(
     () => ({
@@ -396,11 +409,10 @@ function ConvertPageContent() {
           </div>
           <div className="mt-2 flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-3 py-2.5">
             <input
-              type="number"
-              min="0"
-              step="any"
+              type="text"
+              inputMode="decimal"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => handleAmountChange(e.target.value)}
               className="w-full bg-transparent text-lg outline-none"
               placeholder="0.0"
             />
