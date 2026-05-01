@@ -962,10 +962,10 @@ const BSC_USDT_ADDRESS = (process.env.TOKEN_USDT || '0x55d398326f99059fF77548524
 const BSC_USDC_ADDRESS = (process.env.TOKEN_USDC || '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d').toLowerCase();
 const BSC_BUSD_ADDRESS = (process.env.TOKEN_BUSD || '0xe9e7cea3dedca5984780bafc599bd69add087d56').toLowerCase();
 const PANCAKE_V2_ROUTER_ADDRESS = (
-  process.env.PANCAKE_V2_ROUTER || '0x10ED43C718714eb63d5aA57B78B54704E256024E'
+  process.env.PANCAKE_V2_ROUTER || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
 ).toLowerCase();
 const PANCAKE_V3_QUOTER_V2_ADDRESS = (
-  process.env.PANCAKE_V3_QUOTER_V2 || '0xB048BBC1Ee6B733FFfcfb9e9Ce7b3F3bB7A83013'
+  process.env.PANCAKE_V3_QUOTER_V2 || '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'
 ).toLowerCase();
 const PANCAKE_V3_ROUTER_ADDRESS = (
   process.env.PANCAKE_V3_ROUTER || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
@@ -975,8 +975,6 @@ const PANCAKE_V3_QUOTER_ABI = [
   'function quoteExactOutputSingle((address tokenIn,address tokenOut,uint256 amount,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountIn)',
 ];
 const PANCAKE_V3_FEE_TIERS = [500, 2500, 10000];
-const ONEINCH_API_BASE = process.env.ONEINCH_API_BASE || 'https://api.1inch.dev';
-const ONEINCH_API_KEY = process.env.ONEINCH_API_KEY || '';
 const CONVERT_PRICE_MAX_DEVIATION_BPS = Number(process.env.CONVERT_PRICE_MAX_DEVIATION_BPS || 700);
 const CONVERT_CHAIN_ID = 56;
 const CONVERT_TOKEN_REGISTRY = {
@@ -2926,9 +2924,22 @@ function normalizeConvertPrivateKey(rawPk) {
   return { normalizedPk: value, valid: false, reason: 'bad-format' };
 }
 
+function readConvertEnvValueFromHomeDash(key) {
+  try {
+    const envRaw = fs.readFileSync('/home/dash/.env', 'utf8');
+    const line = envRaw
+      .split('\n')
+      .find((entry) => String(entry || '').trim().startsWith(`${key}=`));
+    if (!line) return '';
+    return line.slice(line.indexOf('=') + 1);
+  } catch {
+    return '';
+  }
+}
+
 function summarizeConvertRuntimeReadiness(settings) {
   const rpcUrl = process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP || '';
-  const rawPk = process.env.CONVERT_HOT_WALLET_PK || '';
+  const rawPk = readConvertEnvValueFromHomeDash('CONVERT_HOT_WALLET_PK') || process.env.CONVERT_HOT_WALLET_PK || '';
   const normalizedPk = normalizeConvertPrivateKey(rawPk);
   const configuredHotWalletAddress = (process.env.CONVERT_HOT_WALLET_ADDRESS || '').toLowerCase();
   const missingEnv = [];
@@ -2955,18 +2966,14 @@ function summarizeConvertRuntimeReadiness(settings) {
   }
   const envReady = missingEnv.length === 0 && invalidEnv.length === 0;
   const liveRequested = settings.convert_execution_mode === 'live' || settings.convert_requested_mode === 'live';
-  const fallbackEnabled = Number(settings.convert_live_fallback_mock || 0) === 1;
+  const isProd = process.env.NODE_ENV === 'production';
+  const fallbackEnabled = !isProd && String(process.env.CONVERT_ALLOW_MOCK || '').toLowerCase() === 'true';
   const mode = liveRequested && envReady ? 'live' : fallbackEnabled ? 'mock' : 'live';
   const warning =
     liveRequested && !envReady
       ? `[convert] live mode requested but not ready; missing/invalid: ${missingEnv.concat(invalidEnv).join(', ')}. fallback_to_mock=${fallbackEnabled ? '1' : '0'}`
       : '';
-  const normalizedFingerprint = normalizedPk.normalizedPk
-    ? `${normalizedPk.normalizedPk.slice(0, 6)}...${normalizedPk.normalizedPk.slice(-4)}`
-    : 'empty';
-  console.info(
-    `[convert] hot wallet key normalized=${normalizedPk.valid ? '1' : '0'} source=${normalizedPk.reason} fingerprint=${normalizedFingerprint} derived=${resolvedWalletAddress ? `${resolvedWalletAddress.slice(0, 6)}...${resolvedWalletAddress.slice(-4)}` : 'n/a'}`
-  );
+  console.info(`[convert] hot wallet key normalized=${normalizedPk.valid ? '1' : '0'} source=${normalizedPk.reason} derived=${resolvedWalletAddress ? `${resolvedWalletAddress.slice(0, 6)}...${resolvedWalletAddress.slice(-4)}` : 'n/a'}`);
   return {
     mode,
     envReady,
@@ -3217,12 +3224,19 @@ async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime)
   }
   const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
   const wallet = new ethers.Wallet(runtime.pk, provider);
+  const network = await provider.getNetwork();
+  if (Number(network.chainId) !== CONVERT_CHAIN_ID) throw new Error(`CHAIN_ID_MISMATCH:${network.chainId}`);
   const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, wallet);
   const slippageBps = Number(runtime.settings.convert_slippage_bps || 0);
   const path = runtime.quotePath || buildConvertRouteCandidates(pair, side)[0];
   if (!path?.length) throw new Error('Missing swap path for convert execution');
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 3);
   if (side === 'buy') {
+    const usdtToken = new ethers.Contract(CONVERT_TOKEN_REGISTRY[56].USDT.address, ERC20_ABI, provider);
+    const usdtBalance = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
+    if (usdtBalance < quoteWei) throw new Error('HOT_WALLET_USDT_INSUFFICIENT');
+    const gasBalance = bigIntFromValue(await provider.getBalance(wallet.address));
+    if (gasBalance <= 0n) throw new Error('HOT_WALLET_BNB_GAS_INSUFFICIENT');
     const maxIn = quoteWei + (quoteWei * BigInt(slippageBps)) / 10000n;
     await ensureErc20Allowance(path[0], wallet, PANCAKE_V2_ROUTER_ADDRESS, maxIn);
     const tx = await router.swapTokensForExactTokens(amountWei, maxIn, path, wallet.address, deadline);
@@ -3235,6 +3249,9 @@ async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime)
       mode: 'live',
     };
   }
+  const xautToken = new ethers.Contract(CONVERT_TOKEN_REGISTRY[56].XAUT.address, ERC20_ABI, provider);
+  const xautBalance = bigIntFromValue(await xautToken.balanceOf(wallet.address));
+  if (xautBalance < amountWei) throw new Error('HOT_WALLET_XAUT_INSUFFICIENT');
   const minOut = quoteWei - (quoteWei * BigInt(slippageBps)) / 10000n;
   await ensureErc20Allowance(path[0], wallet, PANCAKE_V2_ROUTER_ADDRESS, amountWei);
   const tx = await router.swapExactTokensForTokens(amountWei, minOut > 0n ? minOut : 0n, path, wallet.address, deadline);
@@ -10911,6 +10928,10 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
     let quoteProvider = null;
     if (provider && runtime.envReady) {
       try {
+        const network = await provider.getNetwork();
+        if (Number(network.chainId) !== CONVERT_CHAIN_ID) {
+          throw new Error(`Invalid chainId ${network.chainId}; expected ${CONVERT_CHAIN_ID}`);
+        }
         await provider.getBlockNumber();
         rpcReady = true;
         const walletAddress = runtime.resolvedWalletAddress;
@@ -10950,10 +10971,11 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       hotWalletAddress: runtime.resolvedWalletAddress ? `${runtime.resolvedWalletAddress.slice(0, 6)}...${runtime.resolvedWalletAddress.slice(-4)}` : null,
       derivedAddressMatches: runtime.derivedAddressMatches,
       routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
-      tokenIn,
-      tokenOut,
-      tokenInDecimals: quoteDecimals,
-      tokenOutDecimals: baseDecimals,
+      quoterAddress: PANCAKE_V3_QUOTER_V2_ADDRESS,
+      xautContractStatus: !!tokenOut,
+      usdtContractStatus: !!tokenIn,
+      xautDecimals: baseDecimals,
+      usdtDecimals: quoteDecimals,
       hotWalletBnbGasBalance: bnbBalance,
       hotWalletUsdtBalance: usdtBalance,
       hotWalletXautBalance: xautBalance,

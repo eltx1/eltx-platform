@@ -203,7 +203,7 @@ function ConvertPageContent() {
     setPairs(res.data.pairs || []);
     setMinUsdt(res.data.settings?.convert_min_usdt || 10);
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
-    setConvertMode(res.data.settings?.convert_execution_mode || 'live');
+    setConvertMode('live');
     setRuntimeWarning('');
     setHealthError('');
     setLiveReady(false);
@@ -263,7 +263,6 @@ function ConvertPageContent() {
         setRuntimeWarning(normalizeConvertWarning(res.error || '', isArabic));
         return;
       }
-      setConvertMode(res.data.executionMode === 'live' ? 'live' : res.data.mode === 'reference' ? 'reference' : 'mock');
       setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
       setEstimate(parsePositive(res.data.quote.estimatedQuote));
       setFeeUsdt(parsePositive(res.data.quote.feeAmount));
@@ -335,7 +334,7 @@ function ConvertPageContent() {
           <div className="flex items-center gap-2 text-sm text-white/80">
             <BadgeDollarSign className="h-4 w-4 text-cyan-200" /> {labels.choosePair}
           </div>
-          <button onClick={loadPairs} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/70 transition hover:border-cyan-400/50 hover:text-white" type="button">
+          <button onClick={async()=>{await loadPairs(); if(selectedSymbol){await loadHealth(selectedSymbol);}}} className="inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-1.5 text-xs text-white/70 transition hover:border-cyan-400/50 hover:text-white" type="button">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> {isArabic ? 'تحديث' : 'Refresh'}
           </button>
         </div>
