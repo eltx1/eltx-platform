@@ -1,6 +1,7 @@
 'use client';
 
 import { ArrowDownUp, BadgeDollarSign, ChevronLeft, RefreshCw, Wallet } from 'lucide-react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
@@ -342,16 +343,13 @@ function ConvertPageContent() {
           <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-[#111a30] p-3">
             <div className="flex items-center gap-3">
               <div className="relative h-10 w-10 overflow-hidden rounded-full bg-white/10 ring-1 ring-white/15">
-                <img
+                <Image
                   src={selectedPair.logo_url || assetIconFallback(selectedPair.token_symbol)}
                   alt={`${selectedPair.token_symbol} icon`}
                   className="h-full w-full object-cover"
-                  onError={(e) => {
-                    const fallback = assetIconFallback(selectedPair.token_symbol);
-                    const target = e.currentTarget;
-                    if (fallback && target.src !== fallback) target.src = fallback;
-                    else target.src = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" rx="24" fill="%23111f34"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="16" fill="%23ffffff" font-family="Arial">%</text></svg>';
-                  }}
+                  width={40}
+                  height={40}
+                  unoptimized
                 />
               </div>
               <div>
