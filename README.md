@@ -89,6 +89,35 @@ GOOGLE_OAUTH_REDIRECT_URI
 
 If you see `Module not found: './globals.css'`, make sure the file exists at `app/globals.css`.
 
+### Production build + PM2 runbook
+
+For Linux production servers (especially with case-sensitive filesystems), use this checklist before deploy:
+
+1. Confirm the stylesheet path is exact and tracked by Git:
+   - `app/layout.tsx` must import `./globals.css` (all lower-case).
+   - `app/globals.css` must exist exactly with the same case.
+   - Run: `git ls-files app/globals.css` to verify it is tracked.
+2. Build from the project root only (`/workspace/eltx-platform` in local/dev containers).
+3. Keep existing npm scripts unchanged because they intentionally load env using:
+   - `node -r dotenv/config`
+   - `DOTENV_CONFIG_PATH=/home/dash/.env` fallback logic.
+
+PM2 note (critical): if logs show `pm2: command not found`, PM2 is not installed or not in PATH for the same OS user running the app.
+
+- Install PM2 for the runtime user (example: `dash`), not only for `root`.
+- Start/restart the app using the same user that owns `/home/dash/.env`.
+- Mixing users (`root` installs PM2, `dash` runs npm scripts) commonly causes this error.
+
+Suggested commands (run as `dash` user):
+
+```bash
+npm run build
+pm2 start npm --name eltx-web -- start
+pm2 save
+```
+
+Do not print secrets from `/home/dash/.env` in logs or shell history.
+
 ### Stripe card payments
 
 The dashboard now exposes a **Buy Crypto** flow backed by Stripe. To activate it you must set the

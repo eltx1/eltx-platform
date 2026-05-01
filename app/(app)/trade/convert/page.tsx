@@ -4,7 +4,7 @@ import { ArrowDownUp, BadgeDollarSign, ChevronLeft, RefreshCw, Wallet } from 'lu
 import Image from 'next/image';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/api';
 import { useLang } from '../../../lib/i18n';
 import { useToast } from '../../../lib/toast';
@@ -162,6 +162,8 @@ function ConvertPageContent() {
   const [quoteValid, setQuoteValid] = useState(false);
   const [blockingReason, setBlockingReason] = useState('');
   const [quoteLoading, setQuoteLoading] = useState(false);
+  const quoteRequestIdRef = useRef(0);
+  const executeIdempotencyRef = useRef<string | null>(null);
 
   const selectedPair = useMemo(() => pairs.find((item) => item.symbol === selectedSymbol) || null, [pairs, selectedSymbol]);
   const amountNum = parsePositive(amount);
@@ -237,6 +239,8 @@ function ConvertPageContent() {
 
   useEffect(() => {
     async function run() {
+      const requestId = quoteRequestIdRef.current + 1;
+      quoteRequestIdRef.current = requestId;
       if (!selectedPair || !amountNum) {
         setEstimate(0);
         setFeeUsdt(0);
@@ -249,6 +253,7 @@ function ConvertPageContent() {
         method: 'POST',
         body: JSON.stringify({ category, symbol: selectedPair.symbol, side, amount: amountNum.toString() }),
       });
+      if (requestId !== quoteRequestIdRef.current) return;
       setQuoteLoading(false);
       if (!res.ok) {
         setEstimate(0);
@@ -289,11 +294,15 @@ function ConvertPageContent() {
       return;
     }
 
+    const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    executeIdempotencyRef.current = idempotencyKey;
     setPlacing(true);
     const res = await apiFetch('/convert/execute', {
       method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
       body: JSON.stringify({ category, symbol: selectedPair.symbol, side, amount: amountNum.toString() }),
     });
+    executeIdempotencyRef.current = null;
     setPlacing(false);
     if (!res.ok) {
       toast({ message: res.error || (isArabic ? 'فشل التنفيذ' : 'Execution failed'), variant: 'error' });
