@@ -1,5 +1,5 @@
 import 'server-only';
-import '../styles/globals.css';
+import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { LangProvider } from './lib/i18n';
 import { ToastProvider } from './lib/toast';
