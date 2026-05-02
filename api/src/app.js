@@ -990,6 +990,47 @@ const CONVERT_TOKEN_REGISTRY = {
   },
 };
 
+
+const CONVERT_PROVIDER = {
+  PANCAKE_V2: 'pancake_v2',
+  PANCAKE_V3: 'pancake_v3',
+  PANCAKESWAP_X: 'pancakeswap_x',
+  REFERENCE_ONLY: 'reference_only',
+};
+
+function resolveConvertExecutionProvider(pair) {
+  const category = String(pair?.category || '').toLowerCase();
+  const base = String(pair?.base_asset || '').toUpperCase();
+  const reasons = [];
+  if (category === 'stocks') {
+    reasons.push('STOCKS_REQUIRE_PANCAKESWAP_X');
+    return { executionProvider: CONVERT_PROVIDER.PANCAKESWAP_X, routerType: 'pancakeswap-x', liveExecutable: false, requiresProvider: true, blockingReasons: reasons, adminReasons: reasons.slice() };
+  }
+  if (category === 'gold' || base === 'XAUT') {
+    reasons.push('XAUT_REQUIRES_PANCAKE_V3');
+    return { executionProvider: CONVERT_PROVIDER.PANCAKE_V3, routerType: 'pancake-v3', liveExecutable: false, requiresProvider: true, blockingReasons: reasons, adminReasons: reasons.slice() };
+  }
+  return { executionProvider: CONVERT_PROVIDER.PANCAKE_V2, routerType: 'pancake-v2', liveExecutable: true, requiresProvider: false, blockingReasons: [], adminReasons: [] };
+}
+
+async function checkPancakeV2RouteForPair(pair, provider) {
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const usdt = resolveConvertAssetAddress('USDT');
+  const wbnb = resolveConvertAssetAddress('WBNB');
+  if (!baseAddress || !usdt) return { routeFound: false, routeAddresses: [], routeSymbols: [], estimatedOut: '0', reason: 'TOKEN_MAPPING_MISSING' };
+  const candidates = [[usdt, baseAddress], [usdt, wbnb, baseAddress].filter(Boolean)];
+  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, provider);
+  const probeIn = decimalToWeiString('1', resolveConvertAssetDecimals('USDT')) || '0';
+  for (const path of candidates) {
+    try {
+      const amounts = await router.getAmountsOut(probeIn, path);
+      const out = bigIntFromValue(Array.isArray(amounts) ? amounts[amounts.length - 1] : 0);
+      if (out > 0n) return { routeFound: true, routeAddresses: path, routeSymbols: routeToSymbols(path), estimatedOut: out.toString(), reason: null };
+    } catch (err) {}
+  }
+  return { routeFound: false, routeAddresses: [], routeSymbols: [], estimatedOut: '0', reason: 'PANCAKE_V2_ROUTE_NOT_FOUND' };
+}
+
 // token metadata from registry files (all supported chains) and env
 const tokenMeta = {};
 const tokenMetaBySymbol = {};
@@ -10942,6 +10983,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
     const pair = await getConvertPairBySymbol(symbol, category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const runtime = await buildConvertRuntime();
+    const providerResolution = resolveConvertExecutionProvider(pair);
     const tokenIn = resolveConvertAssetAddress(pair.quote_asset);
     const tokenOut = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
     const quoteDecimals = resolveConvertAssetDecimals(pair.quote_asset);
@@ -10949,6 +10991,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
     const provider = runtime.rpcUrl ? new ethers.JsonRpcProvider(runtime.rpcUrl) : null;
     let rpcReady = false;
     let quoteReady = false;
+    let routeCheck = { routeFound: false, routeSymbols: [], reason: null };
     let liquidityRouteFound = false;
     let lastError = runtime.warning || '';
     let bnbBalance = '0';
@@ -10982,6 +11025,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
           quoteReady = quoteInfo.quoteWithoutFeeWei > 0n;
           liquidityRouteFound = Array.isArray(quoteInfo.path) && quoteInfo.path.length >= 2;
           quoteProvider = quoteInfo.provider || null;
+          routeCheck = await checkPancakeV2RouteForPair(pair, provider);
         }
       } catch (err) {
         lastError = String(err?.message || err || 'health_failed');
@@ -10994,14 +11038,17 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       ok: true,
       requestedMode: runtime.requestedMode,
       effectiveMode: runtime.mode,
-      liveReady: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound,
-      provider: 'pancakeswap',
+      liveReady: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V2 && routeCheck.routeFound,
+      executable: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V2 && routeCheck.routeFound,
+      referenceOnly: providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V2,
+      executionProvider: providerResolution.executionProvider,
+      provider: providerResolution.executionProvider,
       chainId: CONVERT_CHAIN_ID,
       rpcReady,
       hotWalletAddress: runtime.resolvedWalletAddress ? `${runtime.resolvedWalletAddress.slice(0, 6)}...${runtime.resolvedWalletAddress.slice(-4)}` : null,
       derivedAddressMatches: runtime.derivedAddressMatches,
       routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
-      routerType: 'pancakeswap-v2',
+      routerType: providerResolution.routerType,
       quoteAsset: pair.quote_asset,
       baseAsset: pair.base_asset,
       baseTokenAddress: tokenOut,
@@ -11012,8 +11059,12 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       hotWalletBaseBalance: baseBalance,
       priceSource: 'pancakeswap-v2-router',
       quoteReady,
-      liquidityRouteFound,
+      liquidityReady: liquidityRouteFound,
+      routeFound: routeCheck.routeFound,
+      routeSymbols: routeCheck.routeSymbols,
       quoteProvider,
+      blockingReasons: providerResolution.blockingReasons.concat(routeCheck.routeFound ? [] : [routeCheck.reason]).filter(Boolean),
+      adminReasons: providerResolution.adminReasons,
       lastError: lastError || null,
       missingEnv: runtime.missingEnv,
       invalidEnv: runtime.invalidEnv || [],
@@ -11037,6 +11088,10 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     payload = ConvertQuoteSchema.parse(req.body || {});
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
+    const providerResolution = resolveConvertExecutionProvider(pair);
+    if (providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V2) {
+      return res.json({ ok: true, pair: pair.symbol, side: payload.side, valid: false, executable: false, referenceOnly: true, blockingReason: providerResolution.blockingReasons[0] || 'PROVIDER_NOT_IMPLEMENTED' });
+    }
     amountDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
 
     const runtime = await buildConvertRuntime();
@@ -11241,6 +11296,11 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
+    const providerResolution = resolveConvertExecutionProvider(pair);
+    if (providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V2) {
+      const code = providerResolution.blockingReasons[0] || 'PROVIDER_NOT_IMPLEMENTED';
+      return next({ status: 503, code: code === 'XAUT_REQUIRES_PANCAKE_V3' ? 'PROVIDER_NOT_IMPLEMENTED' : code, message: code });
+    }
     const settings = await readConvertSettings();
     usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
     baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);

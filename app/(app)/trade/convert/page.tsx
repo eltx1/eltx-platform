@@ -32,13 +32,7 @@ type ConvertConfigResponse = {
   settings: { convert_fee_bps: number; convert_min_usdt: number; convert_execution_mode?: 'mock' | 'live' };
 };
 
-type ConvertHealthResponse = {
-  requestedMode: 'mock' | 'live';
-  effectiveMode: 'mock' | 'live';
-  liveReady: boolean;
-  provider: string;
-  lastError?: string | null;
-};
+type ConvertHealthResponse = { requestedMode: 'mock' | 'live'; effectiveMode: 'mock' | 'live'; liveReady: boolean; executable?: boolean; referenceOnly?: boolean; executionProvider?: string; provider: string; blockingReasons?: string[]; adminReasons?: string[]; lastError?: string | null; };
 
 type ConvertQuoteResponse = {
   mode: 'mock' | 'live' | 'reference' | 'unavailable';
@@ -90,6 +84,10 @@ function assetIconFallback(symbol: string): string {
     MSFT: 'https://logo.clearbit.com/microsoft.com',
     AMZN: 'https://logo.clearbit.com/amazon.com',
     GOOGL: 'https://logo.clearbit.com/google.com',
+    META: 'https://logo.clearbit.com/meta.com', COIN: 'https://logo.clearbit.com/coinbase.com', MSTR: 'https://logo.clearbit.com/microstrategy.com', SPY: 'https://logo.clearbit.com/ssga.com', QQQ: 'https://logo.clearbit.com/invesco.com',
+    USDT: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/assets/0x55d398326f99059fF775485246999027B3197955/logo.png',
+    USDC: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/assets/0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d/logo.png',
+    ETH: 'https://assets.coingecko.com/coins/images/279/standard/ethereum.png',
   };
   return map[upper] || '';
 }
@@ -123,6 +121,9 @@ function normalizeConvertWarning(raw: string, isArabic: boolean): string {
   if (lower.includes('live quote unavailable')) {
     return isArabic ? 'التسعير المباشر غير متاح الآن.' : 'Live quote unavailable.';
   }
+  if (lower.includes('stocks_require_pancakeswap_x')) return isArabic ? 'الأسهم المرمزة تحتاج تكامل PancakeSwap X وهي للتسعير المرجعي حاليا.' : 'Tokenized stocks require PancakeSwap X integration and are reference-only for now.';
+  if (lower.includes('xaut_requires_pancake_v3')) return isArabic ? 'تنفيذ XAUT المباشر يحتاج PancakeSwap V3 ولم يتم تفعيله بعد.' : 'XAUT live execution requires PancakeSwap V3 and is not enabled yet.';
+  if (lower.includes('pancake_v2_route_not_found')) return isArabic ? 'لا يوجد مسار PancakeSwap V2 متاح لهذا الزوج.' : 'No PancakeSwap V2 route is available for this pair.';
   if (lower.includes('reference-only') || lower.includes('pair_reference_only') || lower.includes('quote_provider_reference_only')) {
     return isArabic ? 'الزوج متاح للتسعير المرجعي فقط حاليا وليس تنفيذ Live.' : 'This pair is currently reference-only and not executable in live mode.';
   }
@@ -222,7 +223,7 @@ function ConvertPageContent() {
         return;
       }
       setConvertMode(res.data.effectiveMode || 'live');
-      setLiveReady(Boolean(res.data.liveReady && res.data.effectiveMode === 'live'));
+      setLiveReady(Boolean(res.data.liveReady && res.data.executable && !res.data.referenceOnly));
       setHealthError(normalizeConvertWarning(String(res.data.lastError || ''), isArabic));
     },
     [category, isArabic]
