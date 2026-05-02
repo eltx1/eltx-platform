@@ -203,7 +203,7 @@ function ConvertPageContent() {
     setPairs(res.data.pairs || []);
     setMinUsdt(res.data.settings?.convert_min_usdt || 10);
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
-    setConvertMode('live');
+    setConvertMode(res.data.settings?.convert_execution_mode === 'mock' ? 'mock' : 'reference');
     setRuntimeWarning('');
     setHealthError('');
     setLiveReady(false);
@@ -249,9 +249,12 @@ function ConvertPageContent() {
         return;
       }
       setQuoteLoading(true);
+      const quoteBody = side === 'buy'
+        ? { category, symbol: selectedPair.symbol, side, amountType: 'quote', amountUsdt: amountNum.toString() }
+        : { category, symbol: selectedPair.symbol, side, amount: amountNum.toString(), amountType: 'base' };
       const res = await apiFetch<ConvertQuoteResponse>('/convert/quote', {
         method: 'POST',
-        body: JSON.stringify({ category, symbol: selectedPair.symbol, side, amount: amountNum.toString() }),
+        body: JSON.stringify(quoteBody),
       });
       if (requestId !== quoteRequestIdRef.current) return;
       setQuoteLoading(false);
@@ -264,9 +267,9 @@ function ConvertPageContent() {
         return;
       }
       setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
-      setEstimate(parsePositive(res.data.quote.estimatedQuote));
-      setFeeUsdt(parsePositive(res.data.quote.feeAmount));
-      setQuoteValid(Boolean(res.data.valid));
+      setEstimate(parsePositive((res.data.quote as any).estimatedQuote ?? (res.data.quote as any).inputAmountUsdt));
+      setFeeUsdt(parsePositive((res.data.quote as any).feeAmount ?? (res.data.quote as any).feeUsdt));
+      setQuoteValid(Boolean((res.data as any).valid ?? (res.data as any).executable));
       setBlockingReason(String(res.data.blockingReason || ''));
       if (res.data.blockingReason === 'PAIR_REFERENCE_ONLY' || res.data.blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY') {
         setLiveReady(false);
@@ -299,7 +302,7 @@ function ConvertPageContent() {
     const res = await apiFetch('/convert/execute', {
       method: 'POST',
       headers: { 'Idempotency-Key': idempotencyKey },
-      body: JSON.stringify({ category, symbol: selectedPair.symbol, side, amount: amountNum.toString() }),
+      body: JSON.stringify(side === 'buy' ? { category, symbol: selectedPair.symbol, side, amountType: 'quote', amountUsdt: amountNum.toString() } : { category, symbol: selectedPair.symbol, side, amount: amountNum.toString(), amountType: 'base' }),
     });
     executeIdempotencyRef.current = null;
     setPlacing(false);
@@ -407,8 +410,8 @@ function ConvertPageContent() {
           <div className="text-xs text-white/60">
             {side === 'buy'
               ? isArabic
-                ? `كمية ${selectedPair?.base_asset || ''} اللي عايز تشتريها`
-                : `Amount of ${selectedPair?.base_asset || ''} to buy`
+                ? `المبلغ بالـ USDT`
+                : `USDT to spend`
               : isArabic
               ? `كمية ${selectedPair?.base_asset || ''} اللي عايز تبيعها`
               : `Amount of ${selectedPair?.base_asset || ''} to sell`}
@@ -425,7 +428,7 @@ function ConvertPageContent() {
             <ArrowDownUp className="h-4 w-4 text-white/40" />
           </div>
 
-          <div className="mt-3 text-xs text-white/55">{isArabic ? 'Quick amounts معطلة لهذا الزوج لتجنب اللبس (الادخال هنا كمية الأصل).' : 'Quick amounts disabled for this pair to avoid ambiguity (input is base-asset amount).'}</div>
+          <div className="mt-3 text-xs text-white/55">{side === 'buy' ? (isArabic ? 'الإدخال في الشراء هو مبلغ USDT الإجمالي شامل الرسوم.' : 'Buy input is total USDT to spend (fee included).') : (isArabic ? 'الإدخال في البيع هو كمية الأصل.' : 'Sell input is base-asset amount.')}</div>
 
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-xs text-white/70">
