@@ -3176,6 +3176,32 @@ async function quoteConvertFromOneInch(pair, side, amountWei) {
   };
 }
 
+
+async function quoteExactQuoteToBase(pair, quoteAmountWei, provider) {
+  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, provider);
+  const attemptedPaths = [];
+  let best = null;
+  for (const path of buildConvertRouteCandidates(pair, 'buy')) {
+    const routeLabel = routeToSymbols(path).join(' -> ');
+    try {
+      const amounts = await router.getAmountsOut(quoteAmountWei, path);
+      const amountOut = bigIntFromValue(Array.isArray(amounts) ? amounts[amounts.length - 1] : 0);
+      if (amountOut > 0n && (!best || amountOut > best.baseAmountWei)) {
+        best = { path, baseAmountWei: amountOut };
+      }
+      attemptedPaths.push({ route: routeLabel, amountIn: quoteAmountWei.toString(), amountOut: amountOut.toString(), ok: amountOut > 0n });
+    } catch (err) {
+      attemptedPaths.push({ route: routeLabel, ok: false, error: String(err?.message || err || 'route_failed').slice(0, 220) });
+    }
+  }
+  if (!best) throw Object.assign(new Error(`No PancakeSwap V2 route found for ${pair.symbol}`), { code: 'LIVE_QUOTE_UNAVAILABLE', attemptedPaths });
+  return { quoteWithoutFeeWei: quoteAmountWei, baseAmountWei: best.baseAmountWei, direction: 'quote_to_base', path: best.path, attemptedPaths, routeSymbols: routeToSymbols(best.path), provider: 'pancakeswap-v2', liveExecutable: true };
+}
+
+async function quoteExactBaseToQuote(pair, baseAmountWei, provider) {
+  return quoteConvertFromPancakeV2(pair, 'sell', baseAmountWei, provider);
+}
+
 async function quoteConvertLiveWithFallback(pair, side, amountWei, provider) {
   const providers = [{ name: 'pancakeswap-v2', fn: () => quoteConvertFromPancakeV2(pair, side, amountWei, provider), executable: true }];
   const diagnostics = [];
@@ -11038,7 +11064,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       const feeCandidateWei = (grossUsdtInputWei * BigInt(settings.convert_fee_bps || 0)) / (10000n + BigInt(settings.convert_fee_bps || 0));
       const netUsdtToSwapWei = grossUsdtInputWei - feeCandidateWei;
       const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
-      const quoteInfoOut = await quoteConvertLiveWithFallback(pair, 'sell', netUsdtToSwapWei, provider);
+      const quoteInfoOut = await quoteExactQuoteToBase(pair, netUsdtToSwapWei, provider);
       const minBaseOut = quoteInfoOut.baseAmountWei - (quoteInfoOut.baseAmountWei * BigInt(Number(runtime.settings.convert_slippage_bps || 0))) / 10000n;
       return res.json({ ok: true, pair: pair.symbol, side: payload.side, amountType: 'quote', valid: true, executable: quoteInfoOut.liveExecutable, blockingReason: quoteInfoOut.liveExecutable ? null : 'PANCAKE_ROUTE_NOT_FOUND', quote: {
         inputAmountUsdt: trimDecimal(formatUnitsStr(grossUsdtInputWei.toString(), usdtDecimals)),
@@ -11073,7 +11099,9 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       } else {
         ensureConvertLivePairReady(pair, runtime.settings);
         const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
-        quoteInfo = await quoteConvertLiveWithFallback(pair, payload.side, amountWei, provider);
+        quoteInfo = payload.side === 'buy'
+        ? await quoteExactQuoteToBase(pair, amountWei, provider)
+        : await quoteExactBaseToQuote(pair, amountWei, provider);
         priceSource = quoteInfo.provider || 'pancakeswap-v2';
         routerVersion = priceSource === 'pancakeswap-v2' ? 'v2' : priceSource === 'pancakeswap-v3' ? 'v3' : 'aggregator';
         executionMode = quoteInfo.liveExecutable ? 'live' : 'unavailable';
@@ -11098,7 +11126,9 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       responseMode = 'mock';
     }
     const settings = runtime.settings;
-    const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
+    const feeWei = payload.side === 'buy'
+      ? (amountWei * BigInt(settings.convert_fee_bps || 0)) / (10000n + BigInt(settings.convert_fee_bps || 0))
+      : (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
     if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) blockingReason = 'AMOUNT_BELOW_MINIMUM';
     const valid = quoteInfo.quoteWithoutFeeWei > 0n && (!blockingReason || blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY');
@@ -11214,10 +11244,18 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     const settings = await readConvertSettings();
     usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
     baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
-    const amountWeiStr = decimalToWeiString(payload.amount, baseDecimals);
-    if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
-    amountWei = bigIntFromValue(amountWeiStr);
-    if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    const isBuyInput = payload.side === 'buy';
+    if (isBuyInput) {
+      const amountUsdtWeiStr = decimalToWeiString(payload.amountUsdt, usdtDecimals);
+      if (!amountUsdtWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt' });
+      amountWei = bigIntFromValue(amountUsdtWeiStr);
+      if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt' });
+    } else {
+      const amountWeiStr = decimalToWeiString(payload.amount, baseDecimals);
+      if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+      amountWei = bigIntFromValue(amountWeiStr);
+      if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    }
     const runtime = await buildConvertRuntime();
     if (!runtime.envReady && !runtime.fallbackEnabled) {
       return next({
@@ -11230,7 +11268,9 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     if (runtime.mode === 'live') {
       ensureConvertLivePairReady(pair, runtime.settings);
       const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
-      quoteInfo = await quoteConvertLiveWithFallback(pair, payload.side, amountWei, provider);
+      quoteInfo = payload.side === 'buy'
+        ? await quoteExactQuoteToBase(pair, amountWei, provider)
+        : await quoteExactBaseToQuote(pair, amountWei, provider);
       if (!quoteInfo.liveExecutable) {
         return next({
           status: 503,
@@ -11244,7 +11284,9 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       quoteInfo = { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei, fee: null };
     }
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
-    const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
+    const feeWei = payload.side === 'buy'
+      ? (amountWei * BigInt(settings.convert_fee_bps || 0)) / (10000n + BigInt(settings.convert_fee_bps || 0))
+      : (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     const minWeiStr = decimalToWeiString(String(settings.convert_min_usdt || 10), usdtDecimals) || '0';
     if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) {
       return next({ status: 400, code: 'CONVERT_MIN', message: `Minimum convert is ${settings.convert_min_usdt} USDT` });
@@ -11252,7 +11294,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
 
     const debitAsset = payload.side === 'buy' ? 'USDT' : pair.base_asset;
     const debitDecimals = payload.side === 'buy' ? usdtDecimals : baseDecimals;
-    const debitWei = payload.side === 'buy' ? quoteInfo.quoteWithoutFeeWei + feeWei : amountWei;
+    const debitWei = payload.side === 'buy' ? amountWei : amountWei;
     reservedDebitAsset = debitAsset.toUpperCase();
     reservedDebitWei = debitWei;
 
@@ -11303,7 +11345,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       `INSERT INTO convert_executions
        (user_id, pair_id, side, status, amount_wei, amount_decimals, quote_without_fee_wei, quote_decimals, fee_wei, debit_asset, debit_wei, idempotency_key)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [userId, pair.id, payload.side, 'processing', amountWei.toString(), baseDecimals, quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals, feeWei.toString(), debitAsset.toUpperCase(), debitWei.toString(), idempotencyKey]
+      [userId, pair.id, payload.side, 'reserved', amountWei.toString(), baseDecimals, quoteInfo.quoteWithoutFeeWei.toString(), usdtDecimals, feeWei.toString(), debitAsset.toUpperCase(), debitWei.toString(), idempotencyKey]
     );
     executionId = insert.insertId;
     await conn.commit();
@@ -11323,6 +11365,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       userId,
       debitAsset.toUpperCase(),
     ]);
+    debitApplied = true;
     if (creditWei > 0n) {
       await conn.query(
         'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
@@ -11339,7 +11382,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     await conn.query(
       'UPDATE convert_executions SET status=?, tx_hash=?, credited_asset=?, credited_wei=?, metadata=?, updated_at=NOW() WHERE id=?',
-      ['completed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap-v2', router: PANCAKE_V2_ROUTER_ADDRESS, route: quoteInfo.routeSymbols || [] }), executionId]
+      ['confirmed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap-v2', router: PANCAKE_V2_ROUTER_ADDRESS, route: quoteInfo.routeSymbols || [] }), executionId]
     );
     await conn.commit();
     res.json({
@@ -11357,7 +11400,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
         await conn.rollback();
       } catch {}
     }
-    if (executionId && userId && reservedDebitAsset && reservedDebitWei > 0n) {
+    if (executionId && userId && debitApplied && reservedDebitAsset && reservedDebitWei > 0n) {
       try {
         const refundConn = await pool.getConnection();
         try {
@@ -11367,13 +11410,28 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
             [userId, reservedDebitAsset, reservedDebitWei.toString()]
           );
           await refundConn.query('UPDATE convert_executions SET status=?, fail_reason=?, updated_at=NOW() WHERE id=?', [
-            'failed',
+            'refunded',
             String(err?.message || 'convert_failed').slice(0, 500),
             executionId,
           ]);
           await refundConn.commit();
         } finally {
           refundConn.release();
+        }
+      } catch {}
+    }
+
+    if (executionId && !debitApplied) {
+      try {
+        const failConn = await pool.getConnection();
+        try {
+          await failConn.query('UPDATE convert_executions SET status=?, fail_reason=?, updated_at=NOW() WHERE id=?', [
+            'failed',
+            String(err?.message || 'convert_failed').slice(0, 500),
+            executionId,
+          ]);
+        } finally {
+          failConn.release();
         }
       } catch {}
     }
