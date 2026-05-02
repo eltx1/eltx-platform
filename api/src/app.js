@@ -862,7 +862,9 @@ const ConvertQuoteSchema = z.object({
   category: z.enum(CONVERT_CATEGORY_VALUES).optional(),
   symbol: z.string().min(3).max(32),
   side: z.enum(['buy', 'sell']),
-  amount: z.string().min(1),
+  amount: z.string().min(1).optional(),
+  amountType: z.enum(['base', 'quote']).optional(),
+  amountUsdt: z.string().min(1).optional(),
 });
 
 const ConvertIdempotencyKeySchema = z.string().trim().min(8).max(128);
@@ -962,7 +964,7 @@ const BSC_USDT_ADDRESS = (process.env.TOKEN_USDT || '0x55d398326f99059fF77548524
 const BSC_USDC_ADDRESS = (process.env.TOKEN_USDC || '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d').toLowerCase();
 const BSC_BUSD_ADDRESS = (process.env.TOKEN_BUSD || '0xe9e7cea3dedca5984780bafc599bd69add087d56').toLowerCase();
 const PANCAKE_V2_ROUTER_ADDRESS = (
-  process.env.PANCAKE_V2_ROUTER || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
+  process.env.PANCAKE_V2_ROUTER || '0x10ED43C718714eb63d5aA57B78B54704E256024E'
 ).toLowerCase();
 const PANCAKE_V3_QUOTER_V2_ADDRESS = (
   process.env.PANCAKE_V3_QUOTER_V2 || '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'
@@ -984,6 +986,7 @@ const CONVERT_TOKEN_REGISTRY = {
     USDC: { address: BSC_USDC_ADDRESS, decimals: 18 },
     BUSD: { address: BSC_BUSD_ADDRESS, decimals: 18 },
     WBNB: { address: BSC_WBNB_ADDRESS, decimals: 18 },
+    WBTC: { address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c'.toLowerCase(), decimals: 18 },
   },
 };
 
@@ -3234,9 +3237,9 @@ async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime)
   if (side === 'buy') {
     const usdtToken = new ethers.Contract(CONVERT_TOKEN_REGISTRY[56].USDT.address, ERC20_ABI, provider);
     const usdtBalance = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
-    if (usdtBalance < quoteWei) throw new Error('HOT_WALLET_USDT_INSUFFICIENT');
+    if (usdtBalance < quoteWei) throw Object.assign(new Error('Platform hot wallet USDT insufficient'), { code: 'PLATFORM_HOT_WALLET_USDT_INSUFFICIENT' });
     const gasBalance = bigIntFromValue(await provider.getBalance(wallet.address));
-    if (gasBalance <= 0n) throw new Error('HOT_WALLET_BNB_GAS_INSUFFICIENT');
+    if (gasBalance <= 0n) throw Object.assign(new Error('Hot wallet gas insufficient'), { code: 'HOT_WALLET_BNB_GAS_INSUFFICIENT' });
     const maxIn = quoteWei + (quoteWei * BigInt(slippageBps)) / 10000n;
     await ensureErc20Allowance(path[0], wallet, PANCAKE_V2_ROUTER_ADDRESS, maxIn);
     const tx = await router.swapTokensForExactTokens(amountWei, maxIn, path, wallet.address, deadline);
@@ -3249,9 +3252,10 @@ async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime)
       mode: 'live',
     };
   }
-  const xautToken = new ethers.Contract(CONVERT_TOKEN_REGISTRY[56].XAUT.address, ERC20_ABI, provider);
-  const xautBalance = bigIntFromValue(await xautToken.balanceOf(wallet.address));
-  if (xautBalance < amountWei) throw new Error('HOT_WALLET_XAUT_INSUFFICIENT');
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const baseToken = new ethers.Contract(baseAddress, ERC20_ABI, provider);
+  const baseBalance = bigIntFromValue(await baseToken.balanceOf(wallet.address));
+  if (baseBalance < amountWei) throw Object.assign(new Error('Platform hot wallet base token insufficient'), { code: 'PLATFORM_HOT_WALLET_BASE_INSUFFICIENT' });
   const minOut = quoteWei - (quoteWei * BigInt(slippageBps)) / 10000n;
   await ensureErc20Allowance(path[0], wallet, PANCAKE_V2_ROUTER_ADDRESS, amountWei);
   const tx = await router.swapExactTokensForTokens(amountWei, minOut > 0n ? minOut : 0n, path, wallet.address, deadline);
@@ -10923,7 +10927,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
     let lastError = runtime.warning || '';
     let bnbBalance = '0';
     let usdtBalance = '0';
-    let xautBalance = '0';
+    let baseBalance = '0';
     let decimalsMatch = true;
     let quoteProvider = null;
     if (provider && runtime.envReady) {
@@ -10935,14 +10939,14 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
         await provider.getBlockNumber();
         rpcReady = true;
         const walletAddress = runtime.resolvedWalletAddress;
-        const [nativeWei, usdtWei, xautWei] = await Promise.all([
+        const [nativeWei, usdtWei, baseWei] = await Promise.all([
           provider.getBalance(walletAddress),
           readConvertTokenBalance(provider, CONVERT_TOKEN_REGISTRY[56].USDT.address, walletAddress),
-          readConvertTokenBalance(provider, CONVERT_TOKEN_REGISTRY[56].XAUT.address, walletAddress),
+          readConvertTokenBalance(provider, tokenOut, walletAddress),
         ]);
         bnbBalance = trimDecimal(formatUnitsStr(nativeWei.toString(), 18));
         usdtBalance = trimDecimal(formatUnitsStr(usdtWei.toString(), CONVERT_TOKEN_REGISTRY[56].USDT.decimals));
-        xautBalance = trimDecimal(formatUnitsStr(xautWei.toString(), CONVERT_TOKEN_REGISTRY[56].XAUT.decimals));
+        baseBalance = trimDecimal(formatUnitsStr(baseWei.toString(), baseDecimals));
         decimalsMatch =
           (await verifyConvertTokenDecimals(provider, tokenOut, baseDecimals)) &&
           (await verifyConvertTokenDecimals(provider, tokenIn, quoteDecimals));
@@ -10971,14 +10975,15 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       hotWalletAddress: runtime.resolvedWalletAddress ? `${runtime.resolvedWalletAddress.slice(0, 6)}...${runtime.resolvedWalletAddress.slice(-4)}` : null,
       derivedAddressMatches: runtime.derivedAddressMatches,
       routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
-      quoterAddress: PANCAKE_V3_QUOTER_V2_ADDRESS,
-      xautContractStatus: !!tokenOut,
-      usdtContractStatus: !!tokenIn,
-      xautDecimals: baseDecimals,
-      usdtDecimals: quoteDecimals,
+      routerType: 'pancakeswap-v2',
+      quoteAsset: pair.quote_asset,
+      baseAsset: pair.base_asset,
+      baseTokenAddress: tokenOut,
+      quoteTokenAddress: tokenIn,
+      decimals: { base: baseDecimals, quote: quoteDecimals },
       hotWalletBnbGasBalance: bnbBalance,
       hotWalletUsdtBalance: usdtBalance,
-      hotWalletXautBalance: xautBalance,
+      hotWalletBaseBalance: baseBalance,
       priceSource: 'pancakeswap-v2-router',
       quoteReady,
       liquidityRouteFound,
@@ -11007,10 +11012,6 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     amountDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
-    const amountWeiStr = decimalToWeiString(payload.amount, amountDecimals);
-    if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
-    amountWei = bigIntFromValue(amountWeiStr);
-    if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
 
     const runtime = await buildConvertRuntime();
     if (!runtime.envReady && !runtime.fallbackEnabled) {
@@ -11026,6 +11027,34 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     let executionMode = 'unavailable';
     let responseMode = 'reference';
     usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
+    const isBuyQuoteInput = payload.side === 'buy' && (payload.amountType === 'quote' || payload.amountUsdt);
+    if (isBuyQuoteInput) {
+      const amountUsdt = payload.amountUsdt || payload.amount;
+      const amountUsdtWeiStr = decimalToWeiString(amountUsdt, usdtDecimals);
+      if (!amountUsdtWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt' });
+      const grossUsdtInputWei = bigIntFromValue(amountUsdtWeiStr);
+      if (grossUsdtInputWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt' });
+      const settings = runtime.settings;
+      const feeCandidateWei = (grossUsdtInputWei * BigInt(settings.convert_fee_bps || 0)) / (10000n + BigInt(settings.convert_fee_bps || 0));
+      const netUsdtToSwapWei = grossUsdtInputWei - feeCandidateWei;
+      const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
+      const quoteInfoOut = await quoteConvertLiveWithFallback(pair, 'sell', netUsdtToSwapWei, provider);
+      const minBaseOut = quoteInfoOut.baseAmountWei - (quoteInfoOut.baseAmountWei * BigInt(Number(runtime.settings.convert_slippage_bps || 0))) / 10000n;
+      return res.json({ ok: true, pair: pair.symbol, side: payload.side, amountType: 'quote', valid: true, executable: quoteInfoOut.liveExecutable, blockingReason: quoteInfoOut.liveExecutable ? null : 'PANCAKE_ROUTE_NOT_FOUND', quote: {
+        inputAmountUsdt: trimDecimal(formatUnitsStr(grossUsdtInputWei.toString(), usdtDecimals)),
+        feeUsdt: trimDecimal(formatUnitsStr(feeCandidateWei.toString(), usdtDecimals)),
+        netUsdtToSwap: trimDecimal(formatUnitsStr(netUsdtToSwapWei.toString(), usdtDecimals)),
+        estimatedBaseOut: trimDecimal(formatUnitsStr(quoteInfoOut.baseAmountWei.toString(), amountDecimals)),
+        minBaseOut: trimDecimal(formatUnitsStr((minBaseOut > 0n ? minBaseOut : 0n).toString(), amountDecimals)),
+        route: quoteInfoOut.routeSymbols || [],
+        slippageBps: Number(runtime.settings.convert_slippage_bps || 0),
+        quoteTimestamp: new Date().toISOString(),
+      }});
+    }
+    const amountWeiStr = decimalToWeiString(payload.amount, amountDecimals);
+    if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
+    amountWei = bigIntFromValue(amountWeiStr);
+    if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
     const minWeiStr = decimalToWeiString(String(runtime.settings.convert_min_usdt || 10), usdtDecimals) || '0';
     let blockingReason = null;
     if (runtime.mode === 'live') {
@@ -11268,13 +11297,8 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     const currentWei = rows.length ? bigIntFromValue(rows[0].balance_wei) : 0n;
     if (currentWei < debitWei) {
       await conn.rollback();
-      return next({ status: 400, code: 'INSUFFICIENT_BALANCE', message: 'Insufficient balance' });
+      return next({ status: 400, code: 'USER_USDT_BALANCE_INSUFFICIENT', message: 'User USDT balance is insufficient' });
     }
-    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
-      debitWei.toString(),
-      userId,
-      debitAsset.toUpperCase(),
-    ]);
     const [insert] = await conn.query(
       `INSERT INTO convert_executions
        (user_id, pair_id, side, status, amount_wei, amount_decimals, quote_without_fee_wei, quote_decimals, fee_wei, debit_asset, debit_wei, idempotency_key)
@@ -11294,6 +11318,11 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
 
     conn = await pool.getConnection();
     await conn.beginTransaction();
+    await conn.query('UPDATE user_balances SET balance_wei = balance_wei - ? WHERE user_id=? AND UPPER(asset)=?', [
+      debitWei.toString(),
+      userId,
+      debitAsset.toUpperCase(),
+    ]);
     if (creditWei > 0n) {
       await conn.query(
         'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
