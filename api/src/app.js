@@ -1010,7 +1010,7 @@ function resolveConvertExecutionProvider(pair) {
     reasons.push('XAUT_REQUIRES_PANCAKE_V3');
     return { executionProvider: CONVERT_PROVIDER.PANCAKE_V3, routerType: 'pancake-v3', liveExecutable: false, requiresProvider: true, blockingReasons: reasons, adminReasons: reasons.slice() };
   }
-  return { executionProvider: CONVERT_PROVIDER.PANCAKE_V2, routerType: 'pancake-v2', liveExecutable: true, requiresProvider: false, blockingReasons: [], adminReasons: [] };
+  return { executionProvider: CONVERT_PROVIDER.PANCAKE_V3, routerType: 'pancake-v3', liveExecutable: true, requiresProvider: false, blockingReasons: [], adminReasons: [] };
 }
 
 async function checkPancakeV2RouteForPair(pair, provider) {
@@ -3219,32 +3219,17 @@ async function quoteConvertFromOneInch(pair, side, amountWei) {
 
 
 async function quoteExactQuoteToBase(pair, quoteAmountWei, provider) {
-  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, provider);
-  const attemptedPaths = [];
-  let best = null;
-  for (const path of buildConvertRouteCandidates(pair, 'buy')) {
-    const routeLabel = routeToSymbols(path).join(' -> ');
-    try {
-      const amounts = await router.getAmountsOut(quoteAmountWei, path);
-      const amountOut = bigIntFromValue(Array.isArray(amounts) ? amounts[amounts.length - 1] : 0);
-      if (amountOut > 0n && (!best || amountOut > best.baseAmountWei)) {
-        best = { path, baseAmountWei: amountOut };
-      }
-      attemptedPaths.push({ route: routeLabel, amountIn: quoteAmountWei.toString(), amountOut: amountOut.toString(), ok: amountOut > 0n });
-    } catch (err) {
-      attemptedPaths.push({ route: routeLabel, ok: false, error: String(err?.message || err || 'route_failed').slice(0, 220) });
-    }
-  }
-  if (!best) throw Object.assign(new Error(`No PancakeSwap V2 route found for ${pair.symbol}`), { code: 'LIVE_QUOTE_UNAVAILABLE', attemptedPaths });
-  return { quoteWithoutFeeWei: quoteAmountWei, baseAmountWei: best.baseAmountWei, direction: 'quote_to_base', path: best.path, attemptedPaths, routeSymbols: routeToSymbols(best.path), provider: 'pancakeswap-v2', liveExecutable: true };
+  const quoted = await quoteConvertFromPancakeV3(pair, 'buy', quoteAmountWei, provider);
+  return { ...quoted, provider: 'pancakeswap-v3', liveExecutable: true };
 }
 
 async function quoteExactBaseToQuote(pair, baseAmountWei, provider) {
-  return quoteConvertFromPancakeV2(pair, 'sell', baseAmountWei, provider);
+  const quoted = await quoteConvertFromPancakeV3(pair, 'sell', baseAmountWei, provider);
+  return { ...quoted, provider: 'pancakeswap-v3', liveExecutable: true };
 }
 
 async function quoteConvertLiveWithFallback(pair, side, amountWei, provider) {
-  const providers = [{ name: 'pancakeswap-v2', fn: () => quoteConvertFromPancakeV2(pair, side, amountWei, provider), executable: true }];
+  const providers = [{ name: 'pancakeswap-v3', fn: () => quoteConvertFromPancakeV3(pair, side, amountWei, provider), executable: true }];
   const diagnostics = [];
   for (const candidate of providers) {
     try {
@@ -3259,18 +3244,18 @@ async function quoteConvertLiveWithFallback(pair, side, amountWei, provider) {
   }
   throw Object.assign(new Error(`No live route found for ${pair.symbol}`), {
     code: 'LIVE_QUOTE_UNAVAILABLE',
-    provider: 'pancakeswap-v2',
+    provider: 'pancakeswap-v3',
     providerDiagnostics: diagnostics,
   });
 }
 
 function buildConvertErrorDetails(err, pair, side, amountWei, amountDecimals, quoteDecimals) {
   return {
-    provider: 'pancakeswap-v2',
+    provider: 'pancakeswap-v3',
     pair: pair?.symbol || null,
     side: side || null,
     chainId: CONVERT_CHAIN_ID,
-    routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
+    routerAddress: PANCAKE_V3_ROUTER_ADDRESS,
     amount: amountWei != null ? trimDecimal(formatUnitsStr(String(amountWei), amountDecimals || 18)) : null,
     amountDecimals: Number(amountDecimals || 18),
     quoteDecimals: Number(quoteDecimals || 6),
@@ -3296,44 +3281,35 @@ async function executeConvertOnPancake(pair, side, amountWei, quoteWei, runtime)
   const wallet = new ethers.Wallet(runtime.pk, provider);
   const network = await provider.getNetwork();
   if (Number(network.chainId) !== CONVERT_CHAIN_ID) throw new Error(`CHAIN_ID_MISMATCH:${network.chainId}`);
-  const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, wallet);
   const slippageBps = Number(runtime.settings.convert_slippage_bps || 0);
-  const path = runtime.quotePath || buildConvertRouteCandidates(pair, side)[0];
-  if (!path?.length) throw new Error('Missing swap path for convert execution');
   const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 3);
+  const usdtAddress = resolveConvertAssetAddress('USDT');
+  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  if (!usdtAddress || !baseAddress) throw new Error('Missing token mapping for convert execution');
+  const router = new ethers.Contract(PANCAKE_V3_ROUTER_ADDRESS, [
+    'function exactOutputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountOut,uint256 amountInMaximum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountIn)',
+    'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+  ], wallet);
+
   if (side === 'buy') {
-    const usdtToken = new ethers.Contract(CONVERT_TOKEN_REGISTRY[56].USDT.address, ERC20_ABI, provider);
+    const usdtToken = new ethers.Contract(usdtAddress, ERC20_ABI, provider);
     const usdtBalance = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
     if (usdtBalance < quoteWei) throw Object.assign(new Error('Platform hot wallet USDT insufficient'), { code: 'PLATFORM_HOT_WALLET_USDT_INSUFFICIENT' });
-    const gasBalance = bigIntFromValue(await provider.getBalance(wallet.address));
-    if (gasBalance <= 0n) throw Object.assign(new Error('Hot wallet gas insufficient'), { code: 'HOT_WALLET_BNB_GAS_INSUFFICIENT' });
     const maxIn = quoteWei + (quoteWei * BigInt(slippageBps)) / 10000n;
-    await ensureErc20Allowance(path[0], wallet, PANCAKE_V2_ROUTER_ADDRESS, maxIn);
-    const tx = await router.swapTokensForExactTokens(amountWei, maxIn, path, wallet.address, deadline);
+    await ensureErc20Allowance(usdtAddress, wallet, PANCAKE_V3_ROUTER_ADDRESS, maxIn);
+    const tx = await router.exactOutputSingle([usdtAddress, baseAddress, Number(runtime.quoteFeeTier || PANCAKE_V3_FEE_TIERS[0]), wallet.address, amountWei, maxIn, 0]);
     const receipt = await tx.wait();
-    return {
-      txHash: receipt?.hash || tx.hash,
-      spentQuoteWei: maxIn,
-      receivedBaseWei: amountWei,
-      receivedQuoteWei: 0n,
-      mode: 'live',
-    };
+    return { txHash: receipt?.hash || tx.hash, spentQuoteWei: maxIn, receivedBaseWei: amountWei, receivedQuoteWei: 0n, mode: 'live' };
   }
-  const baseAddress = resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+
   const baseToken = new ethers.Contract(baseAddress, ERC20_ABI, provider);
   const baseBalance = bigIntFromValue(await baseToken.balanceOf(wallet.address));
   if (baseBalance < amountWei) throw Object.assign(new Error('Platform hot wallet base token insufficient'), { code: 'PLATFORM_HOT_WALLET_BASE_INSUFFICIENT' });
   const minOut = quoteWei - (quoteWei * BigInt(slippageBps)) / 10000n;
-  await ensureErc20Allowance(path[0], wallet, PANCAKE_V2_ROUTER_ADDRESS, amountWei);
-  const tx = await router.swapExactTokensForTokens(amountWei, minOut > 0n ? minOut : 0n, path, wallet.address, deadline);
+  await ensureErc20Allowance(baseAddress, wallet, PANCAKE_V3_ROUTER_ADDRESS, amountWei);
+  const tx = await router.exactInputSingle([baseAddress, usdtAddress, Number(runtime.quoteFeeTier || PANCAKE_V3_FEE_TIERS[0]), wallet.address, amountWei, minOut > 0n ? minOut : 0n, 0]);
   const receipt = await tx.wait();
-  return {
-    txHash: receipt?.hash || tx.hash,
-    spentQuoteWei: 0n,
-    receivedQuoteWei: minOut > 0n ? minOut : 0n,
-    receivedBaseWei: amountWei,
-    mode: 'live',
-  };
+  return { txHash: receipt?.hash || tx.hash, spentQuoteWei: 0n, receivedQuoteWei: minOut > 0n ? minOut : 0n, receivedBaseWei: amountWei, mode: 'live' };
 }
 
 async function readSpotFeeBps(conn = pool) {
@@ -11038,16 +11014,16 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       ok: true,
       requestedMode: runtime.requestedMode,
       effectiveMode: runtime.mode,
-      liveReady: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V2 && routeCheck.routeFound,
-      executable: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V2 && routeCheck.routeFound,
-      referenceOnly: providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V2,
+      liveReady: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V3 && routeCheck.routeFound,
+      executable: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V3 && routeCheck.routeFound,
+      referenceOnly: providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V3,
       executionProvider: providerResolution.executionProvider,
       provider: providerResolution.executionProvider,
       chainId: CONVERT_CHAIN_ID,
       rpcReady,
       hotWalletAddress: runtime.resolvedWalletAddress ? `${runtime.resolvedWalletAddress.slice(0, 6)}...${runtime.resolvedWalletAddress.slice(-4)}` : null,
       derivedAddressMatches: runtime.derivedAddressMatches,
-      routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
+      routerAddress: PANCAKE_V3_ROUTER_ADDRESS,
       routerType: providerResolution.routerType,
       quoteAsset: pair.quote_asset,
       baseAsset: pair.base_asset,
@@ -11057,7 +11033,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       hotWalletBnbGasBalance: bnbBalance,
       hotWalletUsdtBalance: usdtBalance,
       hotWalletBaseBalance: baseBalance,
-      priceSource: 'pancakeswap-v2-router',
+      priceSource: 'pancakeswap-v3-quoter',
       quoteReady,
       liquidityReady: liquidityRouteFound,
       routeFound: routeCheck.routeFound,
@@ -11089,7 +11065,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const providerResolution = resolveConvertExecutionProvider(pair);
-    if (providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V2) {
+    if (providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V3) {
       return res.json({ ok: true, pair: pair.symbol, side: payload.side, valid: false, executable: false, referenceOnly: true, blockingReason: providerResolution.blockingReasons[0] || 'PROVIDER_NOT_IMPLEMENTED' });
     }
     amountDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
@@ -11157,7 +11133,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
         quoteInfo = payload.side === 'buy'
         ? await quoteExactQuoteToBase(pair, amountWei, provider)
         : await quoteExactBaseToQuote(pair, amountWei, provider);
-        priceSource = quoteInfo.provider || 'pancakeswap-v2';
+        priceSource = quoteInfo.provider || 'pancakeswap-v3';
         routerVersion = priceSource === 'pancakeswap-v2' ? 'v2' : priceSource === 'pancakeswap-v3' ? 'v3' : 'aggregator';
         executionMode = quoteInfo.liveExecutable ? 'live' : 'unavailable';
         responseMode = quoteInfo.liveExecutable ? runtime.mode : 'reference';
@@ -11193,7 +11169,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
         pair: pair.symbol,
         side: payload.side,
         chainId: CONVERT_CHAIN_ID,
-        routerAddress: PANCAKE_V2_ROUTER_ADDRESS,
+        routerAddress: PANCAKE_V3_ROUTER_ADDRESS,
         tokenAddresses: { base: resolveConvertAssetAddress(pair.base_asset, pair.token_address), quote: resolveConvertAssetAddress(pair.quote_asset) },
         decimals: { base: amountDecimals, quote: usdtDecimals },
         attemptedPaths: quoteInfo.attemptedPaths || [],
@@ -11255,7 +11231,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       const details = buildConvertErrorDetails(err, pair, payload?.side, amountWei, amountDecimals, usdtDecimals);
       console.error('[convert][quote][LIVE_QUOTE_UNAVAILABLE]', JSON.stringify(details));
       await markConvertPairLiveProbe(pair?.id, false, err?.message || 'live_quote_unavailable').catch(() => null);
-      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable on PancakeSwap V2', details });
+      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable on PancakeSwap V3', details });
     }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
@@ -11297,9 +11273,9 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     pair = await getConvertPairBySymbol(payload.symbol, payload.category || null);
     if (!pair) return next({ status: 404, code: 'PAIR_NOT_FOUND', message: 'Convert pair not found' });
     const providerResolution = resolveConvertExecutionProvider(pair);
-    if (providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V2) {
+    if (providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V3) {
       const code = providerResolution.blockingReasons[0] || 'PROVIDER_NOT_IMPLEMENTED';
-      return next({ status: 503, code: code === 'XAUT_REQUIRES_PANCAKE_V3' ? 'PROVIDER_NOT_IMPLEMENTED' : code, message: code });
+      return next({ status: 503, code, message: code });
     }
     const settings = await readConvertSettings();
     usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
@@ -11339,6 +11315,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
         });
       }
       runtime.quotePath = quoteInfo.path;
+      runtime.quoteFeeTier = quoteInfo.feeTier || null;
       await markConvertPairLiveProbe(pair.id, true, null);
     } else {
       quoteInfo = { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei, fee: null };
@@ -11442,7 +11419,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     await conn.query(
       'UPDATE convert_executions SET status=?, tx_hash=?, credited_asset=?, credited_wei=?, metadata=?, updated_at=NOW() WHERE id=?',
-      ['confirmed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap-v2', router: PANCAKE_V2_ROUTER_ADDRESS, route: quoteInfo.routeSymbols || [] }), executionId]
+      ['confirmed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap-v3', router: PANCAKE_V3_ROUTER_ADDRESS, route: quoteInfo.routeSymbols || [] }), executionId]
     );
     await conn.commit();
     res.json({
@@ -11509,7 +11486,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       const details = buildConvertErrorDetails(err, pair, payload?.side, amountWei, baseDecimals, usdtDecimals);
       console.error('[convert][execute][LIVE_QUOTE_UNAVAILABLE]', JSON.stringify(details));
       if (pair?.id) await markConvertPairLiveProbe(pair.id, false, err?.message || 'live_quote_unavailable').catch(() => null);
-      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable on PancakeSwap V2', details });
+      return next({ status: 503, code: 'LIVE_QUOTE_UNAVAILABLE', message: 'Live quote unavailable on PancakeSwap V3', details });
     }
     if (err instanceof z.ZodError) {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
