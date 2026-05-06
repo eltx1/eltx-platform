@@ -3011,7 +3011,7 @@ function summarizeConvertRuntimeReadiness(settings) {
   const envReady = missingEnv.length === 0 && invalidEnv.length === 0;
   const liveRequested = settings.convert_execution_mode === 'live' || settings.convert_requested_mode === 'live';
   const isProd = process.env.NODE_ENV === 'production';
-  const fallbackEnabled = !isProd && String(process.env.CONVERT_ALLOW_MOCK || '').toLowerCase() === 'true';
+  const fallbackEnabled = !isProd && Number(settings.convert_live_fallback_mock || 0) === 1;
   const mode = liveRequested && envReady ? 'live' : fallbackEnabled ? 'mock' : 'live';
   const warning =
     liveRequested && !envReady
@@ -11084,7 +11084,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
     let executionMode = 'unavailable';
     let responseMode = 'reference';
     usdtDecimals = resolveConvertAssetDecimals(pair.quote_asset || 'USDT');
-    const isBuyQuoteInput = payload.side === 'buy' && (payload.amountType === 'quote' || payload.amountUsdt);
+    const isBuyQuoteInput = runtime.mode === 'live' && payload.side === 'buy' && (payload.amountType === 'quote' || payload.amountUsdt);
     if (isBuyQuoteInput) {
       const amountUsdt = payload.amountUsdt || payload.amount;
       const amountUsdtWeiStr = decimalToWeiString(amountUsdt, usdtDecimals);
@@ -11157,9 +11157,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       responseMode = 'mock';
     }
     const settings = runtime.settings;
-    const feeWei = payload.side === 'buy'
-      ? (amountWei * BigInt(settings.convert_fee_bps || 0)) / (10000n + BigInt(settings.convert_fee_bps || 0))
-      : (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
+    const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
     if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) blockingReason = 'AMOUNT_BELOW_MINIMUM';
     const valid = quoteInfo.quoteWithoutFeeWei > 0n && (!blockingReason || blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY');
@@ -11282,10 +11280,11 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     baseDecimals = resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals);
     const isBuyInput = payload.side === 'buy';
     if (isBuyInput) {
-      const amountUsdtWeiStr = decimalToWeiString(payload.amountUsdt, usdtDecimals);
-      if (!amountUsdtWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt' });
+      const buyAmountInput = payload.amountUsdt || payload.amount;
+      const amountUsdtWeiStr = decimalToWeiString(buyAmountInput, usdtDecimals);
+      if (!amountUsdtWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt/amount' });
       amountWei = bigIntFromValue(amountUsdtWeiStr);
-      if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt' });
+      if (amountWei <= 0n) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amountUsdt/amount' });
     } else {
       const amountWeiStr = decimalToWeiString(payload.amount, baseDecimals);
       if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
@@ -11321,9 +11320,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       quoteInfo = { quoteWithoutFeeWei: quoteConvertMock(pair, amountWei), baseAmountWei: amountWei, fee: null };
     }
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
-    const feeWei = payload.side === 'buy'
-      ? (amountWei * BigInt(settings.convert_fee_bps || 0)) / (10000n + BigInt(settings.convert_fee_bps || 0))
-      : (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
+    const feeWei = (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     const minWeiStr = decimalToWeiString(String(settings.convert_min_usdt || 10), usdtDecimals) || '0';
     if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) {
       return next({ status: 400, code: 'CONVERT_MIN', message: `Minimum convert is ${settings.convert_min_usdt} USDT` });
@@ -11331,7 +11328,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
 
     const debitAsset = payload.side === 'buy' ? 'USDT' : pair.base_asset;
     const debitDecimals = payload.side === 'buy' ? usdtDecimals : baseDecimals;
-    const debitWei = payload.side === 'buy' ? amountWei : amountWei;
+    const debitWei = payload.side === 'buy' ? quoteInfo.quoteWithoutFeeWei + feeWei : amountWei;
     reservedDebitAsset = debitAsset.toUpperCase();
     reservedDebitWei = debitWei;
 
@@ -11348,7 +11345,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       );
       const existing = existingRows[0];
       if (existing) {
-        if (existing.status === 'completed') {
+        if (existing.status === 'completed' || existing.status === 'confirmed') {
           await conn.commit();
           return res.json({
             ok: true,
