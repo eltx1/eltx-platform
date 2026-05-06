@@ -1,120 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const ACTION_ID_PATTERN = /^[A-Za-z0-9/_-]{16,}$/;
-const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME || 'sid';
+const WINDOW_MS = 60_000;
+const MAX_REQUESTS_PER_WINDOW = 60;
+const ipBuckets = new Map<string, { count: number; resetAt: number }>();
 
-const PROTECTED_PATH_PREFIXES = [
-  '/dashboard',
-  '/wallet',
-  '/messages',
-  '/transactions',
-  '/trade',
-  '/staking',
-  '/premium',
-  '/monetize',
-  '/pay',
-  '/kyc',
-  '/settings',
-  '/profile',
-  '/referrals',
-  '/earn',
-  '/support',
-  '/for-you',
-  '/posts/new',
-  '/p2p',
-  '/ai',
-];
-
-const AUTH_PAGES = ['/login', '/signup'];
-
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE || '').replace(/\/+$/, '');
-const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_DEMO_MODE === '1' || process.env.DEMO_MODE === 'true';
-
-function pathMatches(pathname: string, candidates: string[]) {
-  return candidates.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+function applySecurityHeaders(response: NextResponse) {
+  response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  return response;
 }
 
-function authMeUrl(request: NextRequest) {
-  if (API_BASE) {
-    return `${API_BASE}/auth/me`;
-  }
-
-  return `${request.nextUrl.origin}/auth/me`;
+function shouldRateLimit(pathname: string) {
+  return pathname.startsWith('/api/social/uploads') || pathname.startsWith('/api/social/posts');
 }
 
-async function hasValidSession(request: NextRequest) {
-  const cookieHeader = request.headers.get('cookie');
-  if (!cookieHeader) return false;
-
-  try {
-    const response = await fetch(authMeUrl(request), {
-      method: 'GET',
-      headers: {
-        cookie: cookieHeader,
-      },
-      cache: 'no-store',
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function middleware(request: NextRequest) {
-  if (DEMO_MODE_ENABLED) {
-    return NextResponse.next();
-  }
-
-  const actionId = request.headers.get('next-action');
-  const pathname = request.nextUrl.pathname;
-  const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
-  const isProtectedPath = pathMatches(pathname, PROTECTED_PATH_PREFIXES);
-  const isAuthPage = pathMatches(pathname, AUTH_PAGES);
-
-  let isAuthenticated = false;
-  if (hasSession && (isProtectedPath || isAuthPage)) {
-    isAuthenticated = await hasValidSession(request);
-  }
-
-  if ((!hasSession || !isAuthenticated) && isProtectedPath) {
-    const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('next', pathname);
-    const response = NextResponse.redirect(loginUrl);
-    if (hasSession && !isAuthenticated) {
-      response.cookies.delete(SESSION_COOKIE_NAME);
-    }
-    return response;
-  }
-
-  if (isAuthenticated && isAuthPage) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = '/dashboard';
-    dashboardUrl.search = '';
-    return NextResponse.redirect(dashboardUrl);
-  }
-
-  if (actionId && !ACTION_ID_PATTERN.test(actionId)) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: {
-          code: 'STALE_CLIENT_ACTION',
-          message: 'Your session is using an outdated build. Please hard refresh the page and try again.',
-        },
-      },
-      {
-        status: 409,
-        headers: {
-          'Cache-Control': 'no-store',
-        },
+export function middleware(request: NextRequest) {
+  if (shouldRateLimit(request.nextUrl.pathname)) {
+    const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+    const now = Date.now();
+    const current = ipBuckets.get(ip);
+    if (!current || current.resetAt <= now) {
+      ipBuckets.set(ip, { count: 1, resetAt: now + WINDOW_MS });
+    } else {
+      current.count += 1;
+      if (current.count > MAX_REQUESTS_PER_WINDOW) {
+        return applySecurityHeaders(NextResponse.json({ error: 'Too many requests' }, { status: 429 }));
       }
-    );
+    }
   }
 
-  return NextResponse.next();
+  return applySecurityHeaders(NextResponse.next());
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
 };
