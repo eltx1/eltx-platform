@@ -23,8 +23,9 @@ export async function GET(_request: Request, context: Context) {
     headers: {
       'Content-Type': image.contentType,
       'Cache-Control': 'public, max-age=31536000, immutable',
-      'Content-Disposition': `inline; filename="${filename}"`,
+      'Content-Disposition': `attachment; filename="${filename}"`,
       'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; sandbox",
     },
   });
 }
