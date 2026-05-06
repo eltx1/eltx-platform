@@ -11010,12 +11010,15 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
     if (!decimalsMatch) {
       return next({ status: 503, code: 'PAIR_NOT_LIVE_READY', message: 'token decimals mismatch for configured convert pair' });
     }
+    const v3LivePathReady = runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V3;
+    const extraBlockingReasons = [];
+    if (!v3LivePathReady && routeCheck.reason) extraBlockingReasons.push(routeCheck.reason);
     res.json({
       ok: true,
       requestedMode: runtime.requestedMode,
       effectiveMode: runtime.mode,
-      liveReady: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V3 && routeCheck.routeFound,
-      executable: runtime.envReady && rpcReady && quoteReady && liquidityRouteFound && providerResolution.executionProvider === CONVERT_PROVIDER.PANCAKE_V3 && routeCheck.routeFound,
+      liveReady: v3LivePathReady,
+      executable: v3LivePathReady,
       referenceOnly: providerResolution.executionProvider !== CONVERT_PROVIDER.PANCAKE_V3,
       executionProvider: providerResolution.executionProvider,
       provider: providerResolution.executionProvider,
@@ -11039,7 +11042,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       routeFound: routeCheck.routeFound,
       routeSymbols: routeCheck.routeSymbols,
       quoteProvider,
-      blockingReasons: providerResolution.blockingReasons.concat(routeCheck.routeFound ? [] : [routeCheck.reason]).filter(Boolean),
+      blockingReasons: providerResolution.blockingReasons.concat(extraBlockingReasons).filter(Boolean),
       adminReasons: providerResolution.adminReasons,
       lastError: lastError || null,
       missingEnv: runtime.missingEnv,
