@@ -497,6 +497,27 @@ test('POST /convert/quote returns mock quote and fee details', async () => {
   assert.equal(res.body?.quote?.total_usdt, '6030');
 });
 
+test('GET /convert/status returns structured readiness payload', async () => {
+  testSchema.convertSettings.convert_execution_mode = 'live';
+  testSchema.convertSettings.convert_live_fallback_mock = '0';
+  const originalPk = process.env.CONVERT_HOT_WALLET_PK;
+  const originalAddress = process.env.CONVERT_HOT_WALLET_ADDRESS;
+  const originalRpc = process.env.BSC_RPC_URL;
+  delete process.env.CONVERT_HOT_WALLET_PK;
+  delete process.env.CONVERT_HOT_WALLET_ADDRESS;
+  delete process.env.BSC_RPC_URL;
+  const res = await request.get('/convert/status?category=crypto').set('Cookie', 'sid=valid-session');
+  assert.equal(res.status, 200);
+  assert.equal(typeof res.body?.liveReady, 'boolean');
+  assert.equal(Array.isArray(res.body?.missingEnv), true);
+  assert.equal(typeof res.body?.pairsCount, 'number');
+  process.env.CONVERT_HOT_WALLET_PK = originalPk;
+  process.env.CONVERT_HOT_WALLET_ADDRESS = originalAddress;
+  process.env.BSC_RPC_URL = originalRpc;
+  testSchema.convertSettings.convert_execution_mode = 'mock';
+  testSchema.convertSettings.convert_live_fallback_mock = '1';
+});
+
 test('POST /convert/quote uses sane mock reference pricing for XAUT/USDT', async () => {
   const xautPair = {
     id: 2,

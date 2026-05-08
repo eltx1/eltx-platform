@@ -11045,6 +11045,59 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
   }
 });
 
+app.get('/convert/status', walletLimiter, async (req, res, next) => {
+  const requestId = req.id || req.requestId || null;
+  try {
+    await requireUser(req);
+    const { category } = ConvertPairsQuerySchema.parse(req.query || {});
+    const [runtime, pairs] = await Promise.all([buildConvertRuntime(), listConvertPairs(category)]);
+    const missingEnv = [...(runtime.missingEnv || []), ...(runtime.invalidEnv || [])];
+    let rpcOk = false;
+    let rpcReason = null;
+    if (runtime.rpcUrl) {
+      try {
+        const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
+        const network = await provider.getNetwork();
+        rpcOk = Number(network.chainId) === CONVERT_CHAIN_ID;
+        if (!rpcOk) rpcReason = `chain_id_mismatch:${network.chainId}`;
+      } catch (err) {
+        rpcReason = String(err?.message || err || 'rpc_unreachable').slice(0, 180);
+      }
+    } else {
+      rpcReason = 'missing_rpc_url';
+    }
+    const diagnostics = {
+      requestId,
+      requestedMode: runtime.requestedMode,
+      effectiveMode: runtime.mode,
+      liveRequested: runtime.liveRequested,
+      fallbackEnabled: runtime.fallbackEnabled,
+      envReady: runtime.envReady,
+      rpcReason,
+    };
+    const liveReady = runtime.envReady && rpcOk && pairs.length > 0;
+    const reason = liveReady ? 'ready' : missingEnv.length ? 'missing_env' : !rpcOk ? 'rpc_not_ready' : pairs.length === 0 ? 'no_pairs' : 'not_ready';
+    console.info('[convert:status]', JSON.stringify({ requestId, category: category || 'all', liveReady, reason, pairsCount: pairs.length }));
+    res.json({
+      ok: liveReady,
+      liveReady,
+      category: category || 'crypto',
+      missingEnv,
+      missingDb: pairs.length ? [] : ['convert_pairs'],
+      rpcOk,
+      pairsCount: pairs.length,
+      reason,
+      diagnostics,
+    });
+  } catch (err) {
+    console.error('[convert:status]', JSON.stringify({ requestId, error: String(err?.message || err || 'status_failed').slice(0, 220) }));
+    if (err instanceof z.ZodError) {
+      return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid query', details: err.flatten() });
+    }
+    next(err);
+  }
+});
+
 app.post('/convert/quote', walletLimiter, async (req, res, next) => {
   let pair = null;
   let payload = null;
