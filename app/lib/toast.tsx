@@ -16,11 +16,17 @@ const ToastContext = createContext<(msg: ToastInput) => void>(() => {});
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [lastShownAtByMessage, setLastShownAtByMessage] = useState<Record<string, number>>({});
 
   const remove = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
   const show = (input: ToastInput) => {
     const message = typeof input === 'string' ? input : input.message;
     const variant = typeof input === 'string' ? 'info' : input.variant ?? 'info';
+    const dedupeKey = `${variant}:${message.trim().toLowerCase()}`;
+    const now = Date.now();
+    const lastShownAt = lastShownAtByMessage[dedupeKey] || 0;
+    if (now - lastShownAt < 2500) return;
+    setLastShownAtByMessage((prev) => ({ ...prev, [dedupeKey]: now }));
     const id = Date.now();
     setToasts((t) => [...t, { id, message, variant }]);
     setTimeout(() => remove(id), 3000);

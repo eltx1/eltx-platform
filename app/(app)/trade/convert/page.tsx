@@ -33,6 +33,17 @@ type ConvertConfigResponse = {
 };
 
 type ConvertHealthResponse = { requestedMode: 'mock' | 'live'; effectiveMode: 'mock' | 'live'; liveReady: boolean; executable?: boolean; referenceOnly?: boolean; executionProvider?: string; provider: string; blockingReasons?: string[]; adminReasons?: string[]; lastError?: string | null; };
+type ConvertStatusResponse = {
+  ok: boolean;
+  liveReady: boolean;
+  category: Category;
+  missingEnv: string[];
+  missingDb: string[];
+  rpcOk: boolean;
+  pairsCount: number;
+  reason: string;
+  diagnostics?: Record<string, unknown>;
+};
 
 type ConvertQuoteResponse = {
   mode: 'mock' | 'live' | 'reference' | 'unavailable';
@@ -219,11 +230,19 @@ function ConvertPageContent() {
 
   const loadHealth = useCallback(
     async (pairSymbol: string) => {
+      const statusRes = await apiFetch<ConvertStatusResponse>(`/convert/status?category=${category}`);
+      if (!statusRes.ok) {
+        setLiveReady(false);
+        setHealthError(normalizeConvertWarning(statusRes.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
+        return;
+      }
       const res = await apiFetch<ConvertHealthResponse>(`/convert/health?category=${category}&symbol=${encodeURIComponent(pairSymbol)}`);
       if (!res.ok) {
         setLiveReady(false);
         setConvertMode('live');
-        setHealthError(normalizeConvertWarning(res.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
+        const missing = statusRes.data.missingEnv?.length ? `Missing: ${statusRes.data.missingEnv.join(', ')}` : '';
+        const dbReason = statusRes.data.missingDb?.length ? `DB: ${statusRes.data.missingDb.join(', ')}` : '';
+        setHealthError(normalizeConvertWarning([res.error, missing, dbReason].filter(Boolean).join(' | ') || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
         return;
       }
       setConvertMode(res.data.effectiveMode || 'live');
