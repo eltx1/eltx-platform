@@ -999,17 +999,6 @@ const CONVERT_PROVIDER = {
 };
 
 function resolveConvertExecutionProvider(pair) {
-  const category = String(pair?.category || '').toLowerCase();
-  const base = String(pair?.base_asset || '').toUpperCase();
-  const reasons = [];
-  if (category === 'stocks') {
-    reasons.push('STOCKS_REQUIRE_PANCAKESWAP_X');
-    return { executionProvider: CONVERT_PROVIDER.PANCAKESWAP_X, routerType: 'pancakeswap-x', liveExecutable: false, requiresProvider: true, blockingReasons: reasons, adminReasons: reasons.slice() };
-  }
-  if (category === 'gold' || base === 'XAUT') {
-    reasons.push('XAUT_REQUIRES_PANCAKE_V3');
-    return { executionProvider: CONVERT_PROVIDER.PANCAKE_V3, routerType: 'pancake-v3', liveExecutable: false, requiresProvider: true, blockingReasons: reasons, adminReasons: reasons.slice() };
-  }
   return { executionProvider: CONVERT_PROVIDER.PANCAKE_V3, routerType: 'pancake-v3', liveExecutable: true, requiresProvider: false, blockingReasons: [], adminReasons: [] };
 }
 
