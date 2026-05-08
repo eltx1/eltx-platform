@@ -44,6 +44,9 @@ type ConvertQuoteResponse = {
     estimatedQuote: string;
     feeAmount: string;
     totalQuote: string;
+    estimatedBaseOut?: string;
+    inputAmountUsdt?: string;
+    feeUsdt?: string;
   };
 };
 
@@ -152,6 +155,7 @@ function ConvertPageContent() {
   const [amount, setAmount] = useState('');
   const [estimate, setEstimate] = useState(0);
   const [feeUsdt, setFeeUsdt] = useState(0);
+  const [estimatedBaseOut, setEstimatedBaseOut] = useState(0);
   const [convertMode, setConvertMode] = useState<'mock' | 'live' | 'reference'>('live');
   const [minUsdt, setMinUsdt] = useState(10);
   const [feeBps, setFeeBps] = useState(50);
@@ -245,6 +249,7 @@ function ConvertPageContent() {
       if (!selectedPair || !amountNum) {
         setEstimate(0);
         setFeeUsdt(0);
+        setEstimatedBaseOut(0);
         setQuoteValid(false);
         setBlockingReason('');
         return;
@@ -262,6 +267,7 @@ function ConvertPageContent() {
       if (!res.ok) {
         setEstimate(0);
         setFeeUsdt(0);
+        setEstimatedBaseOut(0);
         setQuoteValid(false);
         setBlockingReason('LIVE_QUOTE_UNAVAILABLE');
         setRuntimeWarning(normalizeConvertWarning(res.error || '', isArabic));
@@ -270,6 +276,7 @@ function ConvertPageContent() {
       setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
       setEstimate(parsePositive((res.data.quote as any).estimatedQuote ?? (res.data.quote as any).inputAmountUsdt));
       setFeeUsdt(parsePositive((res.data.quote as any).feeAmount ?? (res.data.quote as any).feeUsdt));
+      setEstimatedBaseOut(parsePositive((res.data.quote as any).estimatedBaseOut));
       setQuoteValid(Boolean((res.data as any).valid ?? (res.data as any).executable));
       setBlockingReason(String(res.data.blockingReason || ''));
       if (res.data.blockingReason === 'PAIR_REFERENCE_ONLY' || res.data.blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY') {
@@ -434,7 +441,11 @@ function ConvertPageContent() {
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
             <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-xs text-white/70">
               <div className="text-white/50">{labels.estimate}</div>
-              <div className="mt-1 text-sm font-semibold text-white">{formatPrice(estimate)} USDT</div>
+              <div className="mt-1 text-sm font-semibold text-white">
+                {side === 'buy'
+                  ? `${formatPrice(estimatedBaseOut)} ${selectedPair?.base_asset || ''}`
+                  : `${formatPrice(estimate)} USDT`}
+              </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 text-xs text-white/70">
               <div className="text-white/50">{labels.fee}</div>
