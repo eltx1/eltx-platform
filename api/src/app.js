@@ -3126,19 +3126,19 @@ async function quoteConvertFromPancakeV3(pair, side, amountWei, provider) {
   for (const fee of PANCAKE_V3_FEE_TIERS) {
     try {
       if (side === 'buy') {
-        const amountIn = bigIntFromValue(
-          await quoter.quoteExactOutputSingle.staticCall({
+        const amountOut = bigIntFromValue(
+          await quoter.quoteExactInputSingle.staticCall({
             tokenIn,
             tokenOut,
-            amount: amountWei,
+            amountIn: amountWei,
             fee,
             sqrtPriceLimitX96: 0,
           })
         );
-        if (amountIn > 0n && (!best || amountIn < best.quoteWithoutFeeWei)) {
-          best = { quoteWithoutFeeWei: amountIn, baseAmountWei: amountWei, direction: 'quote_to_base', path: [tokenIn, tokenOut], feeTier: fee };
+        if (amountOut > 0n && (!best || amountOut > best.baseAmountWei)) {
+          best = { quoteWithoutFeeWei: amountWei, baseAmountWei: amountOut, direction: 'quote_to_base', path: [tokenIn, tokenOut], feeTier: fee };
         }
-        attemptedFees.push({ fee, ok: amountIn > 0n, amountIn: amountIn.toString() });
+        attemptedFees.push({ fee, ok: amountOut > 0n, amountOut: amountOut.toString() });
       } else {
         const amountOut = bigIntFromValue(
           await quoter.quoteExactInputSingle.staticCall({
