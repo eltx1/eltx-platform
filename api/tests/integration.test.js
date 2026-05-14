@@ -563,7 +563,7 @@ test('POST /convert/execute performs debit/credit lifecycle in mock mode', async
   assert.equal(res.body?.ok, true);
   assert.equal(testSchema.convertExecutions.length, 1);
   assert.equal(testSchema.convertExecutions[0].status, 'confirmed');
-  assert.equal(testSchema.balances['1:USDT'], '4970000000000000000000');
+  assert.equal(testSchema.balances['1:USDT'], '10990000000000000000000');
   assert.equal(testSchema.balances['1:BNB'], '10000000000000000000');
 });
 
@@ -607,7 +607,7 @@ test('POST /convert/execute blocks live mode when wallet env is missing and fall
   const res = await request
     .post('/convert/execute')
     .set('Cookie', 'sid=valid-session')
-    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amount: '1', idempotency_key: 'exec-live-missing-1' });
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '1', idempotency_key: 'exec-live-missing-1' });
   assert.equal(res.status, 503);
   assert.equal(res.body?.error?.code, 'CONVERT_LIVE_NOT_READY');
   testSchema.convertSettings.convert_execution_mode = 'mock';
