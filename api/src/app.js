@@ -27,6 +27,7 @@ const { getEmailEnvDefaults } = require('./config/email');
 const { createStripeState, STRIPE_BASE_FALLBACK } = require('./config/stripe');
 const { requestIdMiddleware } = require('./middleware/requestId');
 const { errorHandler } = require('./middleware/errorHandler');
+const { createConvertRouter } = require('../../src/routes/convert');
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -163,6 +164,7 @@ const noCache = (req, res, next) => {
 app.use(['/wallet', '/api/wallet', '/api/transactions'], noCache);
 
 const pool = createDatabasePool();
+app.use('/convert', createConvertRouter(pool));
 
 const STRIPE_SETTING_KEYS = [
   'stripe_publishable_key',
