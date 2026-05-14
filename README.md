@@ -118,6 +118,23 @@ pm2 save
 
 Do not print secrets from `/home/dash/.env` in logs or shell history.
 
+
+API process note (critical): if PM2 logs show `Error: Cannot find module '/home/dash/public_html/lordai.net/api'`, the API process was started with a wrong entrypoint (`node .../api`).
+
+Use the npm script entrypoint instead so PM2 runs `api/server.js` from the project root:
+
+```bash
+npm run build
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
+Or for API-only restart:
+
+```bash
+pm2 restart api --update-env
+```
+
 ### Stripe card payments
 
 The dashboard now exposes a **Buy Crypto** flow backed by Stripe. To activate it you must set the
