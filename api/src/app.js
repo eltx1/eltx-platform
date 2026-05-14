@@ -25,9 +25,9 @@ const { createDatabasePool } = require('./config/database');
 const { callLLM, getLlmProviderSettings } = require('./services/llm');
 const { getEmailEnvDefaults } = require('./config/email');
 const { createStripeState, STRIPE_BASE_FALLBACK } = require('./config/stripe');
+const { getRuntimeEnv, getConvertRuntimeDiagnostics } = require('./config/runtimeEnv');
 const { requestIdMiddleware } = require('./middleware/requestId');
 const { errorHandler } = require('./middleware/errorHandler');
-const { createConvertRouter } = require('../../src/routes/convert');
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 
@@ -164,7 +164,6 @@ const noCache = (req, res, next) => {
 app.use(['/wallet', '/api/wallet', '/api/transactions'], noCache);
 
 const pool = createDatabasePool();
-app.use('/convert', createConvertRouter(pool));
 
 const STRIPE_SETTING_KEYS = [
   'stripe_publishable_key',
@@ -969,10 +968,10 @@ const PANCAKE_V2_ROUTER_ADDRESS = (
   process.env.PANCAKE_V2_ROUTER || '0x10ED43C718714eb63d5aA57B78B54704E256024E'
 ).toLowerCase();
 const PANCAKE_V3_QUOTER_V2_ADDRESS = (
-  process.env.PANCAKE_V3_QUOTER_V2 || '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'
+  getRuntimeEnv('PANCAKE_V3_QUOTER_V2') || '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'
 ).toLowerCase();
 const PANCAKE_V3_ROUTER_ADDRESS = (
-  process.env.PANCAKE_V3_ROUTER || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
+  getRuntimeEnv('PANCAKE_V3_ROUTER') || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
 ).toLowerCase();
 const PANCAKE_V3_QUOTER_ABI = [
   'function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut)',
@@ -2943,86 +2942,34 @@ async function getConvertPairBySymbol(symbol, category = null, conn = pool) {
   return rows[0] ? mapConvertPairRow(rows[0]) : null;
 }
 
-function normalizeConvertPrivateKey(rawPk) {
-  const value = String(rawPk || '')
-    .replace(/^\uFEFF/, '')
-    .replace(/\r/g, '')
-    .replace(/["']/g, '')
-    .trim();
-  if (!value) return { normalizedPk: '', valid: false, reason: 'empty' };
-  if (value.startsWith('0x')) {
-    return { normalizedPk: value, valid: /^0x[0-9a-fA-F]{64}$/.test(value), reason: '0x-prefixed' };
-  }
-  if (/^[0-9a-fA-F]{64}$/.test(value)) {
-    return { normalizedPk: `0x${value}`, valid: true, reason: 'hex-normalized' };
-  }
-  return { normalizedPk: value, valid: false, reason: 'bad-format' };
-}
-
-function readConvertEnvValueFromHomeDash(key) {
-  try {
-    const envRaw = fs.readFileSync('/home/dash/.env', 'utf8');
-    const line = envRaw
-      .split('\n')
-      .find((entry) => String(entry || '').trim().startsWith(`${key}=`));
-    if (!line) return '';
-    return line.slice(line.indexOf('=') + 1);
-  } catch {
-    return '';
-  }
-}
-
 function summarizeConvertRuntimeReadiness(settings) {
-  const rpcUrl = process.env.BSC_RPC_URL || process.env.BSC_RPC_HTTP || '';
-  const rawPk = readConvertEnvValueFromHomeDash('CONVERT_HOT_WALLET_PK') || process.env.CONVERT_HOT_WALLET_PK || '';
-  const normalizedPk = normalizeConvertPrivateKey(rawPk);
-  const configuredHotWalletAddress = (process.env.CONVERT_HOT_WALLET_ADDRESS || '').toLowerCase();
-  const missingEnv = [];
-  const invalidEnv = [];
-  if (!rpcUrl) missingEnv.push('BSC_RPC_URL (or BSC_RPC_HTTP)');
-  if (!rawPk) missingEnv.push('CONVERT_HOT_WALLET_PK');
-  if (!configuredHotWalletAddress) missingEnv.push('CONVERT_HOT_WALLET_ADDRESS');
-  if (rawPk && !normalizedPk.valid) invalidEnv.push('CONVERT_HOT_WALLET_PK (invalid private key)');
-
-  let resolvedWalletAddress = '';
-  if (normalizedPk.valid) {
-    try {
-      resolvedWalletAddress = ethers.computeAddress(normalizedPk.normalizedPk).toLowerCase();
-    } catch {
-      invalidEnv.push('CONVERT_HOT_WALLET_PK (invalid private key)');
-    }
-  }
-  if (
-    configuredHotWalletAddress &&
-    resolvedWalletAddress &&
-    configuredHotWalletAddress !== resolvedWalletAddress
-  ) {
-    invalidEnv.push('CONVERT_HOT_WALLET_ADDRESS mismatch with CONVERT_HOT_WALLET_PK');
-  }
+  const diagnostics = getConvertRuntimeDiagnostics();
+  const missingEnv = diagnostics.missingEnv;
+  const invalidEnv = diagnostics.invalidEnv;
   const envReady = missingEnv.length === 0 && invalidEnv.length === 0;
   const liveRequested = settings.convert_execution_mode === 'live' || settings.convert_requested_mode === 'live';
   const isProd = process.env.NODE_ENV === 'production';
-  const fallbackEnabled = !isProd && String(process.env.CONVERT_ALLOW_MOCK || '').toLowerCase() === 'true';
+  const fallbackEnabled = settings.convert_live_fallback_mock === 1 && (!isProd || settings.convert_mock_allowed_in_production === 1);
   const mode = liveRequested && envReady ? 'live' : fallbackEnabled ? 'mock' : 'live';
   const warning =
     liveRequested && !envReady
       ? `[convert] live mode requested but not ready; missing/invalid: ${missingEnv.concat(invalidEnv).join(', ')}. fallback_to_mock=${fallbackEnabled ? '1' : '0'}`
       : '';
-  console.info(`[convert] hot wallet key normalized=${normalizedPk.valid ? '1' : '0'} source=${normalizedPk.reason} derived=${resolvedWalletAddress ? `${resolvedWalletAddress.slice(0, 6)}...${resolvedWalletAddress.slice(-4)}` : 'n/a'}`);
   return {
     mode,
     envReady,
     settings,
-    rpcUrl,
-    pk: normalizedPk.valid ? normalizedPk.normalizedPk : '',
-    resolvedWalletAddress: resolvedWalletAddress || configuredHotWalletAddress || null,
+    rpcUrl: diagnostics.rpcUrl,
+    pk: diagnostics.privateKey,
+    resolvedWalletAddress: diagnostics.resolvedWalletAddress,
     missingEnv,
     invalidEnv,
     warning,
     fallbackEnabled,
     liveRequested,
-    derivedAddressMatches: !configuredHotWalletAddress || !resolvedWalletAddress ? false : configuredHotWalletAddress === resolvedWalletAddress,
+    derivedAddressMatches: diagnostics.walletAddressMatch,
     requestedMode: settings.convert_requested_mode || settings.convert_execution_mode,
+    envDiagnostics: diagnostics.envDiagnostics,
   };
 }
 
@@ -11082,12 +11029,22 @@ app.get('/convert/status', walletLimiter, async (req, res, next) => {
     console.info('[convert:status]', JSON.stringify({ requestId, category: category || 'all', liveReady, reason, pairsCount: pairs.length }));
     res.json({
       ok: liveReady,
+      requestedMode: runtime.requestedMode,
+      mode: runtime.mode,
       liveReady,
+      missingEnv: runtime.missingEnv || [],
+      invalidEnv: runtime.invalidEnv || [],
+      runtime_warning: runtime.warning || null,
+      fallbackEnabled: runtime.fallbackEnabled,
       category: category || 'crypto',
-      missingEnv,
+      pairsCount: pairs.length,
+      pairs,
+      chainId: CONVERT_CHAIN_ID,
+      provider: 'pancake_v3',
+      walletAddressMatch: runtime.derivedAddressMatches,
+      envDiagnostics: runtime.envDiagnostics || {},
       missingDb: pairs.length ? [] : ['convert_pairs'],
       rpcOk,
-      pairsCount: pairs.length,
       reason,
       diagnostics,
     });
