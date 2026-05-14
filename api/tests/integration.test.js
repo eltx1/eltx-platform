@@ -152,6 +152,11 @@ const pool = {
       const row = testSchema.convertExecutions.find((item) => item.user_id === userId && item.idempotency_key === key);
       return [row ? [row] : []];
     }
+    if (sql.includes('SELECT id, status FROM convert_executions WHERE id=? FOR UPDATE')) {
+      const id = Number(params[0]);
+      const row = testSchema.convertExecutions.find((item) => item.id === id);
+      return [row ? [{ id: row.id, status: row.status }] : []];
+    }
     if (sql.includes('SELECT asset, balance_wei FROM user_balances WHERE user_id=? AND UPPER(asset)=? FOR UPDATE')) {
       const key = `${Number(params[0])}:${String(params[1]).toUpperCase()}`;
       const balance = testSchema.balances[key];
@@ -557,14 +562,17 @@ test('POST /convert/execute performs debit/credit lifecycle in mock mode', async
   const res = await request
     .post('/convert/execute')
     .set('Cookie', 'sid=valid-session')
-    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '10', idempotency_key: 'exec-smoke-0001' });
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '10.1', idempotency_key: 'exec-smoke-0001' });
 
   assert.equal(res.status, 200);
   assert.equal(res.body?.ok, true);
   assert.equal(testSchema.convertExecutions.length, 1);
   assert.equal(testSchema.convertExecutions[0].status, 'confirmed');
-  assert.equal(testSchema.balances['1:USDT'], '10990000000000000000000');
-  assert.equal(testSchema.balances['1:BNB'], '10000000000000000000');
+  assert.equal(testSchema.balances['1:USDT'], '10989900000000000000000');
+  assert.ok(BigInt(testSchema.balances['1:BNB']) > 0n);
+  assert.equal(res.body?.debit?.amount, '10.1');
+  assert.equal(res.body?.fee?.amount, '0.050248756218905472');
+  assert.equal(res.body?.net_swap_input?.amount, '10.049751243781094528');
 });
 
 
@@ -574,7 +582,7 @@ test('POST /convert/execute buy accepts amountUsdt payload and avoids INVALID_AM
   const res = await request
     .post('/convert/execute')
     .set('Cookie', 'sid=valid-session')
-    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '5', idempotency_key: 'exec-buy-usdt-1' });
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '20', idempotency_key: 'exec-buy-usdt-1' });
   assert.equal(res.status, 200);
   assert.equal(res.body?.ok, true);
 });
@@ -583,7 +591,7 @@ test('POST /convert/execute returns replay response for same idempotency key', a
   const res = await request
     .post('/convert/execute')
     .set('Cookie', 'sid=valid-session')
-    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '10', idempotency_key: 'exec-smoke-0001' });
+    .send({ category: 'crypto', symbol: 'BNB/USDT', side: 'buy', amountType: 'quote', amountUsdt: '10.1', idempotency_key: 'exec-smoke-0001' });
   assert.equal(res.status, 200);
   assert.equal(res.body?.idempotent_replay, true);
 });
