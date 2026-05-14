@@ -12,7 +12,9 @@
     "typecheck": "tsc --noEmit",
     "test:integration": "c8 --include \"api/tests/**\" --check-coverage --lines 50 --functions 50 --branches 50 --statements 50 --reporter=text node --test --test-force-exit api/tests/integration.test.js",
     "test:e2e": "playwright test",
-    "test": "npm run test:integration && npm run test:e2e"
+    "test": "npm run test:integration && npm run test:e2e",
+    "api:start": "DOTENV_CONFIG_PATH=${DOTENV_CONFIG_PATH:-$( [ -f /home/dash/.env ] && echo /home/dash/.env || echo .env )} node -r dotenv/config api/server.js",
+    "api:dev": "DOTENV_CONFIG_PATH=${DOTENV_CONFIG_PATH:-$( [ -f /home/dash/.env ] && echo /home/dash/.env || echo .env )} node -r dotenv/config --watch api/server.js"
   },
   "dependencies": {
     "@stripe/stripe-js": "^3.4.0",
