@@ -3204,6 +3204,27 @@ function buildConvertErrorDetails(err, pair, side, amountWei, amountDecimals, qu
   };
 }
 
+
+async function ensureErc20Allowance(tokenAddress, wallet, spender, amountWei) {
+  const token = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
+  const requiredWei = bigIntFromValue(amountWei);
+  const currentAllowance = bigIntFromValue(await token.allowance(wallet.address, spender));
+  if (currentAllowance >= requiredWei) {
+    return { approved: false };
+  }
+
+  try {
+    const tx = await token.approve(spender, requiredWei);
+    const receipt = await tx.wait();
+    return { approved: true, txHash: receipt?.hash || tx?.hash };
+  } catch (err) {
+    throw Object.assign(new Error('Token approval failed'), {
+      code: 'TOKEN_APPROVAL_FAILED',
+      cause: String(err?.message || err || 'token_approval_failed').slice(0, 500),
+    });
+  }
+}
+
 async function executeConvertOnPancake(pair, side, executionPlan, runtime) {
   if (runtime.mode !== 'live') {
     if (!runtime.fallbackEnabled) throw new Error('Live execution is required for convert');
@@ -11106,7 +11127,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
       const quoteInfoOut = await quoteExactQuoteToBase(pair, netUsdtToSwapWei, provider);
       const minBaseOut = quoteInfoOut.baseAmountWei - (quoteInfoOut.baseAmountWei * BigInt(Number(runtime.settings.convert_slippage_bps || 0))) / 10000n;
-      return res.json({ ok: true, pair: pair.symbol, side: payload.side, amountType: 'quote', valid: true, executable: quoteInfoOut.liveExecutable, blockingReason: quoteInfoOut.liveExecutable ? null : 'PANCAKE_ROUTE_NOT_FOUND', quote: {
+      return res.json({ ok: true, pair: pair.symbol, side: payload.side, amountType: 'quote', mode: quoteInfoOut.liveExecutable ? 'live' : 'reference', executionMode: quoteInfoOut.liveExecutable ? 'live' : 'unavailable', runtime_warning: runtime.warning || null, valid: true, executable: quoteInfoOut.liveExecutable, blockingReason: quoteInfoOut.liveExecutable ? null : 'PANCAKE_ROUTE_NOT_FOUND', quote: {
         inputAmountUsdt: trimDecimal(formatUnitsStr(grossUsdtInputWei.toString(), usdtDecimals)),
         feeUsdt: trimDecimal(formatUnitsStr(feeCandidateWei.toString(), usdtDecimals)),
         netUsdtToSwap: trimDecimal(formatUnitsStr(netUsdtToSwapWei.toString(), usdtDecimals)),
@@ -11115,7 +11136,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
         route: quoteInfoOut.routeSymbols || [],
         slippageBps: Number(runtime.settings.convert_slippage_bps || 0),
         quoteTimestamp: new Date().toISOString(),
-      }});
+      }, settings });
     }
     const amountWeiStr = decimalToWeiString(payload.amount, amountDecimals);
     if (!amountWeiStr) return next({ status: 400, code: 'INVALID_AMOUNT', message: 'Invalid amount' });
@@ -11353,7 +11374,12 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     assertConvertQuoteIsSane(quoteInfo.quoteWithoutFeeWei, amountWei, usdtDecimals);
         const minWeiStr = decimalToWeiString(String(settings.convert_min_usdt || 10), usdtDecimals) || '0';
-    if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) {
+    const minWei = BigInt(minWeiStr);
+    if (payload.side === 'buy') {
+      if (grossUsdtInputWei < minWei) {
+        return next({ status: 400, code: 'CONVERT_MIN', message: `Minimum convert is ${settings.convert_min_usdt} USDT` });
+      }
+    } else if (quoteInfo.quoteWithoutFeeWei < minWei) {
       return next({ status: 400, code: 'CONVERT_MIN', message: `Minimum convert is ${settings.convert_min_usdt} USDT` });
     }
 
@@ -11474,7 +11500,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
           await refundConn.beginTransaction();
           const [lockedRows] = await refundConn.query('SELECT id, status FROM convert_executions WHERE id=? FOR UPDATE', [executionId]);
           const locked = lockedRows[0];
-          if (locked && !['confirmed', 'completed', 'refunded'].includes(String(locked.status))) {
+          if (locked && ['reserved', 'processing'].includes(String(locked.status))) {
             await refundConn.query(
               'INSERT INTO user_balances (user_id, asset, balance_wei) VALUES (?,?,?) ON DUPLICATE KEY UPDATE balance_wei = balance_wei + VALUES(balance_wei)',
               [userId, debitAsset.toUpperCase(), debitWei.toString()]
