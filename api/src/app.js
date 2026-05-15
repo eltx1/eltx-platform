@@ -842,6 +842,17 @@ const AdminConvertPairCreateSchema = z.object({
   sort_order: z.coerce.number().int().min(0).max(10000).optional(),
   active: z.boolean().optional(),
   live_enabled: z.boolean().optional(),
+  execution_provider: z.enum(['pancake_v3', 'reference_only', 'external']).optional(),
+  route_mode: z.enum(['auto', 'manual', 'reference_only']).optional(),
+  allowed_intermediate_tokens: z.string().max(255).optional().nullable(),
+  allowed_fee_tiers: z.string().max(255).optional().nullable(),
+  manual_buy_route_tokens: z.string().max(512).optional().nullable(),
+  manual_buy_route_fees: z.string().max(255).optional().nullable(),
+  manual_sell_route_tokens: z.string().max(512).optional().nullable(),
+  manual_sell_route_fees: z.string().max(255).optional().nullable(),
+  slippage_bps_override: z.coerce.number().int().min(0).max(5000).optional().nullable(),
+  min_usdt_override: z.string().max(32).optional().nullable(),
+  max_usdt_override: z.string().max(32).optional().nullable(),
 });
 
 const AdminConvertPairUpdateSchema = z
@@ -854,6 +865,17 @@ const AdminConvertPairUpdateSchema = z
     sort_order: z.coerce.number().int().min(0).max(10000).optional(),
     active: z.boolean().optional(),
     live_enabled: z.boolean().optional(),
+    execution_provider: z.enum(['pancake_v3', 'reference_only', 'external']).optional(),
+    route_mode: z.enum(['auto', 'manual', 'reference_only']).optional(),
+    allowed_intermediate_tokens: z.string().max(255).optional().nullable(),
+    allowed_fee_tiers: z.string().max(255).optional().nullable(),
+    manual_buy_route_tokens: z.string().max(512).optional().nullable(),
+    manual_buy_route_fees: z.string().max(255).optional().nullable(),
+    manual_sell_route_tokens: z.string().max(512).optional().nullable(),
+    manual_sell_route_fees: z.string().max(255).optional().nullable(),
+    slippage_bps_override: z.coerce.number().int().min(0).max(5000).optional().nullable(),
+    min_usdt_override: z.string().max(32).optional().nullable(),
+    max_usdt_override: z.string().max(32).optional().nullable(),
   })
   .refine((data) => Object.keys(data).length > 0, {
     message: 'No update fields provided',
@@ -3016,6 +3038,38 @@ function buildConvertRouteCandidates(pair, side) {
   return routes.filter((path) => path.length >= 2 && path.every((item) => /^0x[a-f0-9]{40}$/.test(item)));
 }
 
+
+function parseCsvList(value) {
+  if (!value) return [];
+  return String(value).split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function parseFeeTiers(value) {
+  const parsed = parseCsvList(value).map((item) => Number(item)).filter((item) => Number.isFinite(item) && item > 0);
+  return parsed.length ? parsed : PANCAKE_V3_FEE_TIERS;
+}
+
+function encodePancakeV3Path(tokens, fees) {
+  if (!Array.isArray(tokens) || tokens.length < 2) throw new Error('invalid_path_tokens');
+  if (!Array.isArray(fees) || fees.length !== tokens.length - 1) throw new Error('invalid_path_fees');
+  return ethers.solidityPacked(Array(tokens.length + fees.length).fill('address').map((v, i) => (i % 2 === 0 ? 'address' : 'uint24')).slice(0, -1),
+    tokens.flatMap((token, idx) => (idx < fees.length ? [token, fees[idx]] : [token])));
+}
+
+function buildPancakeV3PathCandidates(pair, side) {
+  const tokenIn = side === 'buy' ? resolveConvertAssetAddress(pair.quote_asset) : resolveConvertAssetAddress(pair.base_asset, pair.token_address);
+  const tokenOut = side === 'buy' ? resolveConvertAssetAddress(pair.base_asset, pair.token_address) : resolveConvertAssetAddress(pair.quote_asset);
+  const bridgesRaw = parseCsvList(pair.allowed_intermediate_tokens || 'WBNB,USDC');
+  const bridgeAddresses = bridgesRaw.map((sym) => resolveConvertAssetAddress(sym) || (/^0x/i.test(sym) ? sym.toLowerCase() : null)).filter(Boolean);
+  const uniqueBridges = [...new Set(bridgeAddresses)].filter((addr) => addr !== tokenIn && addr !== tokenOut);
+  const routes = [[tokenIn, tokenOut]];
+  for (const b of uniqueBridges) routes.push([tokenIn, b, tokenOut]);
+  if (uniqueBridges.length >= 2) {
+    routes.push([tokenIn, uniqueBridges[0], uniqueBridges[1], tokenOut]);
+    routes.push([tokenIn, uniqueBridges[1], uniqueBridges[0], tokenOut]);
+  }
+  return routes.filter((path) => path.every((a) => /^0x[a-f0-9]{40}$/.test(String(a || ''))));
+}
 function routeToSymbols(path) {
   const byAddress = CONVERT_TOKEN_REGISTRY[CONVERT_CHAIN_ID] || {};
   return path.map((address) => {
@@ -3064,56 +3118,45 @@ async function quoteConvertFromPancakeV2(pair, side, amountWei, provider) {
 }
 
 async function quoteConvertFromPancakeV3(pair, side, amountWei, provider) {
-  const tokenIn = side === 'buy' ? resolveConvertAssetAddress(pair.quote_asset) : resolveConvertAssetAddress(pair.base_asset, pair.token_address);
-  const tokenOut = side === 'buy' ? resolveConvertAssetAddress(pair.base_asset, pair.token_address) : resolveConvertAssetAddress(pair.quote_asset);
-  if (!tokenIn || !tokenOut) {
-    throw Object.assign(new Error(`Missing token mapping for ${pair.symbol}`), { code: 'LIVE_QUOTE_UNAVAILABLE' });
-  }
-  const quoter = new ethers.Contract(PANCAKE_V3_QUOTER_V2_ADDRESS, PANCAKE_V3_QUOTER_ABI, provider);
+  const quoter = new ethers.Contract(PANCAKE_V3_QUOTER_V2_ADDRESS, [
+    ...PANCAKE_V3_QUOTER_ABI,
+    'function quoteExactInput(bytes path, uint256 amountIn) external returns (uint256 amountOut)'
+  ], provider);
+  const routes = buildPancakeV3PathCandidates(pair, side);
+  const feeTiers = parseFeeTiers(pair.allowed_fee_tiers);
   let best = null;
-  const attemptedFees = [];
-  for (const fee of PANCAKE_V3_FEE_TIERS) {
-    try {
-      if (side === 'buy') {
-        const amountOut = bigIntFromValue(
-          await quoter.quoteExactInputSingle.staticCall({
-            tokenIn,
-            tokenOut,
-            amountIn: amountWei,
-            fee,
-            sqrtPriceLimitX96: 0,
-          })
-        );
-        if (amountOut > 0n && (!best || amountOut > best.baseAmountWei)) {
-          best = { quoteWithoutFeeWei: amountWei, baseAmountWei: amountOut, direction: 'quote_to_base', path: [tokenIn, tokenOut], feeTier: fee };
+  const attemptedPaths = [];
+  for (const tokens of routes.slice(0, 8)) {
+    const hops = tokens.length - 1;
+    const maxCombos = Math.min(24, Math.pow(feeTiers.length, hops));
+    for (let combo = 0; combo < maxCombos; combo += 1) {
+      const fees = [];
+      let n = combo;
+      for (let i = 0; i < hops; i += 1) { fees.push(feeTiers[n % feeTiers.length]); n = Math.floor(n / feeTiers.length); }
+      try {
+        const pathBytes = encodePancakeV3Path(tokens, fees);
+        const amountOut = bigIntFromValue(await quoter.quoteExactInput.staticCall(pathBytes, amountWei));
+        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, amountOut: amountOut.toString(), ok: amountOut > 0n });
+        if (amountOut > 0n && (!best || amountOut > best.amountOutWei)) {
+          best = { tokens, fees, pathBytes, amountOutWei: amountOut };
         }
-        attemptedFees.push({ fee, ok: amountOut > 0n, amountOut: amountOut.toString() });
-      } else {
-        const amountOut = bigIntFromValue(
-          await quoter.quoteExactInputSingle.staticCall({
-            tokenIn,
-            tokenOut,
-            amountIn: amountWei,
-            fee,
-            sqrtPriceLimitX96: 0,
-          })
-        );
-        if (amountOut > 0n && (!best || amountOut > best.quoteWithoutFeeWei)) {
-          best = { quoteWithoutFeeWei: amountOut, baseAmountWei: amountWei, direction: 'base_to_quote', path: [tokenIn, tokenOut], feeTier: fee };
-        }
-        attemptedFees.push({ fee, ok: amountOut > 0n, amountOut: amountOut.toString() });
+      } catch (err) {
+        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, ok: false, error: String(err?.message || err || 'v3_quote_failed').slice(0, 180) });
       }
-    } catch (err) {
-      attemptedFees.push({ fee, ok: false, error: String(err?.message || err || 'v3_quote_failed').slice(0, 220) });
     }
   }
-  if (!best) {
-    throw Object.assign(new Error(`No PancakeSwap V3 quote found for ${pair.symbol}`), {
-      code: 'LIVE_QUOTE_UNAVAILABLE',
-      attemptedFees,
-    });
-  }
-  return { ...best, attemptedFees, routeSymbols: routeToSymbols(best.path) };
+  if (!best) throw Object.assign(new Error(`No live route found for ${pair.symbol}`), { code: 'PAIR_ROUTE_UNAVAILABLE', attemptedPaths });
+  return {
+    quoteWithoutFeeWei: side === 'buy' ? amountWei : best.amountOutWei,
+    baseAmountWei: side === 'buy' ? best.amountOutWei : amountWei,
+    direction: side === 'buy' ? 'quote_to_base' : 'base_to_quote',
+    path: best.tokens,
+    routeSymbols: routeToSymbols(best.tokens),
+    pathBytes: best.pathBytes,
+    feeTiers: best.fees,
+    attemptedPaths,
+    liveExecutable: true,
+  };
 }
 
 async function quoteConvertFromOneInch(pair, side, amountWei) {
@@ -3252,8 +3295,10 @@ async function executeConvertOnPancake(pair, side, executionPlan, runtime) {
   if (!usdtAddress || !baseAddress) throw new Error('Missing token mapping for convert execution');
   const router = new ethers.Contract(PANCAKE_V3_ROUTER_ADDRESS, [
     'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+    'function exactInput((bytes path,address recipient,uint256 amountIn,uint256 amountOutMinimum)) payable returns (uint256 amountOut)',
   ], wallet);
   const feeTier = Number(runtime.quoteFeeTier || PANCAKE_V3_FEE_TIERS[0]);
+  const hasPathBytes = typeof runtime.quotePathBytes === 'string' && runtime.quotePathBytes.startsWith('0x');
 
   if (side === 'buy') {
     const usdtToken = new ethers.Contract(usdtAddress, ERC20_ABI, provider);
@@ -3263,7 +3308,9 @@ async function executeConvertOnPancake(pair, side, executionPlan, runtime) {
     const balanceBefore = bigIntFromValue(await baseToken.balanceOf(wallet.address));
     const minOut = executionPlan.expectedBaseOutWei - (executionPlan.expectedBaseOutWei * BigInt(slippageBps)) / 10000n;
     await ensureErc20Allowance(usdtAddress, wallet, PANCAKE_V3_ROUTER_ADDRESS, executionPlan.swapInputWei);
-    const tx = await router.exactInputSingle([usdtAddress, baseAddress, feeTier, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n, 0]);
+    const tx = hasPathBytes
+      ? await router.exactInput([runtime.quotePathBytes, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n])
+      : await router.exactInputSingle([usdtAddress, baseAddress, feeTier, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n, 0]);
     const receipt = await tx.wait();
     const balanceAfter = bigIntFromValue(await baseToken.balanceOf(wallet.address));
     const actualReceivedWei = balanceAfter > balanceBefore ? (balanceAfter - balanceBefore) : 0n;
@@ -3277,7 +3324,9 @@ async function executeConvertOnPancake(pair, side, executionPlan, runtime) {
   const balanceBefore = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
   const minOut = executionPlan.expectedQuoteOutWei - (executionPlan.expectedQuoteOutWei * BigInt(slippageBps)) / 10000n;
   await ensureErc20Allowance(baseAddress, wallet, PANCAKE_V3_ROUTER_ADDRESS, executionPlan.swapInputWei);
-  const tx = await router.exactInputSingle([baseAddress, usdtAddress, feeTier, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n, 0]);
+  const tx = hasPathBytes
+    ? await router.exactInput([runtime.quotePathBytes, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n])
+    : await router.exactInputSingle([baseAddress, usdtAddress, feeTier, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n, 0]);
   const receipt = await tx.wait();
   const balanceAfter = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
   const actualReceivedWei = balanceAfter > balanceBefore ? (balanceAfter - balanceBefore) : 0n;
@@ -11369,7 +11418,8 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
         });
       }
       runtime.quotePath = quoteInfo.path;
-      runtime.quoteFeeTier = quoteInfo.feeTier || null;
+      runtime.quotePathBytes = quoteInfo.pathBytes || null;
+      runtime.quoteFeeTier = quoteInfo.feeTier || (Array.isArray(quoteInfo.feeTiers) ? quoteInfo.feeTiers[0] : null);
       await markConvertPairLiveProbe(pair.id, true, null);
     } else {
       if (payload.side === 'buy') {
@@ -11783,6 +11833,28 @@ app.patch('/admin/convert/pairs/:id', async (req, res, next) => {
   } catch (err) {
     if (err instanceof z.ZodError)
       return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid input', details: err.flatten() });
+    next(err);
+  }
+});
+
+app.post('/admin/convert/pairs/:id/probe-route', async (req, res, next) => {
+  const pairId = Number.parseInt(req.params.id, 10);
+  if (!Number.isFinite(pairId) || pairId <= 0) return next({ status: 400, code: 'BAD_INPUT', message: 'Invalid pair id' });
+  try {
+    await requireAdmin(req);
+    const [[pairRow]] = await pool.query('SELECT * FROM convert_pairs WHERE id=? LIMIT 1', [pairId]);
+    if (!pairRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Pair not found' });
+    const pair = mapConvertPairRow(pairRow);
+    const runtime = await buildConvertRuntime();
+    const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
+    const buyIn = bigIntFromValue(decimalToWeiString('1', resolveConvertAssetDecimals(pair.quote_asset)) || '0');
+    const sellIn = bigIntFromValue(decimalToWeiString('0.0003', resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals)) || '0');
+    let buy = { executable: false };
+    let sell = { executable: false };
+    try { const q = await quoteConvertFromPancakeV3(pair, 'buy', buyIn, provider); buy = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.baseAmountWei.toString(), attemptedRoutes: q.attemptedPaths }; } catch (e) { buy = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
+    try { const q = await quoteConvertFromPancakeV3(pair, 'sell', sellIn, provider); sell = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.quoteWithoutFeeWei.toString(), attemptedRoutes: q.attemptedPaths }; } catch (e) { sell = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
+    res.json({ ok: true, pair: pair.symbol, buy, sell });
+  } catch (err) {
     next(err);
   }
 });

@@ -134,6 +134,9 @@ function normalizeConvertWarning(raw: string, isArabic: boolean): string {
   if (lower.includes('below minimum') || lower.includes('amount_below_minimum')) {
     return isArabic ? 'الكمية أقل من الحد الأدنى.' : 'Amount is below minimum.';
   }
+  if (lower.includes('pair_route_unavailable') || lower.includes('no live route found')) {
+    return isArabic ? 'المسار المباشر غير متاح حاليا لهذا الزوج.' : 'Live route is unavailable for this pair.';
+  }
   if (lower.includes('live quote unavailable')) {
     return isArabic ? 'التسعير المباشر غير متاح الآن.' : 'Live quote unavailable.';
   }
@@ -428,9 +431,9 @@ function ConvertPageContent() {
                     : 'Reference only'
                   : convertMode === 'live' && liveReady
                     ? labels.live
-                    : isArabic
-                      ? 'غير متاح'
-                      : 'Live unavailable'}
+                    : (blockingReason === 'PAIR_ROUTE_UNAVAILABLE'
+                      ? (isArabic ? 'المسار غير متاح' : 'Route unavailable')
+                      : (isArabic ? 'غير متاح' : 'Live unavailable'))}
               </div>
             </div>
           </div>
