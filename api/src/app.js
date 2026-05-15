@@ -3257,23 +3257,31 @@ async function executeConvertOnPancake(pair, side, executionPlan, runtime) {
 
   if (side === 'buy') {
     const usdtToken = new ethers.Contract(usdtAddress, ERC20_ABI, provider);
+    const baseToken = new ethers.Contract(baseAddress, ERC20_ABI, provider);
     const usdtBalance = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
     if (usdtBalance < executionPlan.swapInputWei) throw Object.assign(new Error('Platform hot wallet USDT insufficient'), { code: 'PLATFORM_HOT_WALLET_USDT_INSUFFICIENT' });
+    const balanceBefore = bigIntFromValue(await baseToken.balanceOf(wallet.address));
     const minOut = executionPlan.expectedBaseOutWei - (executionPlan.expectedBaseOutWei * BigInt(slippageBps)) / 10000n;
     await ensureErc20Allowance(usdtAddress, wallet, PANCAKE_V3_ROUTER_ADDRESS, executionPlan.swapInputWei);
     const tx = await router.exactInputSingle([usdtAddress, baseAddress, feeTier, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n, 0]);
     const receipt = await tx.wait();
-    return { txHash: receipt?.hash || tx.hash, receivedBaseWei: minOut > 0n ? minOut : executionPlan.expectedBaseOutWei, receivedQuoteWei: 0n, expectedOutWei: executionPlan.expectedBaseOutWei, minOutWei: minOut > 0n ? minOut : 0n, swapInputWei: executionPlan.swapInputWei, feeTier, mode: 'live' };
+    const balanceAfter = bigIntFromValue(await baseToken.balanceOf(wallet.address));
+    const actualReceivedWei = balanceAfter > balanceBefore ? (balanceAfter - balanceBefore) : 0n;
+    return { txHash: receipt?.hash || tx.hash, receivedBaseWei: actualReceivedWei > 0n ? actualReceivedWei : (minOut > 0n ? minOut : executionPlan.expectedBaseOutWei), receivedAmountSource: actualReceivedWei > 0n ? 'balanceDelta' : 'minOutFallback', receivedQuoteWei: 0n, expectedOutWei: executionPlan.expectedBaseOutWei, minOutWei: minOut > 0n ? minOut : 0n, swapInputWei: executionPlan.swapInputWei, feeTier, mode: 'live' };
   }
 
   const baseToken = new ethers.Contract(baseAddress, ERC20_ABI, provider);
   const baseBalance = bigIntFromValue(await baseToken.balanceOf(wallet.address));
   if (baseBalance < executionPlan.swapInputWei) throw Object.assign(new Error('Platform hot wallet base token insufficient'), { code: 'PLATFORM_HOT_WALLET_BASE_INSUFFICIENT' });
+  const usdtToken = new ethers.Contract(usdtAddress, ERC20_ABI, provider);
+  const balanceBefore = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
   const minOut = executionPlan.expectedQuoteOutWei - (executionPlan.expectedQuoteOutWei * BigInt(slippageBps)) / 10000n;
   await ensureErc20Allowance(baseAddress, wallet, PANCAKE_V3_ROUTER_ADDRESS, executionPlan.swapInputWei);
   const tx = await router.exactInputSingle([baseAddress, usdtAddress, feeTier, wallet.address, executionPlan.swapInputWei, minOut > 0n ? minOut : 0n, 0]);
   const receipt = await tx.wait();
-  return { txHash: receipt?.hash || tx.hash, receivedQuoteWei: minOut > 0n ? minOut : executionPlan.expectedQuoteOutWei, receivedBaseWei: 0n, expectedOutWei: executionPlan.expectedQuoteOutWei, minOutWei: minOut > 0n ? minOut : 0n, swapInputWei: executionPlan.swapInputWei, feeTier, mode: 'live' };
+  const balanceAfter = bigIntFromValue(await usdtToken.balanceOf(wallet.address));
+  const actualReceivedWei = balanceAfter > balanceBefore ? (balanceAfter - balanceBefore) : 0n;
+  return { txHash: receipt?.hash || tx.hash, receivedQuoteWei: actualReceivedWei > 0n ? actualReceivedWei : (minOut > 0n ? minOut : executionPlan.expectedQuoteOutWei), receivedAmountSource: actualReceivedWei > 0n ? 'balanceDelta' : 'minOutFallback', receivedBaseWei: 0n, expectedOutWei: executionPlan.expectedQuoteOutWei, minOutWei: minOut > 0n ? minOut : 0n, swapInputWei: executionPlan.swapInputWei, feeTier, mode: 'live' };
 }
 
 async function readSpotFeeBps(conn = pool) {
@@ -11413,10 +11421,13 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
           });
         }
         await conn.rollback();
+        if (['onchain_confirmed','settlement_pending','submitted'].includes(existing.status)) {
+          return res.status(202).json({ ok: false, code: 'SETTLEMENT_PENDING', execution_id: existing.id, tx_hash: existing.tx_hash, status: existing.status, message: 'Blockchain swap succeeded. Internal settlement is pending.' });
+        }
         return next({
           status: 409,
-          code: (['reserved','processing','submitted'].includes(existing.status) ? 'IDEMPOTENCY_IN_PROGRESS' : 'IDEMPOTENCY_CONFLICT_RETRY_WITH_NEW_KEY'),
-          message: ['reserved','processing','submitted'].includes(existing.status) ? 'A convert execution with this idempotency key is still processing' : 'A failed execution already exists for this idempotency key; use a new key to retry',
+          code: (['reserved','processing'].includes(existing.status) ? 'IDEMPOTENCY_IN_PROGRESS' : 'IDEMPOTENCY_CONFLICT_RETRY_WITH_NEW_KEY'),
+          message: ['reserved','processing'].includes(existing.status) ? 'A convert execution with this idempotency key is still processing' : 'A failed execution already exists for this idempotency key; use a new key to retry',
         });
       }
     }
@@ -11444,7 +11455,9 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     conn = null;
 
     const executionPlan = payload.side === 'buy' ? { swapInputWei, expectedBaseOutWei: quoteInfo.baseAmountWei, expectedQuoteOutWei: 0n } : { swapInputWei, expectedBaseOutWei: 0n, expectedQuoteOutWei: quoteInfo.quoteWithoutFeeWei };
+    await pool.query('UPDATE convert_executions SET status=?, updated_at=NOW() WHERE id=?', ['processing', executionId]);
     const chainResult = await executeConvertOnPancake(pair, payload.side, executionPlan, runtime);
+    await pool.query('UPDATE convert_executions SET status=?, tx_hash=?, updated_at=NOW() WHERE id=?', ['onchain_confirmed', chainResult.txHash, executionId]);
     creditAsset = payload.side === 'buy' ? pair.base_asset : 'USDT';
     creditDecimals = payload.side === 'buy' ? baseDecimals : usdtDecimals;
     const creditWeiGross = payload.side === 'buy' ? chainResult.receivedBaseWei : chainResult.receivedQuoteWei;
@@ -11454,7 +11467,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     await conn.beginTransaction();
     const [executionRows] = await conn.query('SELECT id, status FROM convert_executions WHERE id=? FOR UPDATE', [executionId]);
     const lockedExecution = executionRows[0];
-    if (!lockedExecution || !['reserved', 'processing'].includes(String(lockedExecution.status))) {
+    if (!lockedExecution || !['reserved', 'processing', 'submitted', 'onchain_confirmed', 'settlement_pending'].includes(String(lockedExecution.status))) {
       throw Object.assign(new Error('Execution already finalized'), { code: 'EXECUTION_FINALIZED' });
     }
     if (creditWei > 0n) {
@@ -11464,7 +11477,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
       );
     }
     if (feeWei > 0n) {
-      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?)', [
+      await conn.query('INSERT INTO platform_fees (fee_type, reference, asset, amount_wei) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE amount_wei=VALUES(amount_wei)', [
         'convert',
         `convert:${executionId}`,
         'USDT',
@@ -11473,7 +11486,7 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
     }
     await conn.query(
       'UPDATE convert_executions SET status=?, tx_hash=?, credited_asset=?, credited_wei=?, metadata=?, updated_at=NOW() WHERE id=?',
-      ['confirmed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap-v3', router: PANCAKE_V3_ROUTER_ADDRESS, route: quoteInfo.routeSymbols || [], grossUsdtInputWei: payload.side === 'buy' ? amountWei.toString() : null, feeWei: feeWei.toString(), netUsdtToSwapWei: payload.side === 'buy' ? swapInputWei.toString() : null, expectedBaseOutWei: payload.side === 'buy' ? quoteInfo.baseAmountWei.toString() : null, expectedOutWei: chainResult.expectedOutWei?.toString?.() || null, minOutWei: chainResult.minOutWei?.toString?.() || null, swapInputWei: chainResult.swapInputWei?.toString?.() || null, feeTier: chainResult.feeTier ?? null }), executionId]
+      ['confirmed', chainResult.txHash, creditAsset.toUpperCase(), creditWei.toString(), JSON.stringify({ mode: chainResult.mode, provider: 'pancakeswap-v3', router: PANCAKE_V3_ROUTER_ADDRESS, route: quoteInfo.routeSymbols || [], grossUsdtInputWei: payload.side === 'buy' ? amountWei.toString() : null, feeWei: feeWei.toString(), netUsdtToSwapWei: payload.side === 'buy' ? swapInputWei.toString() : null, expectedBaseOutWei: payload.side === 'buy' ? quoteInfo.baseAmountWei.toString() : null, expectedOutWei: chainResult.expectedOutWei?.toString?.() || null, minOutWei: chainResult.minOutWei?.toString?.() || null, swapInputWei: chainResult.swapInputWei?.toString?.() || null, feeTier: chainResult.feeTier ?? null, actualReceivedWei: (payload.side === 'buy' ? chainResult.receivedBaseWei : chainResult.receivedQuoteWei)?.toString?.() || null, receivedAmountSource: chainResult.receivedAmountSource || 'minOutFallback', tokenAddress: resolveConvertAssetAddress(pair.base_asset, pair.token_address) }), executionId]
     );
     await conn.commit();
     res.json({
@@ -11511,11 +11524,21 @@ app.post('/convert/execute', walletLimiter, async (req, res, next) => {
               executionId,
             ]);
           }
+          if (locked && ['submitted', 'onchain_confirmed', 'settlement_pending'].includes(String(locked.status))) {
+            await refundConn.query('UPDATE convert_executions SET status=?, fail_reason=?, updated_at=NOW() WHERE id=?', [
+              'settlement_pending',
+              String(err?.message || 'settlement_pending').slice(0, 500),
+              executionId,
+            ]);
+          }
           await refundConn.commit();
         } finally {
           refundConn.release();
         }
       } catch {}
+    }
+    if (executionId && ['EXECUTION_FINALIZED'].includes(err?.code)) {
+      return res.status(202).json({ ok: false, code: 'SETTLEMENT_PENDING', execution_id: executionId, message: 'Blockchain swap succeeded. Internal balance settlement is pending and will be finalized shortly.' });
     }
 
     if (executionId && !executionReserved) {
@@ -11580,21 +11603,21 @@ app.get('/admin/convert/reports', async (req, res, next) => {
     const [overviewRows] = await pool.query(
       `SELECT
          COUNT(*) AS total_executions,
-         SUM(CASE WHEN ce.status='completed' THEN 1 ELSE 0 END) AS completed_executions,
+         SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN 1 ELSE 0 END) AS completed_executions,
          SUM(CASE WHEN ce.status='failed' THEN 1 ELSE 0 END) AS failed_executions,
-         COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+         COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
          COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
-         COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+         COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
        FROM convert_executions ce`
     );
     const [categoryRows] = await pool.query(
       `SELECT cp.category,
               COUNT(*) AS executions,
-              SUM(CASE WHEN ce.status='completed' THEN 1 ELSE 0 END) AS completed,
+              SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN 1 ELSE 0 END) AS completed,
               SUM(CASE WHEN ce.status='failed' THEN 1 ELSE 0 END) AS failed,
-              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
               COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
-              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+              COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
          FROM convert_executions ce
          JOIN convert_pairs cp ON cp.id = ce.pair_id
         GROUP BY cp.category
@@ -11604,9 +11627,9 @@ app.get('/admin/convert/reports', async (req, res, next) => {
       `SELECT cp.category,
               cp.symbol,
               COUNT(*) AS executions,
-              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
               COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
-              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+              COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
          FROM convert_executions ce
          JOIN convert_pairs cp ON cp.id = ce.pair_id
         GROUP BY cp.category, cp.symbol
@@ -11616,9 +11639,9 @@ app.get('/admin/convert/reports', async (req, res, next) => {
     const [dailyRows] = await pool.query(
       `SELECT DATE(ce.created_at) AS day,
               COUNT(*) AS executions,
-              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
+              COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.quote_without_fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS quote_without_fee_wei,
               COALESCE(MAX(ce.quote_decimals), 6) AS quote_decimals,
-              COALESCE(SUM(CASE WHEN ce.status='completed' THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
+              COALESCE(SUM(CASE WHEN ce.status IN ('completed','confirmed') THEN CAST(ce.fee_wei AS DECIMAL(65,0)) ELSE 0 END),0) AS fee_wei
          FROM convert_executions ce
         WHERE ce.created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 14 DAY)
         GROUP BY DATE(ce.created_at)

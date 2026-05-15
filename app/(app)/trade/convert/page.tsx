@@ -334,6 +334,15 @@ function ConvertPageContent() {
     executeIdempotencyRef.current = null;
     setPlacing(false);
     if (!res.ok) {
+      if ((res as any).code === 'SETTLEMENT_PENDING') {
+        toast({
+          message: isArabic
+            ? 'نجحت معاملة البلوكتشين، وتسوية الرصيد الداخلي قيد التنفيذ وسيتم إنهاؤها قريبًا.'
+            : 'Blockchain swap succeeded. Internal balance settlement is pending and will be finalized shortly.',
+          variant: 'success',
+        });
+        return;
+      }
       toast({ message: res.error || (isArabic ? 'فشل التنفيذ' : 'Execution failed'), variant: 'error' });
       return;
     }
