@@ -11135,7 +11135,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
       const quoteInfoOut = await quoteExactQuoteToBase(pair, netUsdtToSwapWei, provider);
       const minBaseOut = quoteInfoOut.baseAmountWei - (quoteInfoOut.baseAmountWei * BigInt(Number(runtime.settings.convert_slippage_bps || 0))) / 10000n;
-      return res.json({ ok: true, pair: pair.symbol, side: payload.side, amountType: 'quote', mode: quoteInfoOut.liveExecutable ? 'live' : 'reference', executionMode: quoteInfoOut.liveExecutable ? 'live' : 'unavailable', runtime_warning: runtime.warning || null, valid: true, executable: quoteInfoOut.liveExecutable, blockingReason: quoteInfoOut.liveExecutable ? null : 'PANCAKE_ROUTE_NOT_FOUND', quote: {
+      return res.json({ ok: true, pair: pair.symbol, side: payload.side, amountType: 'quote', mode: quoteInfoOut.liveExecutable ? 'live' : 'reference', executionMode: quoteInfoOut.liveExecutable ? 'live' : 'unavailable', runtime_warning: runtime.warning || null, valid: true, executable: quoteInfoOut.liveExecutable, blockingReason: quoteInfoOut.liveExecutable ? null : 'PAIR_ROUTE_UNAVAILABLE', quote: {
         inputAmountUsdt: trimDecimal(formatUnitsStr(grossUsdtInputWei.toString(), usdtDecimals)),
         feeUsdt: trimDecimal(formatUnitsStr(feeCandidateWei.toString(), usdtDecimals)),
         netUsdtToSwap: trimDecimal(formatUnitsStr(netUsdtToSwapWei.toString(), usdtDecimals)),
@@ -11175,7 +11175,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
         routerVersion = priceSource === 'pancakeswap-v2' ? 'v2' : priceSource === 'pancakeswap-v3' ? 'v3' : 'aggregator';
         executionMode = quoteInfo.liveExecutable ? 'live' : 'unavailable';
         responseMode = quoteInfo.liveExecutable ? runtime.mode : 'reference';
-        if (!quoteInfo.liveExecutable) blockingReason = 'QUOTE_PROVIDER_REFERENCE_ONLY';
+        if (!quoteInfo.liveExecutable) blockingReason = 'PAIR_ROUTE_UNAVAILABLE';
         await markConvertPairLiveProbe(pair.id, true, null);
       }
     } else {
@@ -11200,7 +11200,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
       ? (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n
       : (quoteInfo.quoteWithoutFeeWei * BigInt(settings.convert_fee_bps || 0)) / 10000n;
     if (quoteInfo.quoteWithoutFeeWei < BigInt(minWeiStr)) blockingReason = 'AMOUNT_BELOW_MINIMUM';
-    const valid = quoteInfo.quoteWithoutFeeWei > 0n && (!blockingReason || blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY');
+    const valid = quoteInfo.quoteWithoutFeeWei > 0n && (!blockingReason || blockingReason === 'PAIR_REFERENCE_ONLY');
     if (!valid && !blockingReason) blockingReason = 'LIVE_QUOTE_UNAVAILABLE';
     if (!valid) {
       logConvertQuoteDiagnostics({

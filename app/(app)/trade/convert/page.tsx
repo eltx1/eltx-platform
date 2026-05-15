@@ -49,6 +49,8 @@ type ConvertQuoteResponse = {
   mode: 'mock' | 'live' | 'reference' | 'unavailable';
   executionMode: 'live' | 'unavailable';
   valid: boolean;
+  executable?: boolean;
+  referenceOnly?: boolean;
   blockingReason?: string | null;
   runtime_warning?: string | null;
   quote: {
@@ -174,7 +176,9 @@ function ConvertPageContent() {
   const [placing, setPlacing] = useState(false);
   const [runtimeWarning, setRuntimeWarning] = useState('');
   const [liveReady, setLiveReady] = useState(false);
-  const [healthError, setHealthError] = useState('');
+  const [readinessError, setReadinessError] = useState('');
+  const [quoteError, setQuoteError] = useState('');
+  const [executeError, setExecuteError] = useState('');
   const [quoteValid, setQuoteValid] = useState(false);
   const [blockingReason, setBlockingReason] = useState('');
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -221,7 +225,9 @@ function ConvertPageContent() {
     setFeeBps(res.data.settings?.convert_fee_bps || 0);
     setConvertMode(res.data.settings?.convert_execution_mode === 'mock' ? 'mock' : 'reference');
     setRuntimeWarning('');
-    setHealthError('');
+    setReadinessError('');
+    setQuoteError('');
+    setExecuteError('');
     setLiveReady(false);
     if ((res.data.pairs || []).length) {
       setSelectedSymbol((prev) => (prev && res.data.pairs.some((item) => item.symbol === prev) ? prev : res.data.pairs[0].symbol));
@@ -233,7 +239,7 @@ function ConvertPageContent() {
       const statusRes = await apiFetch<ConvertStatusResponse>(`/convert/status?category=${category}`);
       if (!statusRes.ok) {
         setLiveReady(false);
-        setHealthError(normalizeConvertWarning(statusRes.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
+        setReadinessError(normalizeConvertWarning(statusRes.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
         return;
       }
       const res = await apiFetch<ConvertHealthResponse>(`/convert/health?category=${category}&symbol=${encodeURIComponent(pairSymbol)}`);
@@ -242,12 +248,12 @@ function ConvertPageContent() {
         setConvertMode('live');
         const missing = statusRes.data.missingEnv?.length ? `Missing: ${statusRes.data.missingEnv.join(', ')}` : '';
         const dbReason = statusRes.data.missingDb?.length ? `DB: ${statusRes.data.missingDb.join(', ')}` : '';
-        setHealthError(normalizeConvertWarning([res.error, missing, dbReason].filter(Boolean).join(' | ') || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
+        setReadinessError(normalizeConvertWarning([res.error, missing, dbReason].filter(Boolean).join(' | ') || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
         return;
       }
       setConvertMode(res.data.effectiveMode || 'live');
       setLiveReady(Boolean(res.data.liveReady && res.data.executable && !res.data.referenceOnly));
-      setHealthError(normalizeConvertWarning(String(res.data.lastError || ''), isArabic));
+      setReadinessError(normalizeConvertWarning(String(res.data.lastError || ''), isArabic));
     },
     [category, isArabic]
   );
@@ -271,6 +277,7 @@ function ConvertPageContent() {
         setEstimatedBaseOut(0);
         setQuoteValid(false);
         setBlockingReason('');
+        setQuoteError('');
         return;
       }
       setQuoteLoading(true);
@@ -289,7 +296,8 @@ function ConvertPageContent() {
         setEstimatedBaseOut(0);
         setQuoteValid(false);
         setBlockingReason('LIVE_QUOTE_UNAVAILABLE');
-        setRuntimeWarning(normalizeConvertWarning(res.error || '', isArabic));
+        setQuoteError(normalizeConvertWarning(res.error || '', isArabic));
+        setRuntimeWarning('');
         return;
       }
       setRuntimeWarning(normalizeConvertWarning(String(res.data.runtime_warning || ''), isArabic));
@@ -298,6 +306,7 @@ function ConvertPageContent() {
       setEstimatedBaseOut(parsePositive((res.data.quote as any).estimatedBaseOut));
       setQuoteValid(Boolean((res.data as any).valid ?? (res.data as any).executable));
       setBlockingReason(String(res.data.blockingReason || ''));
+      setQuoteError('');
       if (res.data.blockingReason === 'PAIR_REFERENCE_ONLY' || res.data.blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY') {
         setLiveReady(false);
       }
@@ -308,7 +317,7 @@ function ConvertPageContent() {
   const executeSwap = useCallback(async () => {
     if (!selectedPair) return;
     if (!liveReady || !quoteValid) {
-      toast({ message: healthError || (isArabic ? 'وضع Live غير جاهز حاليا' : 'Live mode is not ready right now'), variant: 'error' });
+      toast({ message: readinessError || quoteError || (isArabic ? 'الزوج غير متاح للتنفيذ الآن' : 'Pair is not executable right now'), variant: 'error' });
       return;
     }
     if (!amountNum) {
@@ -335,6 +344,7 @@ function ConvertPageContent() {
     setPlacing(false);
     if (!res.ok) {
       if ((res as any).code === 'SETTLEMENT_PENDING') {
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('wallet:refresh'));
         toast({
           message: isArabic
             ? 'نجحت معاملة البلوكتشين، وتسوية الرصيد الداخلي قيد التنفيذ وسيتم إنهاؤها قريبًا.'
@@ -343,14 +353,19 @@ function ConvertPageContent() {
         });
         return;
       }
+      setExecuteError(normalizeConvertWarning(res.error || '', isArabic));
       toast({ message: res.error || (isArabic ? 'فشل التنفيذ' : 'Execution failed'), variant: 'error' });
       return;
     }
     setRuntimeWarning(normalizeConvertWarning(String((res.data as { runtime_warning?: string | null })?.runtime_warning || ''), isArabic));
+    setExecuteError('');
+    setQuoteError('');
+    setReadinessError('');
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('wallet:refresh'));
     toast({ message: isArabic ? 'تم تنفيذ العملية بنجاح' : 'Convert executed successfully', variant: 'success' });
     setAmount('');
     setEstimate(0);
-  }, [amountNum, category, estimate, healthError, isArabic, liveReady, minUsdt, quoteValid, selectedPair, side, toast]);
+  }, [amountNum, category, estimate, readinessError, quoteError, isArabic, liveReady, minUsdt, quoteValid, selectedPair, side, toast]);
 
   return (
     <section className="mx-auto w-full max-w-5xl space-y-4 px-4 py-4 md:px-6 md:py-6">
@@ -496,14 +511,24 @@ function ConvertPageContent() {
               {isArabic ? `القيمة أقل من الحد الأدنى ${minUsdt.toFixed(2)} USDT. زوّد الكمية.` : `Estimated value is below the ${minUsdt.toFixed(2)} USDT minimum.`}
             </div>
           ) : null}
-          {blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY' ? (
+          {blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'PAIR_ROUTE_UNAVAILABLE' ? (
             <div className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 p-2 text-xs text-blue-200">
               {isArabic ? 'الزوج حاليا للتسعير المرجعي فقط لحين توفر مسار تنفيذ Live.' : 'This pair is currently reference-only until a live executable route becomes available.'}
             </div>
           ) : null}
-          {!liveReady ? (
+          {quoteError ? (
+            <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200">
+              {quoteError}
+            </div>
+          ) : null}
+          {executeError ? (
             <div className="mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
-              {isArabic ? 'Live غير جاهز حاليا' : 'Live mode is not ready'}{healthError ? `: ${healthError}` : ''}
+              {executeError}
+            </div>
+          ) : null}
+          {!liveReady && readinessError ? (
+            <div className="mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
+              {isArabic ? 'Live غير جاهز حاليا' : 'Live mode is not ready'}: {readinessError}
             </div>
           ) : null}
         </div>
