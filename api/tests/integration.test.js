@@ -667,6 +667,7 @@ test('POST /convert/quote returns PAIR_NOT_LIVE_READY when live is enabled and p
   process.env.BSC_RPC_URL = 'https://bsc-dataseed.binance.org';
   process.env.CONVERT_HOT_WALLET_PK = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
   process.env.CONVERT_HOT_WALLET_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266';
+  process.env.PANCAKE_V3_FACTORY = process.env.PANCAKE_V3_FACTORY || '0x0BFbCF9fa4f9C56B0Ff6cE1A6D9D8f95b3f4B6d0';
   const res = await request
     .post('/convert/quote')
     .set('Cookie', 'sid=valid-session')
