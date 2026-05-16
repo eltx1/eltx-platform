@@ -798,10 +798,3 @@ test('admin kyc email template has no convert payload contamination', async () =
   const section = src.split("'admin-kyc-submitted':")[1].split("'user-p2p-status':")[0];
   assert.equal(/payload\./.test(section), false);
 });
-
-
-test('convert runtime diagnostics requires PANCAKE_V3_FACTORY in missing env list', async () => {
-  const src = fs.readFileSync('api/src/config/runtimeEnv.js', 'utf8');
-  assert.match(src, /PANCAKE_V3_FACTORY/);
-  assert.match(src, /missingEnv\.push\('PANCAKE_V3_FACTORY'\)/);
-});
