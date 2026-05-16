@@ -995,11 +995,18 @@ const PANCAKE_V3_QUOTER_V2_ADDRESS = (
 const PANCAKE_V3_ROUTER_ADDRESS = (
   getRuntimeEnv('PANCAKE_V3_ROUTER') || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
 ).toLowerCase();
+const PANCAKE_V3_FACTORY_ADDRESS = (
+  getRuntimeEnv('PANCAKE_V3_FACTORY') || ''
+).toLowerCase();
 const PANCAKE_V3_QUOTER_ABI = [
   'function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut)',
   'function quoteExactOutputSingle((address tokenIn,address tokenOut,uint256 amount,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountIn)',
 ];
-const PANCAKE_V3_FEE_TIERS = [500, 2500, 10000];
+const PANCAKE_V3_FACTORY_ABI = [
+  'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
+];
+const PANCAKE_V3_POOL_ABI = ['function liquidity() external view returns (uint128)'];
+const PANCAKE_V3_FEE_TIERS = (() => { const parsed = String(process.env.PANCAKE_V3_FEE_TIERS || '').split(',').map((v) => Number(v.trim())).filter((v) => Number.isFinite(v) && v > 0); return parsed.length ? parsed : [100, 500, 2500, 10000]; })();
 const CONVERT_PRICE_MAX_DEVIATION_BPS = Number(process.env.CONVERT_PRICE_MAX_DEVIATION_BPS || 700);
 const CONVERT_CHAIN_ID = 56;
 const CONVERT_TOKEN_REGISTRY = {
@@ -1022,6 +1029,10 @@ const CONVERT_PROVIDER = {
 };
 
 function resolveConvertExecutionProvider(pair) {
+  const executionProvider = pair?.execution_provider || 'pancake_v3';
+  const routeMode = pair?.route_mode || 'auto';
+  if (executionProvider === 'reference_only' || routeMode === 'reference_only') return { executionProvider: CONVERT_PROVIDER.REFERENCE_ONLY, routerType: 'reference', liveExecutable: false, requiresProvider: false, blockingReasons: ['PAIR_REFERENCE_ONLY'], adminReasons: [] };
+  if (executionProvider === 'external') return { executionProvider: 'external', routerType: 'external', liveExecutable: false, requiresProvider: false, blockingReasons: ['PROVIDER_NOT_IMPLEMENTED'], adminReasons: [] };
   return { executionProvider: CONVERT_PROVIDER.PANCAKE_V3, routerType: 'pancake-v3', liveExecutable: true, requiresProvider: false, blockingReasons: [], adminReasons: [] };
 }
 
@@ -2255,6 +2266,17 @@ const EMAIL_TEMPLATE_BUILDERS = {
         data?.username ? `Username: ${data.username}` : null,
         data?.fullName ? `Name: ${data.fullName}` : null,
         data?.country ? `Country: ${data.country}` : null,
+        payload.execution_provider || 'pancake_v3',
+        payload.route_mode || 'auto',
+        payload.allowed_intermediate_tokens || null,
+        payload.allowed_fee_tiers || null,
+        payload.manual_buy_route_tokens || null,
+        payload.manual_buy_route_fees || null,
+        payload.manual_sell_route_tokens || null,
+        payload.manual_sell_route_fees || null,
+        payload.slippage_bps_override ?? null,
+        payload.min_usdt_override || null,
+        payload.max_usdt_override || null,
       ].filter(Boolean);
       const lines = ['A new KYC submission is waiting for review.', ...details];
       return { subject: 'New KYC submission', body: lines };
@@ -2850,6 +2872,22 @@ function mapConvertPairRow(row) {
     live_status: row.live_status || null,
     last_live_probe_at: row.last_live_probe_at || null,
     last_live_error: row.last_live_error || null,
+    execution_provider: row.execution_provider || 'pancake_v3',
+    route_mode: row.route_mode || 'auto',
+    allowed_intermediate_tokens: row.allowed_intermediate_tokens || null,
+    allowed_fee_tiers: row.allowed_fee_tiers || null,
+    manual_buy_route_tokens: row.manual_buy_route_tokens || null,
+    manual_buy_route_fees: row.manual_buy_route_fees || null,
+    manual_sell_route_tokens: row.manual_sell_route_tokens || null,
+    manual_sell_route_fees: row.manual_sell_route_fees || null,
+    slippage_bps_override: row.slippage_bps_override == null ? null : Number(row.slippage_bps_override),
+    min_usdt_override: row.min_usdt_override || null,
+    max_usdt_override: row.max_usdt_override || null,
+    last_route_probe_status: row.last_route_probe_status || null,
+    last_route_probe_error: row.last_route_probe_error || null,
+    last_route_probe_at: row.last_route_probe_at || null,
+    last_working_buy_route_json: row.last_working_buy_route_json || null,
+    last_working_sell_route_json: row.last_working_sell_route_json || null,
     execution_availability: executionAvailability,
   };
 }
@@ -2863,7 +2901,7 @@ async function listConvertPairs(category, conn = pool, { includeInactive = false
   }
   const [rows] = await conn.query(
     `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active,
-            live_enabled, live_status, last_live_probe_at, last_live_error
+            live_enabled, live_status, last_live_probe_at, last_live_error, execution_provider, route_mode, allowed_intermediate_tokens, allowed_fee_tiers, manual_buy_route_tokens, manual_buy_route_fees, manual_sell_route_tokens, manual_sell_route_fees, slippage_bps_override, min_usdt_override, max_usdt_override, last_route_probe_status, last_route_probe_error, last_route_probe_at, last_working_buy_route_json, last_working_sell_route_json
        FROM convert_pairs
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY category, sort_order, symbol`,
@@ -2957,7 +2995,7 @@ async function getConvertPairBySymbol(symbol, category = null, conn = pool) {
   }
   const [rows] = await conn.query(
     `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active,
-            live_enabled, live_status, last_live_probe_at, last_live_error
+            live_enabled, live_status, last_live_probe_at, last_live_error, execution_provider, route_mode, allowed_intermediate_tokens, allowed_fee_tiers, manual_buy_route_tokens, manual_buy_route_fees, manual_sell_route_tokens, manual_sell_route_fees, slippage_bps_override, min_usdt_override, max_usdt_override, last_route_probe_status, last_route_probe_error, last_route_probe_at, last_working_buy_route_json, last_working_sell_route_json
        FROM convert_pairs WHERE ${where.join(' AND ')} LIMIT 1`,
     params
   );
@@ -3052,8 +3090,17 @@ function parseFeeTiers(value) {
 function encodePancakeV3Path(tokens, fees) {
   if (!Array.isArray(tokens) || tokens.length < 2) throw new Error('invalid_path_tokens');
   if (!Array.isArray(fees) || fees.length !== tokens.length - 1) throw new Error('invalid_path_fees');
-  return ethers.solidityPacked(Array(tokens.length + fees.length).fill('address').map((v, i) => (i % 2 === 0 ? 'address' : 'uint24')).slice(0, -1),
-    tokens.flatMap((token, idx) => (idx < fees.length ? [token, fees[idx]] : [token])));
+  const types = [];
+  const values = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    types.push('address');
+    values.push(tokens[i]);
+    if (i < fees.length) {
+      types.push('uint24');
+      values.push(Number(fees[i]));
+    }
+  }
+  return ethers.solidityPacked(types, values);
 }
 
 function buildPancakeV3PathCandidates(pair, side) {
@@ -3118,6 +3165,9 @@ async function quoteConvertFromPancakeV2(pair, side, amountWei, provider) {
 }
 
 async function quoteConvertFromPancakeV3(pair, side, amountWei, provider) {
+  if (!PANCAKE_V3_FACTORY_ADDRESS || !/^0x[a-f0-9]{40}$/i.test(PANCAKE_V3_FACTORY_ADDRESS)) {
+    throw Object.assign(new Error('PANCAKE_V3_FACTORY is missing/invalid'), { code: 'INVALID_ENV_PANCAKE_V3_FACTORY' });
+  }
   const quoter = new ethers.Contract(PANCAKE_V3_QUOTER_V2_ADDRESS, [
     ...PANCAKE_V3_QUOTER_ABI,
     'function quoteExactInput(bytes path, uint256 amountIn) external returns (uint256 amountOut)'
@@ -3126,6 +3176,7 @@ async function quoteConvertFromPancakeV3(pair, side, amountWei, provider) {
   const feeTiers = parseFeeTiers(pair.allowed_fee_tiers);
   let best = null;
   const attemptedPaths = [];
+  const factory = new ethers.Contract(PANCAKE_V3_FACTORY_ADDRESS, PANCAKE_V3_FACTORY_ABI, provider);
   for (const tokens of routes.slice(0, 8)) {
     const hops = tokens.length - 1;
     const maxCombos = Math.min(24, Math.pow(feeTiers.length, hops));
@@ -3134,14 +3185,36 @@ async function quoteConvertFromPancakeV3(pair, side, amountWei, provider) {
       let n = combo;
       for (let i = 0; i < hops; i += 1) { fees.push(feeTiers[n % feeTiers.length]); n = Math.floor(n / feeTiers.length); }
       try {
+        let poolIssue = null;
+        for (let i = 0; i < hops; i += 1) {
+          const pool = String(await factory.getPool(tokens[i], tokens[i + 1], Number(fees[i]))).toLowerCase();
+          if (!/^0x[a-f0-9]{40}$/.test(pool) || pool === '0x0000000000000000000000000000000000000000') {
+            poolIssue = { hop: i, status: 'poolMissing', tokenIn: tokens[i], tokenOut: tokens[i + 1], fee: Number(fees[i]) };
+            break;
+          }
+          try {
+            const poolCtr = new ethers.Contract(pool, PANCAKE_V3_POOL_ABI, provider);
+            const liq = bigIntFromValue(await poolCtr.liquidity());
+            if (liq <= 0n) {
+              poolIssue = { hop: i, status: 'liquidityZero', tokenIn: tokens[i], tokenOut: tokens[i + 1], fee: Number(fees[i]), pool };
+              break;
+            }
+          } catch {
+            // ignore optional liquidity check errors
+          }
+        }
+        if (poolIssue) {
+          attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, ok: false, ...poolIssue });
+          continue;
+        }
         const pathBytes = encodePancakeV3Path(tokens, fees);
         const amountOut = bigIntFromValue(await quoter.quoteExactInput.staticCall(pathBytes, amountWei));
-        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, amountOut: amountOut.toString(), ok: amountOut > 0n });
+        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, amountOut: amountOut.toString(), ok: amountOut > 0n, status: amountOut > 0n ? 'quoteOk' : 'quoteFailed' });
         if (amountOut > 0n && (!best || amountOut > best.amountOutWei)) {
           best = { tokens, fees, pathBytes, amountOutWei: amountOut };
         }
       } catch (err) {
-        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, ok: false, error: String(err?.message || err || 'v3_quote_failed').slice(0, 180) });
+        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, ok: false, status: 'quoteFailed', error: String(err?.message || err || 'v3_quote_failed').slice(0, 180) });
       }
     }
   }
@@ -10988,7 +11061,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
     const provider = runtime.rpcUrl ? new ethers.JsonRpcProvider(runtime.rpcUrl) : null;
     let rpcReady = false;
     let quoteReady = false;
-    let routeCheck = { routeFound: false, routeSymbols: [], reason: null };
+    let routeCheck = { routeFound: false, routeSymbols: [], reason: null, attemptedRoutes: [] };
     let liquidityRouteFound = false;
     let lastError = runtime.warning || '';
     let bnbBalance = '0';
@@ -11016,13 +11089,13 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
         decimalsMatch =
           (await verifyConvertTokenDecimals(provider, tokenOut, baseDecimals)) &&
           (await verifyConvertTokenDecimals(provider, tokenIn, quoteDecimals));
-        const probeAmount = decimalToWeiString('0.001', baseDecimals) || '0';
+        const probeAmount = decimalToWeiString('1', quoteDecimals) || '0';
         if (bigIntFromValue(probeAmount) > 0n) {
           const quoteInfo = await quoteConvertLiveWithFallback(pair, 'buy', bigIntFromValue(probeAmount), provider);
           quoteReady = quoteInfo.quoteWithoutFeeWei > 0n;
           liquidityRouteFound = Array.isArray(quoteInfo.path) && quoteInfo.path.length >= 2;
           quoteProvider = quoteInfo.provider || null;
-          routeCheck = await checkPancakeV2RouteForPair(pair, provider);
+          routeCheck = { routeFound: liquidityRouteFound, routeSymbols: quoteInfo.routeSymbols || [], reason: liquidityRouteFound ? null : 'PAIR_ROUTE_UNAVAILABLE', attemptedRoutes: quoteInfo.attemptedPaths || [] };
         }
       } catch (err) {
         lastError = String(err?.message || err || 'health_failed');
@@ -11062,6 +11135,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       liquidityReady: liquidityRouteFound,
       routeFound: routeCheck.routeFound,
       routeSymbols: routeCheck.routeSymbols,
+      attemptedRoutes: routeCheck.attemptedRoutes || [],
       quoteProvider,
       blockingReasons: providerResolution.blockingReasons.concat(extraBlockingReasons).filter(Boolean),
       adminReasons: providerResolution.adminReasons,
@@ -11743,8 +11817,8 @@ app.post('/admin/convert/pairs', async (req, res, next) => {
       return next({ status: 400, code: 'BAD_INPUT', message: 'Convert pair must end with /USDT' });
     }
     const [insert] = await pool.query(
-      `INSERT INTO convert_pairs (category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active, live_enabled, live_status, last_live_error)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO convert_pairs (category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active, live_enabled, live_status, last_live_error, execution_provider, route_mode, allowed_intermediate_tokens, allowed_fee_tiers, manual_buy_route_tokens, manual_buy_route_fees, manual_sell_route_tokens, manual_sell_route_fees, slippage_bps_override, min_usdt_override, max_usdt_override)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         payload.category,
         symbol,
@@ -11760,11 +11834,22 @@ app.post('/admin/convert/pairs', async (req, res, next) => {
         payload.live_enabled === undefined ? 1 : payload.live_enabled ? 1 : 0,
         'unknown',
         null,
+        payload.execution_provider || 'pancake_v3',
+        payload.route_mode || 'auto',
+        payload.allowed_intermediate_tokens || null,
+        payload.allowed_fee_tiers || null,
+        payload.manual_buy_route_tokens || null,
+        payload.manual_buy_route_fees || null,
+        payload.manual_sell_route_tokens || null,
+        payload.manual_sell_route_fees || null,
+        payload.slippage_bps_override ?? null,
+        payload.min_usdt_override || null,
+        payload.max_usdt_override || null,
       ]
     );
     const [[row]] = await pool.query(
       `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active,
-              live_enabled, live_status, last_live_probe_at, last_live_error
+              live_enabled, live_status, last_live_probe_at, last_live_error, execution_provider, route_mode, allowed_intermediate_tokens, allowed_fee_tiers, manual_buy_route_tokens, manual_buy_route_fees, manual_sell_route_tokens, manual_sell_route_fees, slippage_bps_override, min_usdt_override, max_usdt_override, last_route_probe_status, last_route_probe_error, last_route_probe_at, last_working_buy_route_json, last_working_sell_route_json
          FROM convert_pairs WHERE id=?`,
       [insert.insertId]
     );
@@ -11820,11 +11905,22 @@ app.patch('/admin/convert/pairs/:id', async (req, res, next) => {
       params.push(payload.live_enabled ? 'unknown' : 'disabled');
       params.push(null);
     }
+    if (payload.execution_provider !== undefined) { fields.push('execution_provider=?'); params.push(payload.execution_provider); }
+    if (payload.route_mode !== undefined) { fields.push('route_mode=?'); params.push(payload.route_mode); }
+    if (payload.allowed_intermediate_tokens !== undefined) { fields.push('allowed_intermediate_tokens=?'); params.push(payload.allowed_intermediate_tokens || null); }
+    if (payload.allowed_fee_tiers !== undefined) { fields.push('allowed_fee_tiers=?'); params.push(payload.allowed_fee_tiers || null); }
+    if (payload.manual_buy_route_tokens !== undefined) { fields.push('manual_buy_route_tokens=?'); params.push(payload.manual_buy_route_tokens || null); }
+    if (payload.manual_buy_route_fees !== undefined) { fields.push('manual_buy_route_fees=?'); params.push(payload.manual_buy_route_fees || null); }
+    if (payload.manual_sell_route_tokens !== undefined) { fields.push('manual_sell_route_tokens=?'); params.push(payload.manual_sell_route_tokens || null); }
+    if (payload.manual_sell_route_fees !== undefined) { fields.push('manual_sell_route_fees=?'); params.push(payload.manual_sell_route_fees || null); }
+    if (payload.slippage_bps_override !== undefined) { fields.push('slippage_bps_override=?'); params.push(payload.slippage_bps_override ?? null); }
+    if (payload.min_usdt_override !== undefined) { fields.push('min_usdt_override=?'); params.push(payload.min_usdt_override || null); }
+    if (payload.max_usdt_override !== undefined) { fields.push('max_usdt_override=?'); params.push(payload.max_usdt_override || null); }
     params.push(pairId);
     await pool.query(`UPDATE convert_pairs SET ${fields.join(', ')}, updated_at=NOW() WHERE id=?`, params);
     const [[row]] = await pool.query(
       `SELECT id, category, symbol, base_asset, quote_asset, token_symbol, token_address, token_decimals, display_name, logo_url, sort_order, active,
-              live_enabled, live_status, last_live_probe_at, last_live_error
+              live_enabled, live_status, last_live_probe_at, last_live_error, execution_provider, route_mode, allowed_intermediate_tokens, allowed_fee_tiers, manual_buy_route_tokens, manual_buy_route_fees, manual_sell_route_tokens, manual_sell_route_fees, slippage_bps_override, min_usdt_override, max_usdt_override, last_route_probe_status, last_route_probe_error, last_route_probe_at, last_working_buy_route_json, last_working_sell_route_json
          FROM convert_pairs WHERE id=?`,
       [pairId]
     );
@@ -11845,15 +11941,37 @@ app.post('/admin/convert/pairs/:id/probe-route', async (req, res, next) => {
     const [[pairRow]] = await pool.query('SELECT * FROM convert_pairs WHERE id=? LIMIT 1', [pairId]);
     if (!pairRow) return next({ status: 404, code: 'NOT_FOUND', message: 'Pair not found' });
     const pair = mapConvertPairRow(pairRow);
+    const body = req.body || {};
+    const save = body.save === true;
+    const mode = body.mode === 'manual' ? 'manual' : 'auto';
     const runtime = await buildConvertRuntime();
     const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
-    const buyIn = bigIntFromValue(decimalToWeiString('1', resolveConvertAssetDecimals(pair.quote_asset)) || '0');
-    const sellIn = bigIntFromValue(decimalToWeiString('0.0003', resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals)) || '0');
+    const buyIn = bigIntFromValue(decimalToWeiString(String(body.amountUsdt || '1'), resolveConvertAssetDecimals(pair.quote_asset)) || '0');
+    const sellIn = bigIntFromValue(decimalToWeiString(String(body.baseAmount || '0.0003'), resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals)) || '0');
     let buy = { executable: false };
     let sell = { executable: false };
-    try { const q = await quoteConvertFromPancakeV3(pair, 'buy', buyIn, provider); buy = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.baseAmountWei.toString(), attemptedRoutes: q.attemptedPaths }; } catch (e) { buy = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
-    try { const q = await quoteConvertFromPancakeV3(pair, 'sell', sellIn, provider); sell = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.quoteWithoutFeeWei.toString(), attemptedRoutes: q.attemptedPaths }; } catch (e) { sell = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
-    res.json({ ok: true, pair: pair.symbol, buy, sell });
+    try { const q = await quoteConvertFromPancakeV3({ ...pair, route_mode: mode }, 'buy', buyIn, provider); buy = { executable: true, bestRoute: { pathSymbols: q.routeSymbols, pathTokens: q.path, feeTiers: q.feeTiers, amountInWei: buyIn.toString(), amountOutWei: q.baseAmountWei.toString(), pathBytes: q.pathBytes }, attemptedRoutes: q.attemptedPaths }; } catch (e) { buy = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
+    try { const q = await quoteConvertFromPancakeV3({ ...pair, route_mode: mode }, 'sell', sellIn, provider); sell = { executable: true, bestRoute: { pathSymbols: q.routeSymbols, pathTokens: q.path, feeTiers: q.feeTiers, amountInWei: sellIn.toString(), amountOutWei: q.quoteWithoutFeeWei.toString(), pathBytes: q.pathBytes }, attemptedRoutes: q.attemptedPaths }; } catch (e) { sell = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
+    if (save) {
+      await pool.query(
+        `UPDATE convert_pairs SET
+          last_working_buy_route_json=?,
+          last_working_sell_route_json=?,
+          last_route_probe_status=?,
+          last_route_probe_error=?,
+          last_route_probe_at=NOW(),
+          updated_at=NOW()
+         WHERE id=?`,
+        [
+          buy?.bestRoute ? JSON.stringify(buy.bestRoute) : null,
+          sell?.bestRoute ? JSON.stringify(sell.bestRoute) : null,
+          buy.executable || sell.executable ? 'ok' : 'failed',
+          buy.executable || sell.executable ? null : String(buy.error || sell.error || 'route_probe_failed').slice(0, 500),
+          pairId,
+        ]
+      );
+    }
+    res.json({ ok: true, pair: pair.symbol, buy, sell, save });
   } catch (err) {
     next(err);
   }
