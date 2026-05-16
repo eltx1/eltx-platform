@@ -995,6 +995,7 @@ const PANCAKE_V3_QUOTER_V2_ADDRESS = (
 const PANCAKE_V3_ROUTER_ADDRESS = (
   getRuntimeEnv('PANCAKE_V3_ROUTER') || '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4'
 ).toLowerCase();
+const PANCAKE_V3_FACTORY_ADDRESS = (getRuntimeEnv('PANCAKE_V3_FACTORY') || '').toLowerCase();
 const PANCAKE_V3_QUOTER_ABI = [
   'function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut)',
   'function quoteExactOutputSingle((address tokenIn,address tokenOut,uint256 amount,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountIn)',
@@ -3111,6 +3112,33 @@ function logConvertQuoteDiagnostics(context) {
   console.warn('[convert][quote]', JSON.stringify(context));
 }
 
+async function getPancakeV3Pool(tokenA, tokenB, fee, provider) {
+  if (!PANCAKE_V3_FACTORY_ADDRESS || !provider) return ZERO_ADDRESS;
+  const factory = new ethers.Contract(PANCAKE_V3_FACTORY_ADDRESS, ['function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)'], provider);
+  return String(await factory.getPool(tokenA, tokenB, Number(fee))).toLowerCase();
+}
+
+async function probePancakeV3RoutePools(tokens, fees, provider) {
+  const hops = [];
+  for (let i = 0; i < fees.length; i += 1) {
+    const tokenIn = tokens[i];
+    const tokenOut = tokens[i + 1];
+    const fee = Number(fees[i]);
+    let poolAddress = ZERO_ADDRESS;
+    let liquidity = null;
+    let error = null;
+    try {
+      poolAddress = await getPancakeV3Pool(tokenIn, tokenOut, fee, provider);
+      if (poolAddress && poolAddress !== ZERO_ADDRESS) {
+        const pool = new ethers.Contract(poolAddress, ['function liquidity() external view returns (uint128)'], provider);
+        liquidity = String(await pool.liquidity());
+      }
+    } catch (err) { error = String(err?.message || err || 'pool_probe_failed').slice(0,180); }
+    hops.push({ tokenIn, tokenOut, fee, poolAddress, poolExists: poolAddress !== ZERO_ADDRESS, liquidity, liquidityZero: liquidity === '0', poolMissing: poolAddress === ZERO_ADDRESS, error });
+  }
+  return hops;
+}
+
 async function quoteConvertFromPancakeV2(pair, side, amountWei, provider) {
   const router = new ethers.Contract(PANCAKE_V2_ROUTER_ADDRESS, PANCAKE_V2_ROUTER_ABI, provider);
   const attemptedPaths = [];
@@ -3164,13 +3192,15 @@ async function quoteConvertFromPancakeV3(pair, side, amountWei, provider) {
       for (let i = 0; i < hops; i += 1) { fees.push(feeTiers[n % feeTiers.length]); n = Math.floor(n / feeTiers.length); }
       try {
         const pathBytes = encodePancakeV3Path(tokens, fees);
+        const factoryDiagnostics = await probePancakeV3RoutePools(tokens, fees, provider);
         const amountOut = bigIntFromValue(await quoter.quoteExactInput.staticCall(pathBytes, amountWei));
-        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, amountOut: amountOut.toString(), ok: amountOut > 0n });
+        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, amountOut: amountOut.toString(), ok: amountOut > 0n, factoryDiagnostics });
         if (amountOut > 0n && (!best || amountOut > best.amountOutWei)) {
           best = { tokens, fees, pathBytes, amountOutWei: amountOut };
         }
       } catch (err) {
-        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, ok: false, error: String(err?.message || err || 'v3_quote_failed').slice(0, 180) });
+        const factoryDiagnostics = await probePancakeV3RoutePools(tokens, fees, provider).catch(() => []);
+        attemptedPaths.push({ route: routeToSymbols(tokens).join(' -> '), fees, ok: false, error: String(err?.message || err || 'v3_quote_failed').slice(0, 180), factoryDiagnostics });
       }
     }
   }
@@ -11045,13 +11075,13 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
         decimalsMatch =
           (await verifyConvertTokenDecimals(provider, tokenOut, baseDecimals)) &&
           (await verifyConvertTokenDecimals(provider, tokenIn, quoteDecimals));
-        const probeAmount = decimalToWeiString('0.001', baseDecimals) || '0';
+        const probeAmount = decimalToWeiString('1', quoteDecimals) || '0';
         if (bigIntFromValue(probeAmount) > 0n) {
           const quoteInfo = await quoteConvertLiveWithFallback(pair, 'buy', bigIntFromValue(probeAmount), provider);
           quoteReady = quoteInfo.quoteWithoutFeeWei > 0n;
           liquidityRouteFound = Array.isArray(quoteInfo.path) && quoteInfo.path.length >= 2;
           quoteProvider = quoteInfo.provider || null;
-          routeCheck = await checkPancakeV2RouteForPair(pair, provider);
+          routeCheck = { routeFound: Array.isArray(quoteInfo.path) && quoteInfo.path.length >= 2, routeSymbols: quoteInfo.routeSymbols || [], reason: null };
         }
       } catch (err) {
         lastError = String(err?.message || err || 'health_failed');
@@ -11077,6 +11107,7 @@ app.get('/convert/health', walletLimiter, async (req, res, next) => {
       hotWalletAddress: runtime.resolvedWalletAddress ? `${runtime.resolvedWalletAddress.slice(0, 6)}...${runtime.resolvedWalletAddress.slice(-4)}` : null,
       derivedAddressMatches: runtime.derivedAddressMatches,
       routerAddress: PANCAKE_V3_ROUTER_ADDRESS,
+      factoryAddress: PANCAKE_V3_FACTORY_ADDRESS || null,
       routerType: providerResolution.routerType,
       quoteAsset: pair.quote_asset,
       baseAsset: pair.base_asset,
@@ -11286,6 +11317,7 @@ app.post('/convert/quote', walletLimiter, async (req, res, next) => {
         side: payload.side,
         chainId: CONVERT_CHAIN_ID,
         routerAddress: PANCAKE_V3_ROUTER_ADDRESS,
+      factoryAddress: PANCAKE_V3_FACTORY_ADDRESS || null,
         tokenAddresses: { base: resolveConvertAssetAddress(pair.base_asset, pair.token_address), quote: resolveConvertAssetAddress(pair.quote_asset) },
         decimals: { base: amountDecimals, quote: usdtDecimals },
         attemptedPaths: quoteInfo.attemptedPaths || [],
