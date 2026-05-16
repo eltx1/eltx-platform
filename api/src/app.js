@@ -2259,17 +2259,6 @@ const EMAIL_TEMPLATE_BUILDERS = {
         data?.username ? `Username: ${data.username}` : null,
         data?.fullName ? `Name: ${data.fullName}` : null,
         data?.country ? `Country: ${data.country}` : null,
-        payload.execution_provider || 'pancake_v3',
-        payload.route_mode || 'auto',
-        payload.allowed_intermediate_tokens || null,
-        payload.allowed_fee_tiers || null,
-        payload.manual_buy_route_tokens || null,
-        payload.manual_buy_route_fees || null,
-        payload.manual_sell_route_tokens || null,
-        payload.manual_sell_route_fees || null,
-        payload.slippage_bps_override ?? null,
-        payload.min_usdt_override || null,
-        payload.max_usdt_override || null,
       ].filter(Boolean);
       const lines = ['A new KYC submission is waiting for review.', ...details];
       return { subject: 'New KYC submission', body: lines };
@@ -11800,6 +11789,17 @@ app.post('/admin/convert/pairs', async (req, res, next) => {
         payload.live_enabled === undefined ? 1 : payload.live_enabled ? 1 : 0,
         'unknown',
         null,
+        payload.execution_provider || 'pancake_v3',
+        payload.route_mode || 'auto',
+        payload.allowed_intermediate_tokens || null,
+        payload.allowed_fee_tiers || null,
+        payload.manual_buy_route_tokens || null,
+        payload.manual_buy_route_fees || null,
+        payload.manual_sell_route_tokens || null,
+        payload.manual_sell_route_fees || null,
+        payload.slippage_bps_override ?? null,
+        payload.min_usdt_override || null,
+        payload.max_usdt_override || null,
       ]
     );
     const [[row]] = await pool.query(
@@ -11898,13 +11898,27 @@ app.post('/admin/convert/pairs/:id/probe-route', async (req, res, next) => {
     const pair = mapConvertPairRow(pairRow);
     const runtime = await buildConvertRuntime();
     const provider = new ethers.JsonRpcProvider(runtime.rpcUrl);
-    const buyIn = bigIntFromValue(decimalToWeiString('1', resolveConvertAssetDecimals(pair.quote_asset)) || '0');
-    const sellIn = bigIntFromValue(decimalToWeiString('0.0003', resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals)) || '0');
+    const amountUsdt = String(req.body?.amountUsdt || '1');
+    const baseAmount = String(req.body?.baseAmount || '0.0003');
+    const shouldSave = req.body?.save === true;
+    const buyIn = bigIntFromValue(decimalToWeiString(amountUsdt, resolveConvertAssetDecimals(pair.quote_asset)) || '0');
+    const sellIn = bigIntFromValue(decimalToWeiString(baseAmount, resolveConvertAssetDecimals(pair.base_asset, pair.token_decimals)) || '0');
     let buy = { executable: false };
     let sell = { executable: false };
     try { const q = await quoteConvertFromPancakeV3(pair, 'buy', buyIn, provider); buy = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.baseAmountWei.toString(), attemptedRoutes: q.attemptedPaths }; } catch (e) { buy = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
-    try { const q = await quoteConvertFromPancakeV3(pair, 'sell', sellIn, provider); sell = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.quoteWithoutFeeWei.toString(), attemptedRoutes: q.attemptedPaths }; } catch (e) { sell = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
-    res.json({ ok: true, pair: pair.symbol, buy, sell });
+    try { const q = await quoteConvertFromPancakeV3(pair, 'sell', sellIn, provider); sell = { executable: true, bestRoute: q.routeSymbols, feeTiers: q.feeTiers, amountOut: q.quoteWithoutFeeWei.toString(), route: { pathTokens: q.path, feeTiers: q.feeTiers, pathBytes: q.pathBytes }, attemptedRoutes: q.attemptedPaths }; } catch (e) { sell = { executable: false, error: String(e?.message || e), attemptedRoutes: e?.attemptedPaths || [] }; }
+    if (shouldSave) {
+      const status = buy.executable || sell.executable ? 'ok' : 'failed';
+      const probeError = buy.error || sell.error || null;
+      await pool.query('UPDATE convert_pairs SET last_working_buy_route_json=?, last_working_sell_route_json=?, last_route_probe_status=?, last_route_probe_error=?, last_route_probe_at=NOW() WHERE id=?', [
+        buy.executable ? JSON.stringify({ pathSymbols: buy.bestRoute, feeTiers: buy.feeTiers, amountOut: buy.amountOut }) : null,
+        sell.executable ? JSON.stringify({ pathSymbols: sell.bestRoute, feeTiers: sell.feeTiers, amountOut: sell.amountOut }) : null,
+        status,
+        probeError ? String(probeError).slice(0, 500) : null,
+        pairId
+      ]);
+    }
+    res.json({ ok: true, pair: pair.symbol, buy, sell, save: shouldSave });
   } catch (err) {
     next(err);
   }

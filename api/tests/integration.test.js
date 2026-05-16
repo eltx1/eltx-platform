@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
 const supertest = require('supertest');
 const proxyquire = require('proxyquire');
 
@@ -780,4 +781,19 @@ test('POST /auth/logout clears oauth browser session cookie', async () => {
   assert.equal(res.status, 200);
   const setCookie = res.headers['set-cookie'] || [];
   assert.equal(setCookie.some((value) => String(value).startsWith('goauth_sid=;')), true);
+});
+
+
+test('admin convert pair INSERT values include all route control placeholders', async () => {
+  const src = fs.readFileSync('api/src/app.js', 'utf8');
+  assert.match(src, /INSERT INTO convert_pairs[\s\S]*execution_provider[\s\S]*max_usdt_override/);
+  assert.match(src, /payload\.execution_provider \|\| 'pancake_v3'/);
+  assert.match(src, /payload\.route_mode \|\| 'auto'/);
+  assert.match(src, /payload\.max_usdt_override \|\| null/);
+});
+
+test('admin kyc email template has no convert payload contamination', async () => {
+  const src = fs.readFileSync('api/src/app.js', 'utf8');
+  const section = src.split("'admin-kyc-submitted':")[1].split("'user-p2p-status':")[0];
+  assert.equal(/payload\./.test(section), false);
 });
