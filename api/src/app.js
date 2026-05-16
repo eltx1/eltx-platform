@@ -1002,10 +1002,6 @@ const PANCAKE_V3_QUOTER_ABI = [
   'function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut)',
   'function quoteExactOutputSingle((address tokenIn,address tokenOut,uint256 amount,uint24 fee,uint160 sqrtPriceLimitX96) params) external returns (uint256 amountIn)',
 ];
-const PANCAKE_V3_FACTORY_ABI = [
-  'function getPool(address tokenA, address tokenB, uint24 fee) external view returns (address pool)',
-];
-const PANCAKE_V3_POOL_ABI = ['function liquidity() external view returns (uint128)'];
 const PANCAKE_V3_FEE_TIERS = (() => { const parsed = String(process.env.PANCAKE_V3_FEE_TIERS || '').split(',').map((v) => Number(v.trim())).filter((v) => Number.isFinite(v) && v > 0); return parsed.length ? parsed : [100, 500, 2500, 10000]; })();
 const CONVERT_PRICE_MAX_DEVIATION_BPS = Number(process.env.CONVERT_PRICE_MAX_DEVIATION_BPS || 700);
 const CONVERT_CHAIN_ID = 56;
