@@ -179,6 +179,10 @@ function ConvertPageContent() {
   const [placing, setPlacing] = useState(false);
   const [runtimeWarning, setRuntimeWarning] = useState('');
   const [liveReady, setLiveReady] = useState(false);
+  const [globalLiveReady, setGlobalLiveReady] = useState(false);
+  const [pairExecutable, setPairExecutable] = useState(false);
+  const [referenceOnly, setReferenceOnly] = useState(false);
+  const [routeUnavailable, setRouteUnavailable] = useState(false);
   const [readinessError, setReadinessError] = useState('');
   const [quoteError, setQuoteError] = useState('');
   const [executeError, setExecuteError] = useState('');
@@ -241,6 +245,7 @@ function ConvertPageContent() {
     async (pairSymbol: string) => {
       const statusRes = await apiFetch<ConvertStatusResponse>(`/convert/status?category=${category}`);
       if (!statusRes.ok) {
+        setGlobalLiveReady(false);
         setLiveReady(false);
         setReadinessError(normalizeConvertWarning(statusRes.error || (isArabic ? 'لا يوجد اتصال Live حاليا' : 'Live connectivity is not ready'), isArabic));
         return;
@@ -255,6 +260,8 @@ function ConvertPageContent() {
         return;
       }
       setConvertMode(res.data.effectiveMode || 'live');
+      const globalReady = Boolean(statusRes.data.liveReady && statusRes.data.rpcOk);
+      setGlobalLiveReady(globalReady);
       setLiveReady(Boolean(res.data.liveReady && res.data.executable && !res.data.referenceOnly));
       setReadinessError(normalizeConvertWarning(String(res.data.lastError || ''), isArabic));
     },
@@ -307,8 +314,12 @@ function ConvertPageContent() {
       setEstimate(parsePositive((res.data.quote as any).estimatedQuote ?? (res.data.quote as any).inputAmountUsdt));
       setFeeUsdt(parsePositive((res.data.quote as any).feeAmount ?? (res.data.quote as any).feeUsdt));
       setEstimatedBaseOut(parsePositive((res.data.quote as any).estimatedBaseOut));
+      const block = String(res.data.blockingReason || '');
       setQuoteValid(Boolean((res.data as any).valid ?? (res.data as any).executable));
-      setBlockingReason(String(res.data.blockingReason || ''));
+      setBlockingReason(block);
+      setReferenceOnly(block === 'PAIR_REFERENCE_ONLY' || block === 'QUOTE_PROVIDER_REFERENCE_ONLY');
+      setRouteUnavailable(block === 'PAIR_ROUTE_UNAVAILABLE');
+      setPairExecutable(Boolean((res.data as any).pairExecutable ?? res.data.executable ?? false));
       setQuoteError('');
       if (res.data.blockingReason === 'PAIR_REFERENCE_ONLY' || res.data.blockingReason === 'QUOTE_PROVIDER_REFERENCE_ONLY') {
         setLiveReady(false);
@@ -429,11 +440,13 @@ function ConvertPageContent() {
                   ? isArabic
                     ? 'تسعير مرجعي فقط'
                     : 'Reference only'
-                  : convertMode === 'live' && liveReady
+                  : pairExecutable
                     ? labels.live
-                    : (blockingReason === 'PAIR_ROUTE_UNAVAILABLE'
-                      ? (isArabic ? 'المسار غير متاح' : 'Route unavailable')
-                      : (isArabic ? 'غير متاح' : 'Live unavailable'))}
+                    : referenceOnly
+                      ? (isArabic ? 'مرجعي فقط' : 'Reference only')
+                      : routeUnavailable
+                        ? (isArabic ? 'المسار غير متاح' : 'Route unavailable')
+                        : (globalLiveReady ? (isArabic ? 'غير متاح' : 'Unavailable') : (isArabic ? 'Live غير جاهز' : 'Live unavailable'))}
               </div>
             </div>
           </div>
@@ -514,9 +527,9 @@ function ConvertPageContent() {
               {isArabic ? `القيمة أقل من الحد الأدنى ${minUsdt.toFixed(2)} USDT. زوّد الكمية.` : `Estimated value is below the ${minUsdt.toFixed(2)} USDT minimum.`}
             </div>
           ) : null}
-          {blockingReason === 'PAIR_REFERENCE_ONLY' || blockingReason === 'PAIR_ROUTE_UNAVAILABLE' ? (
+          {referenceOnly || routeUnavailable ? (
             <div className="mt-2 rounded-lg border border-blue-500/40 bg-blue-500/10 p-2 text-xs text-blue-200">
-              {isArabic ? 'الزوج حاليا للتسعير المرجعي فقط لحين توفر مسار تنفيذ Live.' : 'This pair is currently reference-only until a live executable route becomes available.'}
+              {referenceOnly ? (isArabic ? 'الزوج مرجعي فقط حاليا.' : 'This pair is reference only right now.') : (isArabic ? 'المسار غير متاح لهذا الزوج.' : 'Route unavailable for this pair.')}
             </div>
           ) : null}
           {quoteError ? (
@@ -529,7 +542,7 @@ function ConvertPageContent() {
               {executeError}
             </div>
           ) : null}
-          {!liveReady && readinessError ? (
+          {!globalLiveReady && readinessError ? (
             <div className="mt-2 rounded-lg border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
               {isArabic ? 'Live غير جاهز حاليا' : 'Live mode is not ready'}: {readinessError}
             </div>
