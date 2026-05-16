@@ -1,4 +1,4 @@
--- manual-safe migration for convert pair route controls
+-- manual-safe migration for convert pair route controls (idempotent)
 SET @schema_name := DATABASE();
 
 SET @has_execution_provider := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='convert_pairs' AND COLUMN_NAME='execution_provider');
@@ -29,25 +29,25 @@ SET @sql := CONCAT(
   IF(@has_manual_sell_route_tokens=0, "ADD COLUMN manual_sell_route_tokens VARCHAR(512) NULL, ", ''),
   IF(@has_manual_sell_route_fees=0, "ADD COLUMN manual_sell_route_fees VARCHAR(255) NULL, ", ''),
   IF(@has_slippage_bps_override=0, "ADD COLUMN slippage_bps_override INT NULL, ", ''),
-  IF(@has_min_usdt_override=0, "ADD COLUMN min_usdt_override VARCHAR(32) NULL, ", ''),
-  IF(@has_max_usdt_override=0, "ADD COLUMN max_usdt_override VARCHAR(32) NULL, ", ''),
+  IF(@has_min_usdt_override=0, "ADD COLUMN min_usdt_override DECIMAL(36,18) NULL, ", ''),
+  IF(@has_max_usdt_override=0, "ADD COLUMN max_usdt_override DECIMAL(36,18) NULL, ", ''),
   IF(@has_last_route_probe_status=0, "ADD COLUMN last_route_probe_status VARCHAR(32) NULL, ", ''),
   IF(@has_last_route_probe_error=0, "ADD COLUMN last_route_probe_error VARCHAR(500) NULL, ", ''),
   IF(@has_last_route_probe_at=0, "ADD COLUMN last_route_probe_at DATETIME NULL, ", ''),
-  IF(@has_last_working_buy_route_json=0, "ADD COLUMN last_working_buy_route_json JSON NULL, ", ''),
-  IF(@has_last_working_sell_route_json=0, "ADD COLUMN last_working_sell_route_json JSON NULL, ", '')
+  IF(@has_last_working_buy_route_json=0, "ADD COLUMN last_working_buy_route_json LONGTEXT NULL, ", ''),
+  IF(@has_last_working_sell_route_json=0, "ADD COLUMN last_working_sell_route_json LONGTEXT NULL, ", ''),
+  'ADD COLUMN _tmp_convert_route_controls_marker INT NULL'
 );
-SET @sql := TRIM(TRAILING ', ' FROM @sql);
-SET @sql := IF(@sql='ALTER TABLE convert_pairs', 'SELECT 1', @sql);
-PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+SET @sql := REPLACE(@sql, ', ADD COLUMN _tmp_convert_route_controls_marker INT NULL', '');
+SET @sql := IF(@sql='ALTER TABLE convert_pairs ADD COLUMN _tmp_convert_route_controls_marker INT NULL', 'SELECT 1', @sql);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @idx_cat_active_live := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='convert_pairs' AND INDEX_NAME='idx_convert_pairs_category_active_live');
 SET @idx_symbol := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='convert_pairs' AND INDEX_NAME='idx_convert_pairs_symbol');
 SET @idx_exec_route := (SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA=@schema_name AND TABLE_NAME='convert_pairs' AND INDEX_NAME='idx_convert_pairs_exec_route');
-
 SET @sql_idx1 := IF(@idx_cat_active_live=0, 'CREATE INDEX idx_convert_pairs_category_active_live ON convert_pairs(category, active, live_enabled)', 'SELECT 1');
-PREPARE s1 FROM @sql_idx1; EXECUTE s1; DEALLOCATE PREPARE s1;
+PREPARE stmt1 FROM @sql_idx1; EXECUTE stmt1; DEALLOCATE PREPARE stmt1;
 SET @sql_idx2 := IF(@idx_symbol=0, 'CREATE INDEX idx_convert_pairs_symbol ON convert_pairs(symbol)', 'SELECT 1');
-PREPARE s2 FROM @sql_idx2; EXECUTE s2; DEALLOCATE PREPARE s2;
+PREPARE stmt2 FROM @sql_idx2; EXECUTE stmt2; DEALLOCATE PREPARE stmt2;
 SET @sql_idx3 := IF(@idx_exec_route=0, 'CREATE INDEX idx_convert_pairs_exec_route ON convert_pairs(execution_provider, route_mode)', 'SELECT 1');
-PREPARE s3 FROM @sql_idx3; EXECUTE s3; DEALLOCATE PREPARE s3;
+PREPARE stmt3 FROM @sql_idx3; EXECUTE stmt3; DEALLOCATE PREPARE stmt3;

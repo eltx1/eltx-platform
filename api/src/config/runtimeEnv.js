@@ -44,7 +44,7 @@ function normalizePrivateKey(rawPk) {
 function getConvertRuntimeDiagnostics() {
   const homeEnv = parseEnvFile(HOME_DASH_ENV_PATH);
   const localEnv = parseEnvFile(LOCAL_ENV_PATH);
-  const keys = ['BSC_RPC_URL','BSC_RPC_HTTP','CONVERT_HOT_WALLET_PK','CONVERT_HOT_WALLET_ADDRESS','TOKEN_WBNB','TOKEN_USDT','PANCAKE_V3_ROUTER','PANCAKE_V3_QUOTER_V2'];
+  const keys = ['BSC_RPC_URL','BSC_RPC_HTTP','CONVERT_HOT_WALLET_PK','CONVERT_HOT_WALLET_ADDRESS','TOKEN_WBNB','TOKEN_USDT','PANCAKE_V3_ROUTER','PANCAKE_V3_QUOTER_V2','PANCAKE_V3_FACTORY'];
   const envDiagnostics = {};
   for (const key of keys) {
     envDiagnostics[key] = {
@@ -64,6 +64,7 @@ function getConvertRuntimeDiagnostics() {
   if (!rpc) missingEnv.push('BSC_RPC_URL (or BSC_RPC_HTTP)');
   if (!rawPk) missingEnv.push('CONVERT_HOT_WALLET_PK');
   if (!configuredAddress) missingEnv.push('CONVERT_HOT_WALLET_ADDRESS');
+  if (!getRuntimeEnv('PANCAKE_V3_FACTORY')) missingEnv.push('PANCAKE_V3_FACTORY');
   if (rawPk && !normalizedPk.valid) invalidEnv.push('CONVERT_HOT_WALLET_PK');
 
   let derivedAddress = '';
